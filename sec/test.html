@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title>Edgar Viz Test Page</title>
+
+    <!--CSS files-->
+    <link  rel="stylesheet" href="/global/css/smoothness/jquery-ui-1.11.css?v=<?=$workbenchVersion?>" type="text/css" />
+    <link rel="stylesheet" href="/global/js/fancybox/jquery.fancybox-1.3.4.css" type="text/css" />
+    <link  rel="stylesheet" href="/css/jquery-jvectormap-2.0.1.css" type="text/css" />
+
+    <!-- open source javascript libraries -->
+    <script type="text/javascript" src="/global/js/jquery/jquery-3.3.1.min.js"></script>
+    <!--script type="text/javascript" src="/global/js/jquery-ui/jquery-ui.min.css"></script-->
+
+    <!--script type="text/javascript" src="/global/js/fancybox/jquery.fancybox-1.3.4.pack.js"></script-->
+    <script type="text/javascript" src="/global/js/highcharts/js/highcharts.src.js"></script>
+    <script type="text/javascript" src="/global/js/require/require.2.1.1.js"></script>
+    <script type="text/javascript" src="/global/js/jvectormap/jquery-jvectormap-2.0.1.min.js"></script>
+    <script type="text/javascript" src="/global/js/jvectormap/jquery-mousewheel.js"></script>
+    <script type="text/javascript" src="/global/js/maps/us_aea_en.js"></script>
+    <!-- custom script popups map, popups column chart, and navigates -->
+    <script type="text/javascript" src="js/edgar_viz.js"></script>
+</head>
+<body>
+
+<h2>Examples and resources:</h2>
+<ol>
+    <li><a href="/sec/sec_filing_ds_ingest.php">financial statement dataset ingest</a></li>
+    <li><a href="http://restapi.publicdata.guru/sec/facts/AccountsPayableCurrent/USD/0/2017-03-31">sample fact</a></li>
+    <li><a href="http://restapi.publicdata.guru/sec/facts/AccountsPayableCurrent/index">sample fact index</a> showing fact availability by date & unit for a tag</li>
+    <li><a href="https://restapi.publicdata.guru/sec/timeseries/NetIncomeLoss/CIK1750">sample time series cluster for CIK-tag</a></li>
+    <li>DERA's <a href="https://www.sec.gov/structureddata/rss-feeds-submitted-filings">Disclosure RSS Feeds</a> including recent iXBRL submissions</li>
+    <li><a href="https://www.sec.gov/Archives/edgar/data/27996/000002799618000096/0000027996-18-000096-index.htm">iXBRL submission sample</a> with link to current SEC viewer</li>
+    <li><a href="https://www.sec.gov/ix?doc=/Archives/edgar/data/27996/000002799618000096/a201863010-q.htm">iXBRL file sample</a></li>
+    <li><a href="/sec/viewer.php?doc=27996/000002799618000096/a201863010-q">iXBRL viewer with visualizations</a></li>
+    <li><a href="https://www.sec.gov/cgi-bin/own-disp?action=getissuer&CIK=0000027996">page with table of 3, 4, and 5</a> and same page with <a href="/sec/viewer.php?doc=table">inactive table</a></li>
+    <li><a href="/sec/viewer.php?doc=27996/000002799618000096/a201863010-q">iXBRL viewer with visualizations</a></li>
+    <li><a href="/sec/diff.php">redline</a></li>
+</ol>
+
+</body>
+</html>

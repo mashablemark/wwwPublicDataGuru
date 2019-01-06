@@ -1,0 +1,115 @@
+ix\:nonfraction.ixbrlViewer_standardFrame {
+    cursor: hand;
+    border-bottom: 2px solid #FF6600 !important;
+}
+ix\:nonfraction.ixbrlViewer_standardFrame:hover {
+    background-color: lightsalmon;
+}
+ix\:nonfraction.ixbrlViewer_customTaxonomy {
+    cursor: hand;
+    border-bottom: 1px dotted #FF6600!important;
+}
+
+#popviz, #tabs-ts, #tabs-map, #tabs-scatter{
+    cursor: default !important;
+    border: thin lightgrey solid;
+}
+#saved, #save, #compare {
+    float: right;
+    padding: 4px;
+    margin: 5px;
+}
+
+div.clear_localStorage {
+    margin: 0;
+    float: right;
+}
+span.clear_localStorage {
+    text-decoration-line: underline;
+    color: #0000FF;
+    cursor: hand;
+}
+
+div.compare_companies_box {
+    background-color: lightskyblue;
+    padding: 7px;
+    margin: 0 0 10px 0;
+}
+
+#lookup_user_symbols, #user_symbols {
+    margin: 0 10px 7px;
+}
+
+#chart-options {
+    font-family: "Arial", "sans-serif";
+    cursor: pointer;
+}
+fieldset.player_controls {
+    margin-top: 15px;
+    border: thin grey dotted;
+}
+fieldset.player_controls legend{
+    color: grey;
+}
+div.player_controls{
+    position: relative;
+    height: 25px;
+}
+button.player_home {
+    position: absolute;
+    left: 0;
+}
+div.slider_outer {
+    display: inline-block;
+    width: 90%;
+    /*margin: 5px;
+    top: 6px;
+    */
+    position: absolute;
+    left: 5%;
+}
+div.player_slider {
+    top: 7px;
+    cursor: hand;
+}
+#sliderTip{
+    display: none;
+    position: absolute;
+    bottom: 10px;
+    border: thin grey solid;
+    background-color: white;
+    z-index: 10;
+}
+button.player_play {
+    position: absolute;
+    right: 0;
+}
+.ui-icon-trash:hover {
+    background-image: url("/global/js/jqueryui/images/ui-icons_cc0000_256x240.png");
+}
+
+.jvectormap-tip{
+    z-index: 100000000000000;
+}
+#maptitle{
+    background-color: rgb(179, 224, 255);
+    text-align: center;
+    font-size: large;
+    padding: 5px;
+}
+#mapdatalinks{
+    text-align: right;
+    font-size: small;
+    padding: 5px;
+}
+
+#mapdatalinks a {
+    color: #0000FF;
+}
+
+.highcharts-tooltip{
+    width: auto !important;
+}
+.highcharts-tooltip table{
+    font-size: small;
+}
