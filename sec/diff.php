@@ -1,29 +1,7 @@
 <?php
-/**
- * Created by PhpStorm.
- * User: User
- * Date: 10/26/2018
- * Time: 3:14 PM
- */
-
-$sample = isset($_REQUEST["sample"])?$_REQUEST["sample"]:"10Q";
-$filings = [
-    "10Q" => [
-            "original" => "https://www.sec.gov/Archives/edgar/data/1098996/000121390018013211/f10k2018_orancoinc.htm",
-            "amended" => "https://www.sec.gov/Archives/edgar/data/1098996/000121390018014912/f10k2018a2_orancoinc.htm"
-        ],
-    "10K" => [
-        "original" => "https://www.sec.gov/Archives/edgar/data/34088/000003408817000017/xom10k2016.htm",
-        "amended" =>  "https://www.sec.gov/Archives/edgar/data/34088/000003408818000015/xom10k2017.htm"
-    ]
-];
-
-$filingUrl=
-$amend1Url = "https://www.sec.gov/Archives/edgar/data/1098996/000121390018014496/f10k2018a1_orancoinc.htm";
-
-$filingBody = bodyContents(httpGet($filings[$sample]["original"]));
-$amendBody = bodyContents(httpGet($filings[$sample]["amended"]));
-
+$edgarPath = 'https://www.sec.gov/Archives/edgar/data/';
+$filingBody = bodyContents(httpGet($edgarPath .$_REQUEST['A']));
+$amendBody = bodyContents(httpGet($edgarPath .$_REQUEST['B']));
 ?>
 <!DOCTYPE html>
 <html>
@@ -90,6 +68,23 @@ $amendBody = bodyContents(httpGet($filings[$sample]["amended"]));
             oldString = $('#tabs-original').html().replace(rxCR,' ').replace(rxBlockTags,'\n').replace(rxAllTags,' '),
             newString = $('#tabs-amended').html().replace(rxCR,' ').replace(rxBlockTags,'\n').replace(rxAllTags,' ');
 
+        wikEdDiffConfig = {
+            blockMinLength: 3,
+            charDiff: true,
+            coloredBlocks: true,
+            debug: false,
+            fullDiff: true,
+            noUnicodeSymbols: false,
+            recursionMax: 20,
+            recursiveDiff: true,
+            repeatedDiff: true,
+            showBlockMoves: true,
+            stripTrailingNewline: false,
+            timer: false,
+            unitTesting: false,
+            unlinkBlocks: false,
+            unlinkMax: 20
+        };
         var wikEdDiff = new WikEdDiff();
         var diffHtml = wikEdDiff.diff(oldString, newString);
         document.getElementById('redline').innerHTML = diffHtml;

@@ -261,20 +261,128 @@ EOD;
         break;
     case "reporter":
         $cik = $_REQUEST['cik'];
-        $sql = "select s.adsh, s.issuercik, s.issuername, s.symbol, s.form, s.reportdt, s.filedt, s.symbol, 
-              r.ownernum, r.ownercik, r.ownername, r.isdirector, r.isofficer, r.istenpercentowner, 
-              t.transnum, t.transdt, t.transcode, t.isderivative, t.shares, t.sharesownedafter, t.directindirect, t.deemeddt, t.acquiredisposed
-            from ownership_submission2 s
-              INNER JOIN ownership_reporter2 r on r.adsh = s.adsh
-              INNER JOIN ownership_transaction2 t on t.adsh = s.adsh
-            WHERE r.ownercik='$cik'";
+        $sql = <<<EOL
+select s.adsh, s.issuercik, s.issuername, s.symbol, s.form, s.reportdt, s.filedt, s.symbol, 
+  r.ownernum, r.ownercik, r.ownername, r.isdirector, r.isofficer, r.istenpercentowner, r.ownerstreet1, r.ownerstreet2, r.ownercity,r.ownerstate, r.ownerzip,
+  t.transnum, t.transdt, t.transcode, t.isderivative, t.security, t.shares, t.sharesownedafter, t.directindirect, t.deemeddt, t.acquiredisposed
+from ownership_submission s
+  INNER JOIN ownership_reporter r on r.adsh = s.adsh
+  INNER JOIN ownership_transaction t on t.adsh = s.adsh
+WHERE r.ownercik='$cik'
+ORDER BY coalesce(t.transdt, t.deemeddt, s.filedt) desc, s.filedt desc
+EOL;
+        $result = runQuery($sql);
+        if($result->num_rows==0) {
+            $output = ["status" => "reporter cik ".$_REQUEST['cik']."not found"];
+            break;
+        }
+        $output = [
+            "dataset" => "reported transactions",
+            "view" => $_REQUEST['process'],
+            "status" => "ok",
+            "reporter" => false,
+            "transactions" => [],
+            "issuers" => []
+        ];
+        while($row = $result->fetch_assoc()) {
+            if(!$output["reporter"]  || $output["reporter"]["filedt"]<$row["filedt"]){
+                $output["reporter"] = [
+                    "filedt" => $row["filedt"],
+                    "rcik" => $row["ownercik"],
+                    "name" => $row["ownername"],
+                    "street1" => $row["ownerstreet1"],
+                    "street2" => $row["ownerstreet2"],
+                    "city" => $row["ownercity"],
+                    "state" => $row["ownerstate"],
+                    "zip" => $row["ownerzip"],
+                ];
+            }
+            array_push($output["transactions"], [
+                $row["form"],
+                $row["adsh"],
+                $row["transnum"],
+                $row["transcode"],
+                $row["acquiredisposed"],
+                $row["directindirect"],
+                $row["transdt"],
+                $row["deemeddt"],
+                $row["filedt"],
+                $row["issuername"],
+                $row["issuercik"],
+                $row["shares"],
+                $row["sharesownedafter"],
+                $row["security"]
+            ]);
+            //if(!$output["issuers"][$row["issuercik"]]) $output["issuers"][$row["issuercik"]] = $row["issuername"];
+        }
+        break;
+    case "issuer":
+        $cik = $_REQUEST['cik'];
+        $sql = <<<EOL
+      select s.adsh, s.issuercik, s.issuername, s.symbol, s.form, s.reportdt, s.filedt, s.symbol, 
+          r.ownernum, r.ownercik, r.ownername, r.isdirector, r.isofficer, r.istenpercentowner, 
+          t.transnum, t.transdt, t.transcode, t.isderivative, t.shares, t.sharesownedafter, t.directindirect, t.deemeddt, t.acquiredisposed, t.security
+      from ownership_submission s
+          INNER JOIN ownership_reporter r on r.adsh = s.adsh
+          INNER JOIN ownership_transaction t on t.adsh = s.adsh
+      WHERE s.issuercik='$cik'
+      order by transdt desc, transnum asc
+EOL;
+        //note: issuer address is not in 3/4/5 forms (reporter address is); must get from company table
         $result = runQuery($sql);
         $transactions = [];
+        //$issuers = [];  //normalized to shrink transactions size
+        $output = false;  //set on first row with status and header fields
+
+        $output = [
+            "dataset" => "reported transactions",
+            "view" => $_REQUEST['process'],
+            "status" => "ok",
+            "issuer" => false,
+            "transactions" => [],
+            "reporters" => []
+        ];
         while($row = $result->fetch_assoc()) {
-            if (!isset($ts[$row["uom"]])) $ts[$row["uom"]] = [];
-            $ts[$row["uom"]] += ["Q".(string)$row["qtrs"] => json_decode($row["json"], false)]; //STRICT JSON DECODING REQUIRES DOUBLE QUOTES
-            $lastRow = $row;
+            if(!$output["issuer"]  || $output["issuer"]["filedt"]<$row["filedt"]){
+                $output["reporter"] = [
+                    "filedt" => $row["filedt"],
+                    "icik" => $row["issuercik"],
+                    "name" => $row["issuername"],
+                    /*"street1" => $row["ownerstreet1"],
+                    "street2" => $row["ownerstreet2"],
+                    "city" => $row["ownercity"],
+                    "state" => $row["ownerstate"],
+                    "zip" => $row["ownerzip"],*/
+                ];
+            }
+            array_push($transactions, [
+                $row["form"],
+                $row["adsh"],
+                $row["transnum"],
+                $row["transcode"],
+                $row["acquiredisposed"],
+                $row["directindirect"],
+                $row["transdt"],
+                $row["deemeddt"],
+                $row["filedt"],
+                $row["ownername"],
+                $row["ownercik"],
+                $row["shares"],
+                $row["sharesownedafter"],
+                $row["security"]
+            ]);
         }
+        $output["transactions"] = $transactions;
+        break;
+
+    case "searchNames":
+        $sql = "call searchNames(" . safeStringSQL( $_REQUEST['last']) . ", "
+            . safeStringSQL( $_REQUEST['first']) . ", " . safeStringSQL( $_REQUEST['middle']) . ");";
+        $result = runQuery($sql);
+        $output = [
+            "status" => "ok",
+            "matches" => $result->fetch_all(MYSQLI_ASSOC)
+            ];
         break;
     default:
         $output = array("status" => "invalid command");
