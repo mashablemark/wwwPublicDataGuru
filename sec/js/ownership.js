@@ -104,17 +104,19 @@ $(document).ready(function() {
     $( "#cikFilter" ).combobox({
         select: filterControlChanged
     });
+
     $("#acquireddisposedFilter").controlgroup().change(filterControlChanged);
     $( "#formFilter" ).change(filterControlChanged);
     $( "#codeFilter" ).change(filterControlChanged);
-    $( "#dateSlider" ).slider({
+    $( "#dateSlider" ).width(window.innerWidth-20-2*$('#startDateFilter').outerWidth()).css('left', '110px')
+        .slider({
         range: true,
         min: 0,
         max: 1,
         values: [0,1],
         slide: function(event, ui ){  //mouse-move event
             var selector = ui.handleIndex==0?'#startDateFilter':'#endDateFilter';
-            $(selector).val(transactionDates[ui.value]);
+            $(selector).html(transactionDates[ui.value]);
         },
         stop: function( event, ui ){
             filterControlChanged();
@@ -144,8 +146,8 @@ function filterControlChanged(){
     filters.form = $("#formFilter").val();
     filters.code = $("#codeFilter").val();
     filters[pageOptions.view=='reporter'?'issuer':'reporter'] = $("#cikFilter").val();
-    filters.start = $("#startDateFilter").val();
-    filters.end = $("#endDateFilter").val();
+    filters.start = $("#startDateFilter").html();
+    filters.end = $("#endDateFilter").html();
     //b. set hash, which triggers has change event handler by hashChangeHandler
     var updatedHash = 'view='+pageOptions.view + '&' + pageOptions.view + '=' + pageOptions[pageOptions.view];
     for(var filter in filters){
@@ -178,6 +180,7 @@ function hashChangeHandler(newHash, oldHash){
             filterTable(newOptions);
             //filterTransactionsTable(newOptions, data)
         }
+        $('#startDateFilter')
         console.timeEnd('HashChange');
     });
 

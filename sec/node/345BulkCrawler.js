@@ -325,28 +325,33 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
         }
 
         function next345(){  //the master index has reference to all submission; just get the next 3/4/5 ownership or false if none left to process
-            while(ingestFileNum<fileNames.length-1){
+            while(ingestFileNum<fileNames.length-1) {
                 ingestFileNum++;
                 var fileName = fileNames[ingestFileNum];
-                if(fileName.indexOf('.nc') != -1){
+                if (fileName.indexOf('.nc') != -1) {
                     //todo: understand .corrr01 files such as 0000914475-15-000080.corr01 in 20160119
-                    var  fileStats = fs.statSync(directory+'/'+fileName);  //blocking necessary for master control
-                    if(fileStats.size<10*1024*1024){//don't both read massive files.  3/4/5 are typically 3-4 kB, but
-                        // scanned attachments can be much larger
-                        var fileBody = fs.readFileSync(directory+'/'+fileName, 'utf8'),  //blocking for master control
-                            form = headerInfo(fileBody, '<FORM-TYPE>');
-                        processControl.totalFilesRead++;
-                        if(ownershipForms[form]) {  //detection of 345 file
-                            return {
+
+                    var MAX_BUFFER = 250 * 1024;  //read first 250kb
+                    fileStats = fs.statSync(directory + '/' + fileName);
+                    fd = fs.openSync(directory + '/' + fileName, 'r');
+                    var buf = new Buffer(Math.min(MAX_BUFFER, fileStats.size)),
+                        bytes = fs.readSync(fd, buf, 0, buf.length, 0);
+
+                    processControl.totalFilesRead++;
+                    var fileBody = buf.slice(0, bytes).toString(),
+                        form = headerInfo(fileBody, '<FORM-TYPE>');
+                    fs.close(fd); //called asynchronously!!
+                    processControl.totalFilesRead++;
+                    if (ownershipForms[form]) {
+                        console.log(fileBody);
+                        process.exit();
+                        return {
                                 fileBody: fileBody,
                                 fileName: fileName,
                                 form: form,
                                 filedDate: headerInfo(fileBody, '<FILING-DATE>'),
                                 period: headerInfo(fileBody, '<PERIOD>')
-                            }
-                        } //else logEvent('<FORM-TYPE> not found', fileNames[ingestFileNum]);
-                    } else {
-                        processControl.largeUnreadFileCount++
+                        }
                     }
                 }
             }
