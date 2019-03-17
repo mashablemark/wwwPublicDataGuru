@@ -56,7 +56,7 @@ var tableColumns = {
         {   title: "Form", className: "dt-body-center"},
         {   title: "Accession No.",
             render: function (data, type, row, meta) {
-                return '<a href="https://www.sec.gov/Archives/edgar/data/' + row[10] + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
+                return '<a href="https://www.sec.gov/Archives/edgar/data/' + row[9] + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
             }
         },
         {   title: "Line Number", visible: false },
@@ -64,11 +64,10 @@ var tableColumns = {
         {   title: "Acquisition or Disposition", className: "dt-body-center" },
         {   title: "Direct or Indirect Ownership", className: "dt-body-center"  },
         {   title: "Transaction Date", className: "dt-body-center" },
-        {   title: "Deemed Date", className: "dt-body-center" },
         {   title: "Reported Date", className: "dt-body-center" },
         {   title: "Issuer",
             render: function (data, type, row, meta) {
-                return '<a href="ownership.php#view=issuer&issuer=' + row[10] + '">' + data + '</a>';
+                return '<a href="ownership.php#view=issuer&issuer=' + row[9] + '">' + data + '</a>';
             }
         },
         {   title: "Issuer CIK" },
@@ -80,18 +79,17 @@ var tableColumns = {
         {   title: "Form", className: "dt-body-center" },
         {   title: "Accession No.",
             render: function (data, type, row, meta) {
-                return '<a href="https://www.sec.gov/Archives/edgar/data/' + row[10] + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
+                return '<a href="https://www.sec.gov/Archives/edgar/data/' + row[9] + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
             }},
         {   title: "Line Number" , visible: false},
         {   title: "Transaction Type", className: "dt-body-center" },
         {   title: "Acquisition or Disposition", className: "dt-body-center" },
         {   title: "Direct or Indirect Ownership", className: "dt-body-center" },
         {   title: "Transaction Date", className: "dt-body-center" },
-        {   title: "Deemed Date", className: "dt-body-center" },
         {   title: "Reported Date", className: "dt-body-center" },
         {   title: "Reporter",
             render: function (data, type, row, meta) {
-                return '<a href="ownership.php#view=reporter&reporter=' + row[10] + '">' + data + '</a>';
+                return '<a href="ownership.php#view=reporter&reporter=' + row[9] + '">' + data + '</a>';
             } },
         {   title: "Reporter CIK" },
         {   title: "Number of Securities Transacted", className: "dt-body-right" },
@@ -104,24 +102,26 @@ $(document).ready(function() {
     $( "#cikFilter" ).combobox({
         select: filterControlChanged
     });
-
-    $("#acquireddisposedFilter").controlgroup().change(filterControlChanged);
+    $("#acquireddisposedFilter").controlgroup({classes: {"ui-controlgroup-item": "inviz"}}).change(filterControlChanged);
     $( "#formFilter" ).change(filterControlChanged);
     $( "#codeFilter" ).change(filterControlChanged);
-    $( "#dateSlider" ).width(window.innerWidth-20-2*$('#startDateFilter').outerWidth()).css('left', '110px')
+    $( "#dateSlider" ).innerWidth($('#filter').innerWidth()-30-2*$('#startDateFilter').outerWidth(true)).css('left', '110px')
         .slider({
         range: true,
         min: 0,
         max: 1,
         values: [0,1],
-        slide: function(event, ui ){  //mouse-move event
-            var selector = ui.handleIndex==0?'#startDateFilter':'#endDateFilter';
-            $(selector).html(transactionDates[ui.value]);
-        },
+        slide: sliderChange,
+        change: sliderChange,
         stop: function( event, ui ){
             filterControlChanged();
         }
     });
+
+    function sliderChange(event, ui ){  //mouse-move event
+        var selector = ui.handleIndex==0?'#startDateFilter':'#endDateFilter';
+        $(selector).html(transactionDates[ui.value]);
+    }
     //setup hash listener
     hasher.changed.add(hashChangeHandler); //add hash change listener
     hasher.initialized.add(hashChangeHandler); //add initialized listener (to grab initial value in case it is already set)
@@ -146,8 +146,10 @@ function filterControlChanged(){
     filters.form = $("#formFilter").val();
     filters.code = $("#codeFilter").val();
     filters[pageOptions.view=='reporter'?'issuer':'reporter'] = $("#cikFilter").val();
-    filters.start = $("#startDateFilter").html();
-    filters.end = $("#endDateFilter").html();
+    var startLabel = $("#startDateFilter").html(),
+        endLabel = $("#endDateFilter").html();
+    filters.start = startLabel==transactionDates[0] ? '' : startLabel;
+    filters.end = endLabel==transactionDates[transactionDates.length-1] ? '' : endLabel;
     //b. set hash, which triggers has change event handler by hashChangeHandler
     var updatedHash = 'view='+pageOptions.view + '&' + pageOptions.view + '=' + pageOptions[pageOptions.view];
     for(var filter in filters){
@@ -157,32 +159,37 @@ function filterControlChanged(){
     $('#reset').button('enable');
 }
 
-//handle hash changes
+//handle hash changes (fires on page load too!)
 function hashChangeHandler(newHash, oldHash){
-
-    console.time('HashChange');
-    var newOptions = optionsFromHash(newHash),
-        oldOptions = optionsFromHash(oldHash),
-        isNewView = !oldHash  || newOptions.view != oldOptions.view;
-    //1. fetch data (from cache or API)
-    getOwnershipData(newOptions, function(data){
-        console.log('fetched data');
-        console.timeLog('HashChange');
-        //2. filter data and fill controls
-        //3. IF (new view) (re)load table ELSE refill data and redraw
+    $('body').mask('loading data...');
+    window.setTimeout(function(){  //allow mask to render
+        console.time('HashChange');
+        var newOptions = optionsFromHash(newHash),
+            oldOptions = optionsFromHash(oldHash),
+            isNewView = !oldHash  || newOptions.view != oldOptions.view;
         if(isNewView){
-            fillFilterControls(newOptions, data);
+            //new data set = 1. fetch data (from cache or API)
+            getOwnershipData(newOptions, function(data){
+                console.log('fetched data');
+                console.timeLog('HashChange');
+                //2. fill controls
+                fillFilterControls(newOptions, data);
 
-            console.log('set filter controls');
-            console.timeLog('HashChange');
-            loadTransactionsTable(newOptions, data.transactions);
+                console.log('set filter controls');
+                console.timeLog('HashChange');
+                //3. load table ELSE refill data and redraw
+                loadTransactionsTable(newOptions, data.transactions);
+                console.timeEnd('HashChange');
+                //4. display header info
+                displayHeader(data);
+                $('body').unmask();
+            });
         } else {
+            //existing data set = filter
             filterTable(newOptions);
-            //filterTransactionsTable(newOptions, data)
+            $('body').unmask();
         }
-        $('#startDateFilter')
-        console.timeEnd('HashChange');
-    });
+    }, 10);
 
     console.log(newHash);
 }
@@ -201,31 +208,22 @@ function getOwnershipData(options, callback){
     if(ownershipData[key]){
         callback(ownershipData[key]);
     } else {
+        console.time('callAPI');
         callAPI(
             {process: options.view, cik: options[options.view]},
             function(apiResponse) {
+                console.timeEnd('callAPI');
                 ownershipData[key] = apiResponse;
                 callback(ownershipData[key]);
             }
         );
     }
 }
-/*function filterTransactionsTable(options, data){
-    var filteredTransactions = [],
-        cikFilterType = options.view=='issuer'?'reporter':'issuer'; //opposite of view
-    for(var t in data.transactions){
-        var trans = data.transactions[t];
-        if(
-            (!options.form || options.form == trans[0])
-            && (!options.code || options.code == trans[3])
-            && (!options.start || options.start <= trans[6])
-            && (!options.end || options.end >= trans[6])
-            && (!options[cikFilterType] || options[cikFilterType] == trans[10])
-        ) filteredTransactions.push(trans)
-    }
-    //dtTransactions.
-    return filteredTransactions;
-}*/
+function displayHeader(data){
+    $('#entity').html(data.name + ' <a href="https://www.sec.gov/cgi-bin/browse-edgar?CIK='+data.cik+'&action=getcompany">'+data.cik+'</a>');
+    $('#address').html(data.street1+'<br>'+(data.street2 && data.street2.trim().length>0?data.street2+'<br>':'')+data.city+' '+data.state+' '+data.zip);
+}
+
 function fillFilterControls(options, data){
     var distinctForms = [],
         distinctCodes = [],
@@ -240,7 +238,7 @@ function fillFilterControls(options, data){
         if(distinctForms.indexOf(trans[0])==-1) distinctForms.push(trans[0]);
         if(distinctCodes.indexOf(trans[3])==-1) distinctCodes.push(trans[3]);
         if(distinctDates.indexOf(trans[6])==-1) distinctDates.push(trans[6]);
-        if(!cikTree[trans[10]]) cikTree[trans[10]] = trans[9];
+        if(!cikTree[trans[9]]) cikTree[trans[9]] = trans[8];
     }
 
     //form select filter
@@ -270,7 +268,7 @@ function fillFilterControls(options, data){
     transactionDates = distinctDates.sort();
     $( "#dateSlider" ).slider({
         range: true,
-        max: transactionDates.length,
+        max: transactionDates.length-1,
         values: [0, transactionDates.length - 1]
     });
     resetFilterValues();
@@ -279,10 +277,12 @@ function fillFilterControls(options, data){
 function resetFilterValues(){
     $("#cikFilter").val('all').parent().find('input').val('');
     $("#both").prop("checked", true);
+    $("#acquireddisposedFilter input[name='acquireddisposed'][value='all']").prop('checked', true);
     $("#acquireddisposedFilter").controlgroup('refresh');
     $("#codeFilter").val('all');
     $("#formFilter").val('all');
     $('#reset').button('disable');
+    $("#dateSlider" ).slider('values', [0, transactionDates.length-1]);
 }
 
 function loadTransactionsTable(options, transactions){
@@ -294,28 +294,39 @@ function loadTransactionsTable(options, transactions){
     //   - build aryTransactions
     var t, startDate = false, endDate = false, names = {}, dates=[];
     //   - build aryOwners / aryIssuers depending on request
+    var height = window.innerHeight - $('#filter').outerHeight() - Math.max($('#header').outerHeight(),75) -200;
     dtTransactions = $('table#transactions').DataTable( {
         data: transactions,
         dom: 'Bfrtip',
         columns: tableColumns[options.view],
-        scrollY:        "500px",
+        scrollY:        height + "px",
         scrollCollapse: true,
         scroller:       true,
         deferRender: true,
+        oLanguage: {"sSearch": "Text search"},
         buttons: [
-            'copy', 'excel', 'csv', {
+            'copy',
+            'excel',
+            'csv',
+            {
                 extend: 'pdfHtml5',
                 pageSize: 'letter',
                 orientation: 'landscape',
-                customize: function(doc) {
+                customize: function (doc) {
                     doc.defaultStyle.fontSize = 6; //<-- set fontsize to 16 instead of 10
                     doc.styles.tableHeader.fontSize = 7;
+                }
+            },
+            {
+                text: 'JSON',
+                action: function(){
+                    window.location.href = 'http://restapi.publicdata.guru/sec/ownership/'+options.view+'/cik'+parseInt(options[options.view]);
+                    //alert('clicked JSON');
                 }
             }
         ]
     });
-   /* dtTransactions.buttons().container()
-        .appendTo( $('.col-sm-6:eq(0)', dtTransactions.table().container() ) );*/
+    //dtTransactions.draw();
     console.log('instantiated datatable');
     console.timeLog('HashChange');
     //  c. create interactive tblTransactions using dataTables
@@ -325,11 +336,6 @@ function loadTransactionsTable(options, transactions){
     //  g. set begin and end data and date slider limits
 }
 
-function refreshTransactionsTable(){
-
-}
-
-
 function filterTable(options){
 //REWRITE TO FILTER ARRAY AND REDRAW BECAUSE DATATABLES CAN NOT DO A RANGE (START AND END DATE)
     //ALSO RELOAD THE FILTER CONTROLS GIVEN THE FILTERED DATA
@@ -338,31 +344,54 @@ function filterTable(options){
     dtTransactions.columns(4).search(options.ad ? options.ad : '');
     dtTransactions.columns(3).search(options.code ? options.code: '');
     dtTransactions.columns(0).search(options.form ? options.form : '');
-    dtTransactions.columns(10).search(options[cikFilterParam] ? options[cikFilterParam] : '');
+    dtTransactions.columns(9).search(options[cikFilterParam] ? options[cikFilterParam] : '');
     //date filter is handled inDateRange function applied in loadTransactionTable which using filterDates global var:
     filterDates = [options.start ? options.start : '', options.end ? options.end : ''];
     dtTransactions.draw();
 }
 
 function callAPI(params, callback, fail) {
-    $.ajax({
-        data: params,
-        dataType: 'JSON',
-        type: 'post',
-        url: '/sec/api.php',
-        success: function (data, status) {
-            console.log('successfully ran API command: ' + params.process);
-            callback(data);
-        },
-        error: function (jqXHR, textStatus, errorThrown) {
-            if (fail) {
-                fail(params);
-            } else {
-                console.log(textStatus);
-                throw(errorThrown);
+    var useDb = false;  //if false, use S3 bucket
+    if(useDb){
+        $.ajax({
+            data: params,
+            dataType: 'JSON',
+            type: 'post',
+            url: '/sec/api.php',
+            success: function (data, status) {
+                console.log('successfully ran API command: ' + params.process);
+                callback(data);
+            },
+            error: function (jqXHR, textStatus, errorThrown) {
+                if (fail) {
+                    fail(params);
+                } else {
+                    console.log(textStatus);
+                    throw(errorThrown);
+                }
             }
-        }
-    });
+        });
+    } else {
+        var url = 'http://restapi.publicdata.guru/sec/ownership/' + params.process+ '/cik' + parseInt(params.cik);  //remove leading zeros
+        $.ajax({
+            dataType: 'JSON',
+            url: url,
+            type: 'get',
+            success: function (data, status) {
+                console.log('successfully fetched ' + url);
+                callback(data);
+            },
+            error: function (jqXHR, textStatus, errorThrown) {
+                if(fail){
+                    fail(url);
+                } else {
+                    console.log(textStatus);
+                    throw(errorThrown);
+                }
+            }
+        });
+
+    }
 }
 
 (function($) {
@@ -496,3 +525,4 @@ function callAPI(params, callback, fail) {
         }
     });
 } )(jQuery);
+
