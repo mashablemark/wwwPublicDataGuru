@@ -21,9 +21,15 @@
  *
  */
 var ownershipData = {};
-var dtTransactions;
+var dtTransactions = false;
 var transactionDates;
 var filterDates = ['',''];
+var view;
+var counter = {
+    'reporter': 'issuer',
+    issuer: 'reporter'
+};
+
 var transactionCodes = {
     //General Transaction Codes
     P: 'Open market or private purchase of non-derivative or derivative security',
@@ -60,17 +66,17 @@ var tableColumns = {
             }
         },
         {   title: "Line Number", visible: false },
-        {   title: "Transaction Type", className: "dt-body-center" },
+        {   title: "Transaction Code", className: "dt-body-center" },
         {   title: "Acquisition or Disposition", className: "dt-body-center" },
         {   title: "Direct or Indirect Ownership", className: "dt-body-center"  },
         {   title: "Transaction Date", className: "dt-body-center" },
         {   title: "Reported Date", className: "dt-body-center" },
-        {   title: "Issuer",
+        {   title: "Issuer"},  //8
+        {   title: "Issuer CIK",  //9
             render: function (data, type, row, meta) {
-                return '<a href="ownership.php#view=issuer&issuer=' + row[9] + '">' + data + '</a>';
+                return '<a href="ownership.php#view='+counter[view]+'&'+counter[view]+'=' + row[9] + '">' + data + '</a>';
             }
         },
-        {   title: "Issuer CIK" },
         {   title: "Number of Securities Transacted", className: "dt-body-right"  },
         {   title: "Number of Securities Owned", className: "dt-body-right"  },
         {   title: "Notes" }
@@ -82,16 +88,17 @@ var tableColumns = {
                 return '<a href="https://www.sec.gov/Archives/edgar/data/' + row[9] + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
             }},
         {   title: "Line Number" , visible: false},
-        {   title: "Transaction Type", className: "dt-body-center" },
+        {   title: "Transaction Code", className: "dt-body-center" },
         {   title: "Acquisition or Disposition", className: "dt-body-center" },
         {   title: "Direct or Indirect Ownership", className: "dt-body-center" },
         {   title: "Transaction Date", className: "dt-body-center" },
         {   title: "Reported Date", className: "dt-body-center" },
-        {   title: "Reporter",
+        {   title: "Reporter"},
+        {   title: "Reporter CIK",
             render: function (data, type, row, meta) {
                 return '<a href="ownership.php#view=reporter&reporter=' + row[9] + '">' + data + '</a>';
-            } },
-        {   title: "Reporter CIK" },
+            }
+        },
         {   title: "Number of Securities Transacted", className: "dt-body-right" },
         {   title: "Number of Securities Owned", className: "dt-body-right" },
         {   title: "Notes" }
@@ -177,11 +184,11 @@ function hashChangeHandler(newHash, oldHash){
 
                 console.log('set filter controls');
                 console.timeLog('HashChange');
-                //3. load table ELSE refill data and redraw
+                //3. display header info
+                displayHeader(data);
+                //4. load table ELSE refill data and redraw
                 loadTransactionsTable(newOptions, data.transactions);
                 console.timeEnd('HashChange');
-                //4. display header info
-                displayHeader(data);
                 $('body').unmask();
             });
         } else {
@@ -286,8 +293,9 @@ function resetFilterValues(){
 }
 
 function loadTransactionsTable(options, transactions){
+    view = options.view;
     // a. clear existing data tables
-    if(dtTransactions) dtTransactions.destroy();
+    //if(dtTransactions) dtTransactions.destroy();
     console.log('destroyed datatable');
     console.timeLog('HashChange');
     // b. from in-mem relational API data:
@@ -295,37 +303,48 @@ function loadTransactionsTable(options, transactions){
     var t, startDate = false, endDate = false, names = {}, dates=[];
     //   - build aryOwners / aryIssuers depending on request
     var height = window.innerHeight - $('#filter').outerHeight() - Math.max($('#header').outerHeight(),75) -200;
-    dtTransactions = $('table#transactions').DataTable( {
-        data: transactions,
-        dom: 'Bfrtip',
-        columns: tableColumns[options.view],
-        scrollY:        height + "px",
-        scrollCollapse: true,
-        scroller:       true,
-        deferRender: true,
-        oLanguage: {"sSearch": "Text search"},
-        buttons: [
-            'copy',
-            'excel',
-            'csv',
-            {
-                extend: 'pdfHtml5',
-                pageSize: 'letter',
-                orientation: 'landscape',
-                customize: function (doc) {
-                    doc.defaultStyle.fontSize = 6; //<-- set fontsize to 16 instead of 10
-                    doc.styles.tableHeader.fontSize = 7;
+    if(!dtTransactions){
+        dtTransactions = $('table#transactions').DataTable( {
+            data: transactions,
+            dom: 'Bfrtip',
+            columns: tableColumns[options.view],
+            scrollY:        height + "px",
+            scrollCollapse: true,
+            scroller:       true,
+            deferRender: true,
+            oLanguage: {"sSearch": "Text search"},
+            buttons: [
+                'copy',
+                'excel',
+                'csv',
+                {
+                    extend: 'pdfHtml5',
+                    pageSize: 'letter',
+                    orientation: 'landscape',
+                    messageTop: 'working...',
+                    customize: function (doc) {
+                        doc.defaultStyle.fontSize = 6; //<-- set fontsize to 16 instead of 10
+                        doc.styles.tableHeader.fontSize = 7;
+                    }
+                },
+                {
+                    text: 'JSON',
+                    action: function(){
+                        window.location.href = 'http://restapi.publicdata.guru/sec/ownership/'+view+'/cik'+parseInt(options[view]);
+                        //alert('clicked JSON');
+                    }
                 }
-            },
-            {
-                text: 'JSON',
-                action: function(){
-                    window.location.href = 'http://restapi.publicdata.guru/sec/ownership/'+options.view+'/cik'+parseInt(options[options.view]);
-                    //alert('clicked JSON');
-                }
-            }
-        ]
-    });
+            ]
+        });
+    } else {
+        dtTransactions.clear();
+        var label = view.substring(0,1).toUpperCase() + view.substring(1);
+        dtTransactions.column(8).header().innerHTML = label;
+        dtTransactions.column(9).header().innerHTML = label+ ' CIK';
+        dtTransactions.rows.add(transactions);
+        dtTransactions.draw();
+    }
+
     //dtTransactions.draw();
     console.log('instantiated datatable');
     console.timeLog('HashChange');

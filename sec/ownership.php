@@ -40,7 +40,7 @@
     #dateFilter {margin: 10px 0}
     #startDateFilter {width: 100px; float: left}
     #endDateFilter {width: 100px; text-align: right; float: right}
-    #reset {float: right; background-color: red}
+    #reset {margin-left: 20px; background-color: red}
     .custom-combobox {
         position: relative;
         display: inline-block;
@@ -92,13 +92,7 @@
 
 
 <div id="filter">
-    <button id="reset" disabled="disabled">clear filter</button>
-    <div id="cikFilterOuter">
-        <span id="filterLabel">Reporter</span>: <div class="ui-widget">
-        <select id="cikFilter"><option value="all"></option></select>
-        </div>
-    </div>
-
+    <select id="formFilter"><option value="all">all forms</option></select>
     <select id="codeFilter"><option value="all">all transaction codes</option></select>
     <div id="acquireddisposedFilter">
         <input type="radio" id="acquired"  value="A" name="acquireddisposed">
@@ -110,7 +104,12 @@
         <input type="radio" id="disposed" value="D" name="acquireddisposed">
         <label for="disposed">disposed</label>
     </div>
-    <select id="formFilter"><option value="all">all forms</option></select>
+    <div id="cikFilterOuter">
+        <span id="filterLabel">Reporter</span>: <div class="ui-widget">
+            <select id="cikFilter"><option value="all"></option></select>
+        </div>
+    </div>
+    <button id="reset" disabled="disabled">clear filter</button>
     <div id="dateFilter">
         <span id="startDateFilter"></span>
         <span id="endDateFilter"></span>
