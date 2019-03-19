@@ -70,7 +70,7 @@ var tableColumns = {
         {   title: "Acquisition or Disposition", className: "dt-body-center" },
         {   title: "Direct or Indirect Ownership", className: "dt-body-center"  },
         {   title: "Transaction Date", className: "dt-body-center" },
-        {   title: "Reported Date", className: "dt-body-center" },
+        {   title: "Date Reported", className: "dt-body-center" },
         {   title: "Issuer"},  //8
         {   title: "Issuer CIK",  //9
             render: function (data, type, row, meta) {
@@ -92,7 +92,7 @@ var tableColumns = {
         {   title: "Acquisition or Disposition", className: "dt-body-center" },
         {   title: "Direct or Indirect Ownership", className: "dt-body-center" },
         {   title: "Transaction Date", className: "dt-body-center" },
-        {   title: "Reported Date", className: "dt-body-center" },
+        {   title: "Date Reported", className: "dt-body-center" },
         {   title: "Reporter"},
         {   title: "Reporter CIK",
             render: function (data, type, row, meta) {
@@ -159,11 +159,16 @@ function filterControlChanged(){
     filters.end = endLabel==transactionDates[transactionDates.length-1] ? '' : endLabel;
     //b. set hash, which triggers has change event handler by hashChangeHandler
     var updatedHash = 'view='+pageOptions.view + '&' + pageOptions.view + '=' + pageOptions[pageOptions.view];
+    var resetState = false;
     for(var filter in filters){
-        if(filters[filter] && filters[filter]!='all') updatedHash += '&' + filter + '=' + filters[filter];
+        if(filters[filter] && filters[filter]!='all') {
+            updatedHash += '&' + filter + '=' + filters[filter];
+            resetState = true;
+        }
+
     }
     hasher.setHash(updatedHash);  //note: this will indirectly fire hashChangeHandler()
-    $('#reset').button('enable');
+    $('#reset').button(resetState ? 'enable' : 'disable');
 }
 
 //handle hash changes (fires on page load too!)
@@ -228,7 +233,15 @@ function getOwnershipData(options, callback){
 }
 function displayHeader(data){
     $('#entity').html(data.name + ' <a href="https://www.sec.gov/cgi-bin/browse-edgar?CIK='+data.cik+'&action=getcompany">'+data.cik+'</a>');
-    $('#address').html(data.street1+'<br>'+(data.street2 && data.street2.trim().length>0?data.street2+'<br>':'')+data.city+' '+data.state+' '+data.zip);
+    writeAddress('Mailing', data.mailingAddress);
+    writeAddress('Business', data.businessAddress);
+
+    function writeAddress(label, address) {
+        var addressHtml = (address && (address.street1 || address.city)) ?
+            '<b>' + label + ' Address</b><br>' + address.street1 + '<br>' + (address.street2 && address.street2.trim().length > 0 ? address.street2 + '<br>' : '') + address.city + ' ' + address.state + ' ' + address.zip
+            : '';
+        $('#' + label.toLowerCase() + 'Address').html(addressHtml);
+    }
 }
 
 function fillFilterControls(options, data){
@@ -313,25 +326,56 @@ function loadTransactionsTable(options, transactions){
             scroller:       true,
             deferRender: true,
             oLanguage: {"sSearch": "Text search"},
+            order: [[6, 'desc']],
             buttons: [
                 'copy',
-                'excel',
-                'csv',
+                {
+                    extend: 'excelHtml5',
+                    action: function(e, dt, node, config) {
+                        $('body').mask('Generating Excel file.  Download will start shortly.');
+                        var me = this;
+                        setTimeout(function(){
+                            $.fn.dataTable.ext.buttons.excelHtml5.action.call(me, e, dt, node, config);
+                            $('body').unmask();
+                        }, 10);
+                    }
+
+                },
+                {
+                    extend: 'csvHtml5',
+                    action: function(e, dt, node, config) {
+                        $('body').mask('Generating CSV.  Download will start shortly.');
+                        var me = this;
+                        setTimeout(function(){
+                            $.fn.dataTable.ext.buttons.csvHtml5.action.call(me, e, dt, node, config);
+                            $('body').unmask();
+                        }, 10);
+                    }
+
+                },
                 {
                     extend: 'pdfHtml5',
                     pageSize: 'letter',
                     orientation: 'landscape',
-                    messageTop: 'working...',
                     customize: function (doc) {
-                        doc.defaultStyle.fontSize = 6; //<-- set fontsize to 16 instead of 10
+                        doc.defaultStyle.fontSize = 6; //<-- set fontsize to 6 instead of 10
                         doc.styles.tableHeader.fontSize = 7;
+                    },
+                    action: function(e, dt, node, config) {
+                        $('body').mask('Generating PDF.  Download will start shortly.');
+                        var me = this;
+                        setTimeout(function(){
+                            $.fn.dataTable.ext.buttons.pdfHtml5.action.call(me, e, dt, node, config);
+                            $('body').unmask();
+                        }, 10);
                     }
+
                 },
                 {
                     text: 'JSON',
                     action: function(){
-                        window.location.href = 'http://restapi.publicdata.guru/sec/ownership/'+view+'/cik'+parseInt(options[view]);
-                        //alert('clicked JSON');
+                        var pageOptions = optionsFromHash(hasher.getHash());
+                        window.location.href = 'http://restapi.publicdata.guru/sec/ownership/'+view+'/cik'+parseInt(pageOptions[pageOptions.view]);
                     }
                 }
             ]

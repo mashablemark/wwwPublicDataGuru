@@ -27,20 +27,20 @@
         visibility: hidden;
         height: 0;
         width: 0;}
-    #acquireddisposedFilter, #cikFilterOuter {display: inline-block}
-    #cikFilterOuter div {display: inline-block; margin-right: 30px }
+    #acquireddisposedFilter, #cikFilterOuter {display: inline-block; margin: 0 5px;}
+    #cikFilterOuter div {display: inline-block;}
     .container input {
         position: absolute;
         visibility: hidden;
         height: 0;
         width: 0;
     }
-    #codeFilter {max-width: 200px; height: 30px; margin: 0 10px;}
-    #formFilter  {height: 30px; margin: 0 10px;}
+    #codeFilter {max-width: 200px; height: 30px; margin: 0 5px;}
+    #formFilter  {height: 30px; margin: 0 5px;}
     #dateFilter {margin: 10px 0}
     #startDateFilter {width: 100px; float: left}
     #endDateFilter {width: 100px; text-align: right; float: right}
-    #reset {margin-left: 20px; background-color: red}
+    #reset {margin-left: 40px; background-color: red}
     .custom-combobox {
         position: relative;
         display: inline-block;
@@ -81,13 +81,14 @@
         background-color: #f6f6f6;
     }
     #entity {display: inline-block;}
-    #address {display: inline-block;
+    #mailingAddress, #businessAddress {display: inline-block;
         margin-left: 100px;}
 </style>
 <body>
 <div id="header">
     <h2 id="entity"></h2>
-    <div id="address"></div>
+    <div id="businessAddress"></div>
+    <div id="mailingAddress"></div>
 </div>
 
 
