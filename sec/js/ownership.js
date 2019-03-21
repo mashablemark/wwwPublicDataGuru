@@ -192,7 +192,7 @@ function hashChangeHandler(newHash, oldHash){
                 //3. display header info
                 displayHeader(data);
                 //4. load table ELSE refill data and redraw
-                loadTransactionsTable(newOptions, data.transactions);
+                loadTransactionsTable(newOptions, data);
                 console.timeEnd('HashChange');
                 $('body').unmask();
             });
@@ -305,8 +305,8 @@ function resetFilterValues(){
     $("#dateSlider" ).slider('values', [0, transactionDates.length-1]);
 }
 
-function loadTransactionsTable(options, transactions){
-    view = options.view;
+function loadTransactionsTable(options, data){
+    view = data.view;
     // a. clear existing data tables
     //if(dtTransactions) dtTransactions.destroy();
     console.log('destroyed datatable');
@@ -315,15 +315,16 @@ function loadTransactionsTable(options, transactions){
     //   - build aryTransactions
     var t, startDate = false, endDate = false, names = {}, dates=[];
     //   - build aryOwners / aryIssuers depending on request
-    var height = window.innerHeight - $('#filter').outerHeight() - Math.max($('#header').outerHeight(),75) -200;
+    var height = window.innerHeight - $('#filter').outerHeight() - Math.max($('#header').outerHeight(),75) -220;
     if(!dtTransactions){
         dtTransactions = $('table#transactions').DataTable( {
-            data: transactions,
+            data: data.transactions,
             dom: 'Bfrtip',
-            columns: tableColumns[options.view],
+            columns: tableColumns[data.view],
             scrollY:        height + "px",
+            scrollX: false,
             scrollCollapse: true,
-            scroller:       true,
+            scroller: {rowHeight: 'auto'},
             deferRender: true,
             oLanguage: {"sSearch": "Text search"},
             order: [[6, 'desc']],
@@ -353,7 +354,7 @@ function loadTransactionsTable(options, transactions){
                     }
 
                 },
-                {
+                /*{
                     extend: 'pdfHtml5',
                     pageSize: 'letter',
                     orientation: 'landscape',
@@ -369,7 +370,6 @@ function loadTransactionsTable(options, transactions){
                             $('body').unmask();
                         }, 10);
                     }
-
                 },
                 {
                     text: 'JSON',
@@ -377,19 +377,20 @@ function loadTransactionsTable(options, transactions){
                         var pageOptions = optionsFromHash(hasher.getHash());
                         window.location.href = 'http://restapi.publicdata.guru/sec/ownership/'+view+'/cik'+parseInt(pageOptions[pageOptions.view]);
                     }
-                }
+                }*/
             ]
         });
     } else {
         dtTransactions.clear();
-        var label = view.substring(0,1).toUpperCase() + view.substring(1);
+        var label = counter[data.view].substring(0,1).toUpperCase() + counter[data.view].substring(1);
         dtTransactions.column(8).header().innerHTML = label;
         dtTransactions.column(9).header().innerHTML = label+ ' CIK';
-        dtTransactions.rows.add(transactions);
+        dtTransactions.rows.add(data.transactions);
         dtTransactions.draw();
     }
-
-    //dtTransactions.draw();
+    var apiResource = '//restapi.publicdata.guru/sec/ownership/' + data.view + '/cik'+parseInt(data.cik);
+    if($('#apiInfo').length == 0) $('#transactions_info').after('<div id="apiInfo"></div>');
+    $('#apiInfo').html('API resource: <a href="'+apiResource+'">'+apiResource+'</a>');
     console.log('instantiated datatable');
     console.timeLog('HashChange');
     //  c. create interactive tblTransactions using dataTables

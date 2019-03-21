@@ -83,6 +83,10 @@
     #entity {display: inline-block;}
     #mailingAddress, #businessAddress {display: inline-block;
         margin-left: 100px;}
+    #apiInfo{
+        margin-top: 0.755em;
+        float: right;
+    }
 </style>
 <body>
 <div id="header">
@@ -90,8 +94,6 @@
     <div id="businessAddress"></div>
     <div id="mailingAddress"></div>
 </div>
-
-
 <div id="filter">
     <select id="formFilter"><option value="all">all forms</option></select>
     <select id="codeFilter"><option value="all">all transaction codes</option></select>
@@ -119,5 +121,4 @@
 </div>
 <table id="transactions">
 </table>
-<span id="apiUrl"></span>
 </body>
