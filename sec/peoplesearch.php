@@ -1,7 +1,7 @@
 <html>
 <head lang="en">
     <meta charset="UTF-8">
-    <title>People Search Test Page</title>
+    <title>People Search Demo</title>
     <!--CSS files-->
     <!-- open source javascript libraries -->
     <script type="text/javascript" src="/sec/global/js/jquery/jquery-3.3.1.min.js"></script>
@@ -10,7 +10,7 @@
         $(document).ready(function() {
             $('#nomatches').hide();
             $('#searchCriteria').click(function(){searchForPeople($('#peoplesearch input[name="lastmiddlefirstname"]').val())});
-            //if($('#peoplesearch').val().trim().length !=0 ) $('#search').click();
+            if($('#peoplesearch input[name="lastmiddlefirstname"]').val().trim().length != 0) $('#searchCriteria').click();
         });
 
         function searchForPeople(searchCriteria){
@@ -87,7 +87,7 @@
 </ol>
 
 <form id="peoplesearch">
-    Last, Middle First: <input type="text" name="lastmiddlefirstname" value="Mickey" autofocus pattern="[A-Za-z]+(,?/s[A-Za-z]+)?(/s[A-Za-z]+)?"></input>
+    Last, Middle First: <input type="text" name="lastmiddlefirstname" value="<?PHP if(isset($_REQUEST['lastmiddlefirstname'])) echo $_REQUEST['lastmiddlefirstname'] ?>" autofocus pattern="[A-Za-z]+(,?/s[A-Za-z]+)?(/s[A-Za-z]+)?"></input>
     <button id="searchCriteria" type="button">search</button>
 </form>
 <p id="nomatches">No matches found.</p>
