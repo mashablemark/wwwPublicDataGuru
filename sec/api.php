@@ -121,7 +121,7 @@ EOD;
 
         $syncOutput = [];
         $syncRet = 0;
-        $syncCmd = "aws s3 sync $localBulkFolder s3://restapi.publicdata.guru/filingdata";
+        $syncCmd = "aws s3 sync $localBulkFolder s3://restapi.publicdata.guru/sec/filingdata";
         $syncOutput = exec($syncCmd, $syncOutput, $syncRet);
 
         $rmOutput = [];
@@ -143,7 +143,7 @@ EOD;
     case "fetchFile":
         set_time_limit(300);
         $archive = $_REQUEST['dir'];
-        $cmd = "aws s3 cp s3://restapi.publicdata.guru/filingdata/$archive.zip $localBulkFolder"; //fetch from S3 if exists
+        $cmd = "aws s3 cp s3://restapi.publicdata.guru/sec/filingdata/$archive.zip $localBulkFolder"; //fetch from S3 if exists
         shell_exec($cmd);
         if (!file_exists($localBulkFolder.$archive)) {
             mkdir($localBulkFolder.$archive, 0777, true);

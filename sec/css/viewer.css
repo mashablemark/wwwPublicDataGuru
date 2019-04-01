@@ -10,9 +10,12 @@ ix\:nonfraction.ixbrlViewer_customTaxonomy {
     border-bottom: 1px dotted #FF6600!important;
 }
 
-#popviz, #tabs-ts, #tabs-map, #tabs-scatter{
+#popviz, #tabs-ts, #tabs-map, #tabs-scatter, #tabs-frame{
     cursor: default !important;
     border: thin lightgrey solid;
+}
+div.framecontrols{
+    margin-bottom: 10px;
 }
 #saved, #save, #compare {
     float: right;
@@ -43,6 +46,9 @@ div.compare_companies_box {
 #chart-options {
     font-family: "Arial", "sans-serif";
     cursor: pointer;
+}
+#frame-table{
+    font-size: 12px;
 }
 fieldset.player_controls {
     margin-top: 15px;

@@ -193,6 +193,8 @@ function hashChangeHandler(newHash, oldHash){
                 displayHeader(data);
                 //4. load table ELSE refill data and redraw
                 loadTransactionsTable(newOptions, data);
+                //5. clear any lingering search filters
+                filterTable(newOptions);
                 console.timeEnd('HashChange');
                 $('body').unmask();
             });
@@ -375,7 +377,7 @@ function loadTransactionsTable(options, data){
                     text: 'JSON',
                     action: function(){
                         var pageOptions = optionsFromHash(hasher.getHash());
-                        window.location.href = 'http://restapi.publicdata.guru/sec/ownership/'+view+'/cik'+parseInt(pageOptions[pageOptions.view]);
+                        window.location.href = 'https://restapi.publicdata.guru/sec/ownership/'+view+'/cik'+parseInt(pageOptions[pageOptions.view]);
                     }
                 }*/
             ]
@@ -437,7 +439,7 @@ function callAPI(params, callback, fail) {
             }
         });
     } else {
-        var url = 'http://restapi.publicdata.guru/sec/ownership/' + params.process+ '/cik' + parseInt(params.cik);  //remove leading zeros
+        var url = 'https://restapi.publicdata.guru/sec/ownership/' + params.process+ '/cik' + parseInt(params.cik);  //remove leading zeros
         $.ajax({
             dataType: 'JSON',
             url: url,

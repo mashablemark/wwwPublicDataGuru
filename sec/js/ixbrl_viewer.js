@@ -330,6 +330,10 @@ var ixbrlViewer = {
             if(!ixbrlViewer.scatterChart)self.showScatterChart(oVars);
             $('#save, #compare').hide();
         });
+        $('a[href="#tabs-frame"]').click(function(){
+            if(!ixbrlViewer.dtFrame)self.showFrameTable(oVars);
+            //$('#save, #compare').hide();
+        });
         self.configureSaveControls(oVars);
         $('#save').click(function(){
             var $save = $('#save'),
@@ -343,7 +347,7 @@ var ixbrlViewer = {
 
     drawBarChart: function(oVars, callback){  //can be called to redraw
         var self = this,
-            url = 'http://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik;
+            url = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik;
         self.fetchTimeSeriesToCache(oVars,
             function(aryTimeSeries){
                 if(aryTimeSeries.length==0 || !self.secDataCache[url]){
@@ -353,7 +357,7 @@ var ixbrlViewer = {
                 //DISCUSS!! -> add clicked value if not in API (possible when disclosure just desseminated and APIs have not yet been updated)
                 if(aryTimeSeries.length>0 && aryTimeSeries[0].url == url){
                     var timeseries = aryTimeSeries[0],
-                        ts = self.secDataCache[url][oVars.tag]['cik'+oVars.cik]['units'][oVars.uom]['Q'+oVars.qtrs],
+                        ts = self.secDataCache[url][oVars.tag]['cik'+oVars.cik]['units'][oVars.uom][ixbrlViewer.durationPrefix+oVars.qtrs],
                         found = false,
                         pt,
                         coName;
@@ -458,7 +462,7 @@ var ixbrlViewer = {
                         pointFormatter: function(){ //change to "" in Highcharts v.4+
                             //todo:  fix this for multiseries charts
                             var sParam = aryTimeSeriesParams[this.series.index],
-                                ts = self.secDataCache[sParam.url][sParam.tag]['cik'+sParam.cik]['units'][sParam.uom]['Q'+sParam.qtrs];
+                                ts = self.secDataCache[sParam.url][sParam.tag]['cik'+sParam.cik]['units'][sParam.uom][ixbrlViewer.durationPrefix+sParam.qtrs];
                             var disclosures = [], disclosure, lastDisclosure = false;
                             for(var i=0;i<ts.length;i++){
                                 disclosure = self.parseTsPoint(ts[i]);
@@ -561,7 +565,7 @@ var ixbrlViewer = {
                 for(var i=0; i < aryTimeSeriesParams.length; i++){
                     var tsParams = aryTimeSeriesParams[i],
                         edgarTsData = self.secDataCache[tsParams.url],
-                        ts = edgarTsData[tsParams.tag]['cik'+tsParams.cik]['units'][tsParams.uom]['Q'+tsParams.qtrs],
+                        ts = edgarTsData[tsParams.tag]['cik'+tsParams.cik]['units'][tsParams.uom][ixbrlViewer.durationPrefix+tsParams.qtrs],
                         serie = {
                             type: 'column',
                             name: chartLabels.series[i],
@@ -613,7 +617,7 @@ var ixbrlViewer = {
             yFrame,
             oChart,
             xUrl,
-            yUrl = 'http://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/'+oVars.qtrs +'/'+oVars.ddate,
+            yUrl = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
             ply,
             $playerControls,
             $home,
@@ -628,7 +632,6 @@ var ixbrlViewer = {
         self.getRestfulData(
             yUrl,
             function(frame){   //parallel fetch of y Axis data
-                frame.qtrs = parseInt(frame.qtrs.substr(-1));  //todo: fix Python API writer to make Qn the format
                 yFrame = frame;
                 self.vars.sic = self.getSicFromFrame(yFrame, self.vars.cik);
                 $('#scatterchart').html('Y-Axis data successfully loaded for ' + oVars.tag);
@@ -655,7 +658,7 @@ var ixbrlViewer = {
                         if(oVars.xTag != xTagValue) {
                             oVars.xTag = xTagValue;
                             $xSelector.attr('disabled', 'disabled');
-                            xUrl = 'http://restapi.publicdata.guru/sec/frames/' + oVars.xTag + '/' + oVars.uom + '/' + oVars.qtrs + '/' + oVars.ddate;
+                            xUrl = 'https://restapi.publicdata.guru/sec/frames/' + oVars.xTag + '/' + oVars.uom + '/DQ' + oVars.qtrs + '/' + self.cdate(oVars.ddate, oVars.qtrs);
                             self.getRestfulData(xUrl,
                                 function (frame) {   //parallel fetch of x Axis data
                                     frame.qtrs = parseInt(frame.qtrs.substr(-1));  //todo: fix Python API writer to make Qn the format
@@ -730,7 +733,7 @@ var ixbrlViewer = {
         );
 
         
-        /*var url = 'http://restapi.publicdata.guru/sec/timeseries/'+oVars.tag+'/cik'+oVars.cik;
+        /*var url = 'https://restapi.publicdata.guru/sec/timeseries/'+oVars.tag+'/cik'+oVars.cik;
         self.getRestfulData(url, function(timeseries){  //this should be from memory
             //todo: make the play controls
         });*/
@@ -780,8 +783,8 @@ var ixbrlViewer = {
         function changeFrame(dateIndex){
             newDateIndex = dateIndex;
             newDate = ply.dateIndex[dateIndex];
-            yUrlNew = 'http://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/'+oVars.qtrs +'/'+newDate;
-            xUrlNew = 'http://restapi.publicdata.guru/sec/frames/'+oVars.xTag+'/'+oVars.uom+'/'+oVars.qtrs +'/'+newDate;
+            yUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(newDate, oVars.qtrs);
+            xUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.xTag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(newDate, oVars.qtrs);
             newFrameFetches = 0;
             fetchNew(xUrlNew);
             fetchNew(yUrlNew);
@@ -1077,9 +1080,80 @@ var ixbrlViewer = {
         }
     },
 
+    showFrameTable: function(oVars){
+        //get data for both frames via REST API (S3 bucket)
+        var self = this,
+            cols = self.frameDataCol,
+            ply = self.playerIndexes(oVars),
+            url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
+            $slider;
+        self.getRestfulData(
+            url,
+            function(frame){   //parallel fetch of y Axis data
+                //add sicname field, drop latLng field,
+               /* for(var i=0; i<frame.data.length;i++){
+                    frame.data[i].splice(frameDataCol.sic, 0, (self.sicCode[frame.data[i][frameDataCol.sic]]) ||'');
+                }*/
+                $slider = $('#tabs-frame div.framecontrols').html('').slider({
+                    min: 0,
+                    max: ply.dateIndex.length - 1,
+                    value: ply.homeIndex,
+                    stop: function () {
+                        changeFrame($slider.slider('value')); //force change on user slide
+                    }
+                });
+                self.dtFrame = $('#frame-table').DataTable( {
+                    data: frame.data,
+                    dom: 'Bfrtip',
+                    columns: [ //["AAR CORP", 1750, 3720, "0001104659-18-073842", "US-IL", Array(2), "2018-05-31", 31100000, 1]
+                        {   title: "Entity Name", className: "dt-body-left"  },
+                        {   title: "CIK"},
+                        {   title: "SIC Classification",
+                            render: function(data, type, row, meta){
+                                return data? data+' - '+ixbrlViewer.sicCode[data]:'';
+                            },
+                            className: "dt-body-left" },
+                        {   title: "Accession No.",
+                            render: function (data, type, row, meta) {
+                                return '<a href="https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
+                            }
+                        },
+                        {   title: "Location", className: "dt-body-center" },
+                        {   title: "latLng", visible: false},
+                        {   title: "Date", visible: false, render: function (data, type, row, meta) {return data.substr(0,7);}},
+                        {   title: frame.tlabel, className: "dt-body-right", render: ixbrlViewer.numberFormatter},  //value
+                        {   title: "versions", visible: false}
+                    ],
+                    scrollY: "500px",
+                    scrollX: false,
+                    scrollCollapse: true,
+                    scroller: {rowHeight: 'auto'},
+                    deferRender: true,
+                    oLanguage: {"sSearch": "Text search"},
+                    order: [[6, 'desc']],
+                    buttons: [
+                        'copy',
+                        'excel',
+                        'csv'
+                    ]
+                });
+            },
+            fetch_error
+        );
+
+
+        /*var url = 'https://restapi.publicdata.guru/sec/timeseries/'+oVars.tag+'/cik'+oVars.cik;
+        self.getRestfulData(url, function(timeseries){  //this should be from memory
+            //todo: make the play controls
+        });*/
+
+        function fetch_error(url){
+            $('#scatterchart').html('Unable to load snapshot from API for ' + url);
+        }
+    },
     showMap: function(oVars){
         //get frame data via REST API (S3 bucket)
-        var url = 'http://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/'+oVars.qtrs+'/'+oVars.ddate;
+        var url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs+'/'+ this.cdate(oVars.ddate, oVars.qtrs);
         var self = this;
         self.getRestfulData(url,
             function(frame){
@@ -1151,7 +1225,7 @@ var ixbrlViewer = {
             };
             var min = null, max = null, i, inFilter;
             for(i=0; i<frame.data.length; i++){ //find min and max values for scaling
-                if(frame.data[i][frameDataCol.country]=='US' && !isNaN(frame.data[i][frameDataCol.value])){
+                if(frame.data[i][frameDataCol.countryRegion].substr(0,2)=='US' && !isNaN(frame.data[i][frameDataCol.value])){
                     if(!isNaN(min)){
                         if(min>frame.data[i][frameDataCol.value]) min=frame.data[i][frameDataCol.value];
                         if(max<frame.data[i][frameDataCol.value]) max=frame.data[i][frameDataCol.value];
@@ -1232,11 +1306,11 @@ var ixbrlViewer = {
                 '</select>';
     },
     playerIndexes: function(params){
-        var cached = this.secDataCache['http://restapi.publicdata.guru/sec/timeseries/' + params.tag + '/cik' + params.cik];
+        var cached = this.secDataCache['https://restapi.publicdata.guru/sec/timeseries/' + params.tag + '/cik' + params.cik];
         if(cached){
             var tsObject = cached[params.tag]['cik'+params.cik];
-            if(tsObject['units'][params.uom] && tsObject['units'][params.uom]['Q'+params.qtrs]){
-                var data = tsObject['units'][params.uom]['Q'+params.qtrs],
+            if(tsObject['units'][params.uom] && tsObject['units'][params.uom][ixbrlViewer.durationPrefix+params.qtrs]){
+                var data = tsObject['units'][params.uom][ixbrlViewer.durationPrefix+params.qtrs],
                 pt, lastDate = false, playerIndex = [], homeIndex=0;
                 for(var i=0; i<data.length; i++){
                 pt = this.parseTsPoint(data[i]);
@@ -1252,7 +1326,7 @@ var ixbrlViewer = {
     },
     makeXAxisSelector: function(yTag, uom, qtrs){
         var htmlOptions = '',
-            branch = this.standardTagTree['Q'+qtrs][uom];
+            branch = this.standardTagTree[ixbrlViewer.durationPrefix+qtrs][uom];
         if(branch){
             branch.sort();
             for(var i=0;i<branch.length;i++){
@@ -1269,7 +1343,7 @@ var ixbrlViewer = {
     fetchTimeSeriesToCache: function(oVars, callBack){
         //1. get the full list of urls to fetch from saved series and companies
         var self = this,
-            clickedUrl = 'http://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik,
+            clickedUrl = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik,
             savedTimeSeries = self.getSavedTimeSeries(),
             savedCompanies = self.getComparedCompanies(),
             fldSC = self.localStorageFields.comparedCompanies,
@@ -1286,7 +1360,7 @@ var ixbrlViewer = {
         //saved companies that are selected
         for(i=0; i<savedTimeSeries.length; i++){
             if(savedTimeSeries[i][0]){
-                url = 'http://restapi.publicdata.guru/sec/timeseries/' + savedTimeSeries[i][fldTS.tag]
+                url = 'https://restapi.publicdata.guru/sec/timeseries/' + savedTimeSeries[i][fldTS.tag]
                     + '/cik' + savedTimeSeries[i][fldTS.cik];
                 if(url != clickedUrl){
                     requests.push({
@@ -1302,7 +1376,7 @@ var ixbrlViewer = {
         //all saved companies
         for(i=0; i<savedCompanies.length; i++){
             if(savedCompanies[i][0]){
-                url = 'http://restapi.publicdata.guru/sec/timeseries/' + oVars.tag
+                url = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag
                     + '/cik' + savedCompanies[i][fldSC.cik];
                 if(url != clickedUrl){
                     requests.push({
@@ -1324,7 +1398,7 @@ var ixbrlViewer = {
                     responseCount++;
                     //make sure the particular (uom, qtrs) timeseries is in the (cik, tag) response
                     if (oTS[requests[i].tag]['cik' + requests[i].cik]['units'][requests[i].uom]
-                        && oTS[requests[i].tag]['cik' + requests[i].cik]['units'][requests[i].uom]['Q'+requests[i].qtrs]) {
+                        && oTS[requests[i].tag]['cik' + requests[i].cik]['units'][requests[i].uom][ixbrlViewer.durationPrefix + requests[i].qtrs]) {
                         responses.push(requests[i]);
                     }
                     if (responseCount == requests.length) callBack(responses);
@@ -1341,14 +1415,13 @@ var ixbrlViewer = {
     },
 
     getRestfulData: function(url, success, fail){
-
         if(ixbrlViewer.secDataCache[url]){
             console.log('data found in cache for ' + url);
             if(success) success(ixbrlViewer.secDataCache[url]);
         } else {
             var dbUrl = false;
             if(window.location.href.indexOf('maker.publicdata')!=-1){ //use database for maker.publicdata.guru
-                var uParts = url.split('/');  //e.g. 'http://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/'+oVars.qtrs +'/'+oVars.ddate,
+                var uParts = url.split('/');  //e.g. 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
                 switch(uParts[4]){
                     case 'frames':
                         dbUrl = 'http://maker.publicdata.guru/sec/api.php?process='+uParts[4]+'&t='+uParts[5]+'&u='+encodeURIComponent(uParts[6]) +'&q='+uParts[7]+'&d='+uParts[8];
@@ -1444,6 +1517,11 @@ var ixbrlViewer = {
         return (uom=='USD'?'$':'') + num.toLocaleString() + '&nbsp;' + uom;
     },
 
+    cdate: function(ddate, duration){  //frames are
+        var closestEndMonth = new Date(ddate);
+        return closestEndMonth.getUTCFullYear() + (duration==4?'':'C' + (Math.floor(closestEndMonth.getUTCMonth()/3)+1));
+    },
+
 //global vars
     htmlTemplates: {
         popWindow:
@@ -1453,10 +1531,12 @@ var ixbrlViewer = {
             '  <li><a href="#tabs-ts">time series</a></li>' +
             '  <li><a href="#tabs-map">US map</a></li>' +
             '  <li><a href="#tabs-scatter">scatter plot</a></li>' +
+            '  <li><a href="#tabs-frame">all reporting companies</a></li>' +
             '</ul>' +
             '<div id="tabs-ts"><div id="tschart">loading... please wait</div><div id="tscontrols"></div></div>' +
             '<div id="tabs-map"><div id="maptitle"></div><div id="mapchart">loading... please wait</div><div id="mapcontrols"></div><div id="mapdatalinks"></div></div>' +
             '<div id="tabs-scatter"><div id="scatterchart">loading... please wait</div><div id="scattercontrols"></div></div>' +
+            '<div id="tabs-frame"><div class="framecontrols">loading... please wait</div><table id="frame-table"></table></div>' +
             '</div>',
         popOptions:
             '<div id="chart-options">' +
@@ -1508,14 +1588,15 @@ var ixbrlViewer = {
         "4": "annual"
     },
     frameDataCol: {
-        adsh: 0,
+        name: 0,
         cik: 1,
         sic: 2,
-        name: 3,
-        country: 4,
+        adsh: 3,
+        countryRegion: 4,
         latLng: 5,
-        value: 6,
-        versions: 7
+        ddate: 6,
+        value: 7,
+        versions: 8
     },
     localStorageFields: {
         timeSeries: {
@@ -1534,6 +1615,7 @@ var ixbrlViewer = {
         }
     },
     rgxAllDash: /-/g,
+    durationPrefix: 'DQ',  //after API update this will be 'DQ'
     standardTaxonomies: ['us-gaap','ifrs','dei','country','invest','currency','srt','exch','stpr','naics','rr','sic'],
     standardTagTree: {}, //filled on doc ready to provide denominator choices in scatter plot
     contextTree: {}, //filled on doc ready to provide period (duration) lookup
@@ -1549,6 +1631,11 @@ $(document).ready(function() {
         oQSParams[tuplet[0]] = tuplet[1];
     }
 
+    //fix images source links
+    $('img').each(function(){
+        $(this).attr('src', 'https://www.sec.gov/Archives/edgar/data/'+ixbrlViewer.cik+'/'+ixbrlViewer.adsh+'/' + $(this).attr('src'));
+    });
+
     //calculate the fiscal to calendar relationship and set document reporting period, fy, adsh and cik
     var $reportingPeriod = $('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]'),
         contextref = $reportingPeriod.attr('contextref'),
@@ -1563,10 +1650,7 @@ $(document).ready(function() {
     ixbrlViewer.cik = docPart[0];
     ixbrlViewer.adsh = docPart[1];
 
-    //fix images source links
-    $('img').each(function(){
-        $(this).attr('src', 'https://www.sec.gov/Archives/edgar/data/'+ixbrlViewer.cik+'/'+ixbrlViewer.adsh+'/' + $(this).attr('src'));
-    });
+
 
     //get iXBRL context tags make lookup tree for contextRef date values and dimensions
     var $context, start, end, ddate, $this, $start, $member;
@@ -1613,10 +1697,10 @@ $(document).ready(function() {
         if(xbrl.isStandard){
             if(!xbrl.dim && (xbrl.qtrs ==0 || xbrl.qtrs ==1 || xbrl.qtrs ==4)) {
                 $standardTag = $(this).addClass("ixbrlViewer_standardFrame");  //only give standard facts an underline and hand
-                if (!ixbrlViewer.standardTagTree['Q' + xbrl.qtrs]) ixbrlViewer.standardTagTree['Q' + xbrl.qtrs] = {};
-                if (!ixbrlViewer.standardTagTree['Q' + xbrl.qtrs][xbrl.uom]) ixbrlViewer.standardTagTree['Q' + xbrl.qtrs][xbrl.uom] = [];
-                if (ixbrlViewer.standardTagTree['Q' + xbrl.qtrs][xbrl.uom].indexOf(xbrl.tag) === -1) {
-                    ixbrlViewer.standardTagTree['Q' + xbrl.qtrs][xbrl.uom].push(xbrl.tag);
+                if (!ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs]) ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs] = {};
+                if (!ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom]) ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom] = [];
+                if (ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom].indexOf(xbrl.tag) === -1) {
+                    ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom].push(xbrl.tag);
                 }
                 //flag to navigate to tag if info was supplied on the querystring
                 if(oQSParams.t && oQSParams.q && oQSParams.d && oQSParams.u
@@ -1694,6 +1778,7 @@ $(document).ready(function() {
                 function(){ //callback after barChart is loaded
                     if(hash.x) $('a[href="#tabs-scatter"]').click(); //trigger scatter chart load
                     if(hash.c=='m') $('a[href="#tabs-map"]').click(); //trigger map load
+                    if(hash.c=='f') $('a[href="#tabs-frame"]').click(); //trigger map load
                 });
         }
     }
