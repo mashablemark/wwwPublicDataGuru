@@ -1078,12 +1078,17 @@ var ixbrlViewer = {
     },
 
     showFrameTable: function(oVars){
-        //get data for both frames via REST API (S3 bucket)
         var self = this,
             cols = self.frameDataCol,
             ply = self.playerIndexes(oVars),
             url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
             $slider;
+        if(this.dtFrame){
+            //destroy existing table
+        } else {
+            initializeFrameControls(oVars);
+        }
+        //get data for both frames via REST API (S3 bucket)
         self.getRestfulData(
             url,
             function(frame){   //parallel fetch of y Axis data
@@ -1091,14 +1096,7 @@ var ixbrlViewer = {
                /* for(var i=0; i<frame.data.length;i++){
                     frame.data[i].splice(frameDataCol.sic, 0, (self.sicCode[frame.data[i][frameDataCol.sic]]) ||'');
                 }*/
-                $slider = $('#tabs-frame div.framecontrols').html('').slider({
-                    min: 0,
-                    max: ply.dateIndex.length - 1,
-                    value: ply.homeIndex,
-                    stop: function () {
-                        changeFrame($slider.slider('value')); //force change on user slide
-                    }
-                });
+
                 self.dtFrame = $('#frame-table').DataTable( {
                     data: frame.data,
                     dom: 'Bfrtip',
@@ -1147,7 +1145,39 @@ var ixbrlViewer = {
         function fetch_error(url){
             $('#scatterchart').html('Unable to load snapshot from API for ' + url);
         }
+        function initializeFrameControls(options){
+            $slider = $('#tabs-frame div.framecontrols').html('<div class="fameSlider"></div><button class="addCdate">Add Date</button></button><select id="frameTagSelector"></select><div class="frameOptionTags"></div>')
+                .find('.fameSlider').slider({
+                    min: 0,
+                    max: ply.dateIndex.length - 1,
+                    value: ply.homeIndex,
+                    stop: function () {
+                        changeFrame($slider.slider('value')); //force change on user slide
+                    }
+                });
+            var tagOptions = '<option value="null"></option>';
+            var tagCombos = [];
+            for(var duration in self.standardTagTree){
+                for(var units in self.standardTagTree[duration]){
+                    for(var i in self.standardTagTree[duration][units]){
+                        tagCombos.push(self.standardTagTree[duration][units][i] + ':' + units + ':' + duration);
+                    }
+                }
+            }
+            tagCombos.sort();
+            for(i=0;i<tagCombos.length;i++){
+                var part = tagCombos[i].split(':');
+                tagOptions += '<option value="'+tagCombos[i]+'">'+part[0]+ ' ('+ self.durationNames[part[2].substr(2,1)] + ' in ' + part[1] + ')</option>';
+            }
+            $("#frameTagSelector").html(tagOptions).combobox({
+                select: function(){
+                    addTag($(this).val().split(':'));
+                    makeFrameTable();
+                }
+            });
+        }
     },
+
     showMap: function(oVars){
         //get frame data via REST API (S3 bucket)
         var url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs+'/'+ this.cdate(oVars.ddate, oVars.qtrs);
@@ -2228,3 +2258,134 @@ ixbrlViewer.sicCode = {
     9995: "Non-Operating Establishments"
 };
 
+(function($) {
+    $.widget( "custom.combobox", {
+        _create: function() {
+            this.wrapper = $( "<span>" )
+                .addClass( "custom-combobox" )
+                .insertAfter( this.element );
+
+            this.element.hide();
+            this._createAutocomplete();
+            this._createShowAllButton();
+        },
+
+        _createAutocomplete: function() {
+            var selected = this.element.children( ":selected" ),
+                value = selected.val() ? selected.text() : "";
+
+            this.input = $( "<input>" )
+                .appendTo( this.wrapper )
+                .val( value )
+                .attr( "title", "" )
+                .addClass( "custom-combobox-input ui-widget ui-widget-content ui-state-default ui-corner-left" )
+                .autocomplete({
+                    delay: 0,
+                    minLength: 0,
+                    source: $.proxy( this, "_source" )
+                })
+                .tooltip({
+                    classes: {
+                        "ui-tooltip": "ui-state-highlight"
+                    }
+                });
+
+            this._on( this.input, {
+                autocompleteselect: function( event, ui ) {
+                    ui.item.option.selected = true;
+                    this._trigger( "select", event, {
+                        item: ui.item.option
+                    });
+                },
+
+                autocompletechange: "_removeIfInvalid"
+            });
+        },
+
+        _createShowAllButton: function() {
+            var input = this.input,
+                wasOpen = false;
+
+            $( "<a>" )
+                .attr( "tabIndex", -1 )
+                .attr( "title", "Show All Items" )
+                .tooltip()
+                .appendTo( this.wrapper )
+                .button({
+                    icons: {
+                        primary: "ui-icon-triangle-1-s"
+                    },
+                    text: false
+                })
+                .removeClass( "ui-corner-all" )
+                .addClass( "custom-combobox-toggle ui-corner-right" )
+                .on( "mousedown", function() {
+                    wasOpen = input.autocomplete( "widget" ).is( ":visible" );
+                })
+                .on( "click", function() {
+                    input.trigger( "focus" );
+
+                    // Close if already visible
+                    if ( wasOpen ) {
+                        return;
+                    }
+
+                    // Pass empty string as value to search for, displaying all results
+                    input.autocomplete( "search", "" );
+                });
+        },
+
+        _source: function( request, response ) {
+            var matcher = new RegExp( $.ui.autocomplete.escapeRegex(request.term), "i" );
+            response( this.element.children( "option" ).map(function() {
+                var text = $( this ).text();
+                if ( this.value && ( !request.term || matcher.test(text) ) )
+                    return {
+                        label: text,
+                        value: text,
+                        option: this
+                    };
+            }) );
+        },
+
+        _removeIfInvalid: function( event, ui ) {
+
+            // Selected an item, nothing to do
+            if ( ui.item ) {
+                return;
+            }
+
+            // Search for a match (case-insensitive)
+            var value = this.input.val(),
+                valueLowerCase = value.toLowerCase(),
+                valid = false;
+            this.element.children( "option" ).each(function() {
+                if ( $( this ).text().toLowerCase() === valueLowerCase ) {
+                    this.selected = valid = true;
+                    return false;
+                }
+            });
+
+            // Found a match, nothing to do
+            if ( valid ) {
+                return;
+            }
+
+            // Remove invalid value
+            this.input
+                .val( "" )
+                .attr( "title", value + " didn't match any item" )
+                .tooltip( "open" );
+            this.element.val( "" );
+            this._delay(function() {
+                this.input.tooltip( "close" ).attr( "title", "" );
+            }, 2500 );
+            this.input.autocomplete( "instance" ).term = "";
+        },
+
+        _destroy: function() {
+            this.wrapper.remove();
+            this.element.show();
+        }
+    });
+} )(jQuery);
