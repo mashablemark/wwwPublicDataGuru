@@ -6,6 +6,7 @@
  * Time: 12:10 PM
  * To change this template use File | Settings | File Templates.
  */
+include_once "secure.php";
 $laptop = false;
 
 $db = getConnection(); //establishes a db connection as a global variable on include
@@ -96,12 +97,12 @@ function safeStringSQL($val, $nullable = true){  //needed with mysql_fetch_array
     }
 }
 function getConnection(){
-    global $db, $laptop;
+    global $db, $laptop, $secdata_host, $secdata_uid, $secdata_password;
     if($laptop){
         $db = new mysqli("localhost","root","");
     }else{
         if(isset($_REQUEST["db"]) && $_REQUEST["db"]=="dev"){  //allow testing of crawlers in alternate DB
-            $db = new mysqli("localhost","secdata","Mx)vfHt{_k^p");
+            $db = new mysqli($secdata_host, $secdata_uid, $secdata_password);
             if (!$db) die("status: 'db connection error'");
             $selectSuccess = $db->select_db("secdata");
             if(!$selectSuccess) {
@@ -109,7 +110,7 @@ function getConnection(){
                 echo("DEV database selection failed");
             }
         } else {
-            $db = new mysqli("localhost","secdata","Mx)vfHt{_k^p");
+            $db = new mysqli($secdata_host, $secdata_uid ,$secdata_password);
             if (!$db) die("status: 'db connection error'");
             $selectSuccess = $db->select_db("secdata");
             if(!$selectSuccess) {

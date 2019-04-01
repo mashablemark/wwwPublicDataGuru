@@ -4,7 +4,9 @@
 //node --stack-size=2048 --max_old_space_size=4096 345BulkCrawler.js
 //on m5XL:   node --stack-size=4096 --max_old_space_size=8096 345BulkCrawler.js
 
-
+//todo: unarchive one while processing
+//todo: unnested functions to avoid accidental closure leaks
+//todo: process oldest download first (FIFO)
 /*
 Problem: sec.gov limits request to 10 per second.  With 140,000 3/4/5 filing per quarter, a decade would take 6.5 days
 Daily bulk tar files (about 1GB each):
@@ -35,6 +37,7 @@ var cheerio = require('cheerio');
 var mysql = require('mysql');
 var fs = require('fs');
 var exec = require('child_process').exec;
+var secure = require('./secure');
 
 var con,  //global db connection
     secDomain = 'https://www.sec.gov';
@@ -65,10 +68,11 @@ var processControl = {
     maxQueuedDownloads: 4,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
-    start: new Date("2007-01-01"),  //restart date
+    //start: new Date("2018-06-06"),  //restart date
     //start:  new Date("2008-01-01"), //earliest ingested filedt
     end: false, // new Date("2008-01-29"), //if false or not set, scrape continues up to today
-    days: ['2017-02-13'], //ingest specific days (also used as retry queue) e.g. ['2013-08-12', '2013-08-14', '2013-11-13', '2013-11-15', '2014-03-04', '2014-08-04', '2014-11-14', '2015-03-31','2015-04-30', '2016-02-18', '2016-02-26', '2016-02-29', '2017-02-24', '2017-02-28', '2017-04-27','2017-05-10', '2017-08-03', '2017-08-04', '2017-08-08', '2017-10-16', '2017-10-23', '2017-10-30', '2017-11-03','2017-11-06', '2017-12-20', '2018-04-26', '2018-04-27', '2018-04-30', '2018-05-01', '2018-11-14']],
+    days: [
+    ], //ingest specific days (also used as retry queue) e.g. ['2013-08-12', '2013-08-14', '2013-11-13', '2013-11-15', '2014-03-04', '2014-08-04', '2014-11-14', '2015-03-31','2015-04-30', '2016-02-18', '2016-02-26', '2016-02-29', '2017-02-24', '2017-02-28', '2017-04-27','2017-05-10', '2017-08-03', '2017-08-04', '2017-08-08', '2017-10-16', '2017-10-23', '2017-10-30', '2017-11-03','2017-11-06', '2017-12-20', '2018-04-26', '2018-04-27', '2018-04-30', '2018-05-01', '2018-11-14']],
     processes: {},
     activeDownloads: {},
     directory: 'dayfiles/'
@@ -78,10 +82,11 @@ startCrawl(processControl);
 
 function startCrawl(processControl){
     exec('rm -r '+processControl.directory +'*').on('exit', function(code) { //clear the any remains of last crawl
+        var db_info = secure.secdata();
         con = mysql.createConnection({ //global db connection
-            host: "localhost",
-            user: "secdata",
-            password: "Mx)vfHt{_k^p",
+            host: db_info.host,
+            user: db_info.uid,
+            password: db_info.password,
             database: 'secdata'
         });
 
@@ -89,8 +94,13 @@ function startCrawl(processControl){
             if (err) throw err;
             startDownloadManager(processControl, function(){
                 console.log(processControl);
-                logEvent('process finished',JSON.stringify(processControl), true);
-                //process.exit();
+                logEvent('processing finished',JSON.stringify(processControl), true);
+                console.log('calling makeOwnershipAPI()');
+                runQuery('call makeOwnershipAPI();', function(){
+                    logEvent('makeOwnershipAPI() finished',JSON.stringify(processControl), true);
+                    //todo:  update the S3 files where ownership_api_reporter/issuer.lastfiledt >= processcontrol.startdate = convert from python to Node?
+                    process.exit();
+                });
             });
         });
     });
@@ -110,8 +120,18 @@ function startDownloadManager(processControl, startDownloadManagerCallback) {
     processControl.largeUnreadFileCount = 0;
     processControl.totalGBytesDownloaded = 0
     var ingestingFlag = false;  //important state flag must be set at start of ingest and cleared when finished
-    var downloadOverSeer = setInterval(overseeDownloads, 500);  //master event loop kicks off, queues, and monitors downloads and manages uncompressed and file deletions
     var tick = 0;
+    var downloadOverSeer;
+    if(!processControl.start){
+        runQuery('SELECT max(filedt) as lastfiledt FROM ownership_submission', function(result, fields){
+            var lastfiledt = result[0].lastfiledt;
+            processControl.start = new Date(lastfiledt.substr(0,4)+'-'+lastfiledt.substr(4,2)+'-'+lastfiledt.substr(6,2));
+            processControl.start.setUTCDate(processControl.start.getUTCDate()+1);
+            downloadOverSeer = setInterval(overseeDownloads, 500);  //master event loop kicks off, queues, and monitors downloads and manages uncompressed and file deletions
+        })
+    } else {
+        downloadOverSeer = setInterval(overseeDownloads, 500);  //master event loop kicks off, queues, and monitors downloads and manages uncompressed and file deletions
+    }
     function overseeDownloads() {
         var downloadDate, d;
         //1. check for available process slots and (and restart dead activeDownloads)
@@ -190,12 +210,12 @@ function startDownloadManager(processControl, startDownloadManagerCallback) {
             if(Array.isArray(processControl.days) && processControl.days.length){
                 return new Date(processControl.days.pop());
             } else {
-                if (!processControl.current) {
+                if(!processControl.current && processControl.start) {
                     processControl.current = new Date(processControl.start);
                     return processControl.current;
                 } else {
                     var nextWeekday = new Date(processControl.current);
-                    nextWeekday.setDate(nextWeekday.getUTCDate() + (nextWeekday.getUTCDay() == 5 ? 3 : 1)); //skip weekends (Sunday = 0)
+                    nextWeekday.setUTCDate(nextWeekday.getUTCDate() + (nextWeekday.getUTCDay() == 5 ? 3 : 1)); //skip weekends (Sunday = 0)
                 }
                 if((processControl.end || Date.now()) > nextWeekday){
                     processControl.current = nextWeekday;
@@ -340,7 +360,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                     processControl.totalFilesRead++;
                     var fileBody = buf.slice(0, bytes).toString(),
                         form = headerInfo(fileBody, '<FORM-TYPE>');
-                    fs.closeSync(fd); //called asynchronously!!
+                    fs.closeSync(fd);
                     processControl.totalFilesRead++;
                     if (ownershipForms[form]) {
                         return {
@@ -364,7 +384,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
     });
 }
 
-function process345Submission(processControl, filing){
+function process345Submission(processControl, filing, remainsChecking){
     var ts = Date.now(),
         adsh = filing.fileName.split('.')[0];  //used as a unique code to establish and check ownership
     processControl.processes["p"+filing.processNum] = {
@@ -438,8 +458,10 @@ function process345Submission(processControl, filing){
             officerTitle: readAndRemoveTag($owner, 'reportingOwner officerTitle') //>Exec. VP, Administration, CFO</officerTitle>
         });
         //check to see if data or values were not read (and subsequently removed)
-        var remains = $owner.text().trim();
-        if(remains.length>0) logEvent('reporter remains', submission.fileName + ': '+ $owner.html())
+        if(remainsChecking){
+            var remains = $owner.text().trim();
+            if(remains.length>0) logEvent('reporter remains', submission.fileName + ': '+ $owner.html())
+        }
     });
 
     $xml('footnotes footnote').each(function (i, elem) {
@@ -492,10 +514,12 @@ function process345Submission(processControl, filing){
             transactions.push(trans);
 
             //check to see if data or values were not read (and subsequently removed)
-            $trans.find('footnoteId').remove();
-            var remains = $trans.text().trim();
-            if(remains.length>0) logEvent(transactionRecordType.path + ' remains', submission.fileName + ': '+ $trans.html())
-            delete $trans;
+            if(remainsChecking) {
+                $trans.find('footnoteId').remove();
+                var remains = $trans.text().trim();
+                if(remains.length>0) logEvent(transactionRecordType.path + ' remains', submission.fileName + ': '+ $trans.html())
+                delete $trans;
+            }
         });
 
     });
@@ -508,26 +532,24 @@ function process345Submission(processControl, filing){
 
     save345Submission(submission);
     process.nextTick(finished345ParsingSubmission);  //allow stack to clear
-
-    function readAndRemoveTag($xml, tagPath){
-        var $tag = $xml.find(tagPath);
-        var value = $tag.text().replace(rgxTrim, '');
-        $tag.remove();
-        return value;
-    }
-    function finished345ParsingSubmission() {
-        processControl.total345SubmissionsProcessed++
-        if (processControl.processes["p" + filing.processNum] && processControl.processes["p" + filing.processNum].started == ts) {
-            //that's me! terminiate nicely and let go of thread to allow trash collection, MySQL, downloads...  Timer will kick off next process
-            processControl.processes.ownshipsSubmissionsProcessed++
-            processControl.processes["p" + filing.processNum].status = 'finished';
-        } else {
-            //overseer killed me for taking too long
-            logEvent('killed 345 process finished', ((Date.now() - ts) / 1000) + 's processing ' + fileName);
-        }
+}
+function readAndRemoveTag($xml, tagPath, remainsChecking){
+    var $tag = $xml.find(tagPath);
+    var value = $tag.text().replace(rgxTrim, '');
+    if(remainsChecking) $tag.remove();
+    return value;
+}
+function finished345ParsingSubmission() {
+    processControl.total345SubmissionsProcessed++
+    if (processControl.processes["p" + filing.processNum] && processControl.processes["p" + filing.processNum].started == ts) {
+        //that's me! terminiate nicely and let go of thread to allow trash collection, MySQL, downloads...  Timer will kick off next process
+        processControl.processes.ownshipsSubmissionsProcessed++
+        processControl.processes["p" + filing.processNum].status = 'finished';
+    } else {
+        //overseer killed me for taking too long
+        logEvent('killed 345 process finished', ((Date.now() - ts) / 1000) + 's processing ' + fileName);
     }
 }
-
 function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
     var sql = 'INSERT INTO ownership_submission (adsh, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '

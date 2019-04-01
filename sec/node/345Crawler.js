@@ -17,6 +17,7 @@ var request = require('request');
 var util = require('util');
 var cheerio = require('cheerio');
 var mysql = require('mysql');
+var secure = require('./secure');
 
 var con,  //global db connection
     secDomain = 'https://www.sec.gov';
@@ -53,10 +54,11 @@ var processControl = {
 startCrawl(processControl);
 
 function startCrawl(processControl){
+    var db_info = secure.secdata();
     con = mysql.createConnection({ //global db connection
-        host: "localhost",
-        user: "secdata",
-        password: "Mx)vfHt{_k^p",
+        host: db_info.host,
+        user: db_info.uid,
+        password: db_info.password,
         database: 'secdata'
     });
 
