@@ -661,7 +661,6 @@ var ixbrlViewer = {
                             xUrl = 'https://restapi.publicdata.guru/sec/frames/' + oVars.xTag + '/' + oVars.uom + '/DQ' + oVars.qtrs + '/' + self.cdate(oVars.ddate, oVars.qtrs);
                             self.getRestfulData(xUrl,
                                 function (frame) {   //parallel fetch of x Axis data
-                                    frame.qtrs = parseInt(frame.qtrs.substr(-1));  //todo: fix Python API writer to make Qn the format
                                     xFrame = frame;
                                     self.setHashSilently('y=' + oVars.tag + '&x=' + oVars.xTag + '&u=' + oVars.uom + '&q='
                                         + oVars.qtrs + '&d=' + oVars.ddate + '&c=s');
@@ -783,8 +782,8 @@ var ixbrlViewer = {
         function changeFrame(dateIndex){
             newDateIndex = dateIndex;
             newDate = ply.dateIndex[dateIndex];
-            yUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(newDate, oVars.qtrs);
-            xUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.xTag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(newDate, oVars.qtrs);
+            yUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.cdate(newDate, oVars.qtrs);
+            xUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.xTag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.cdate(newDate, oVars.qtrs);
             newFrameFetches = 0;
             fetchNew(xUrlNew);
             fetchNew(yUrlNew);
@@ -802,10 +801,8 @@ var ixbrlViewer = {
         }
         function makeFrame(){
             var xFrame = self.secDataCache[xUrlNew],
-                yFrame = self.secDataCache[yUrlNew];
-            xFrame.qtrs = parseInt(frame.qtrs.substr(-1));  //todo: fix Python API writer to make Qn the format
-            yFrame.qtrs = parseInt(frame.qtrs.substr(-1));  //todo: fix Python API writer to make Qn the format
-            var updatedSeries = makeScatterSeries(xFrame, yFrame, oVars),
+                yFrame = self.secDataCache[yUrlNew],
+                updatedSeries = makeScatterSeries(xFrame, yFrame, oVars),
                 hcSeries = ixbrlViewer.scatterChart.series,
                 fastAlgo = hcSeries[0].data.length>10000, //note: the updates are much faster in HC 6.x!
                 pt, ptTree = {}, s, i;
@@ -1121,7 +1118,7 @@ var ixbrlViewer = {
                         {   title: "Location", className: "dt-body-center" },
                         {   title: "latLng", visible: false},
                         {   title: "Date", visible: false, render: function (data, type, row, meta) {return data.substr(0,7);}},
-                        {   title: frame.tlabel, className: "dt-body-right", render: ixbrlViewer.numberFormatter},  //value
+                        {   title: frame.tlabel, className: "dt-body-right", render: function(data){ return ixbrlViewer.numberFormatter(data, frame.uom)}},
                         {   title: "versions", visible: false}
                     ],
                     scrollY: "500px",
@@ -1529,8 +1526,8 @@ var ixbrlViewer = {
             '<button id="compare">compare</button><button id="save">save</button><span id="saved"></span>' +
             '<ul>' +
             '  <li><a href="#tabs-ts">time series</a></li>' +
-            '  <li><a href="#tabs-map">US map</a></li>' +
-            '  <li><a href="#tabs-scatter">scatter plot</a></li>' +
+            '  <li><a href="#tabs-map"><span class="strikethrough">US map</span></a></li>' +
+            '  <li><a href="#tabs-scatter"><span class="strikethrough">scatter plot</span></a></li>' +
             '  <li><a href="#tabs-frame">all reporting companies</a></li>' +
             '</ul>' +
             '<div id="tabs-ts"><div id="tschart">loading... please wait</div><div id="tscontrols"></div></div>' +

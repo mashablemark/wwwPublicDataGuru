@@ -14,15 +14,20 @@ ix\:nonfraction.ixbrlViewer_customTaxonomy {
     cursor: default !important;
     border: thin lightgrey solid;
 }
+#tabs-ts, #tabs-map, #tabs-scatter, #tabs-frame{
+    min-height: 500px;
+}
 div.framecontrols{
     margin-bottom: 10px;
 }
 #saved, #save, #compare {
     float: right;
     padding: 4px;
-    margin: 5px;
+    margin: 4px;
 }
-
+.strikethrough {
+    text-decoration: line-through;
+}
 div.clear_localStorage {
     margin: 0;
     float: right;
