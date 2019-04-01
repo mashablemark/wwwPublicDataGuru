@@ -391,6 +391,7 @@ function loadTransactionsTable(options, data){
     var apiResource = '//restapi.publicdata.guru/sec/ownership/' + data.view + '/cik'+parseInt(data.cik);
     if($('#apiInfo').length == 0) $('#transactions_info').after('<div id="apiInfo"></div>');
     $('#apiInfo').html('API resource: <a href="'+apiResource+'">'+apiResource+'</a>');
+    $('title').html(data.name + ' ('+data.view+')');
     console.log('instantiated datatable');
     console.timeLog('HashChange');
     //  c. create interactive tblTransactions using dataTables
