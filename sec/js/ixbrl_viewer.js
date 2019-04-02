@@ -316,6 +316,10 @@ var ixbrlViewer = {
                 touch: false,
                 afterClose: function(){
                     self.setHashSilently('c=null');
+                    if(self.dtFrame){
+                        self.dtFrame.destroy(true);
+                        self.dtFrame = false;
+                    }
                 }
             });
         var disable = [];
@@ -1079,71 +1083,181 @@ var ixbrlViewer = {
 
     showFrameTable: function(oVars){
         var self = this,
-            cols = self.frameDataCol,
             ply = self.playerIndexes(oVars),
-            url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
             $slider;
         if(this.dtFrame){
             //destroy existing table
         } else {
             initializeFrameControls(oVars);
         }
-        //get data for both frames via REST API (S3 bucket)
-        self.getRestfulData(
-            url,
-            function(frame){   //parallel fetch of y Axis data
-                //add sicname field, drop latLng field,
-               /* for(var i=0; i<frame.data.length;i++){
-                    frame.data[i].splice(frameDataCol.sic, 0, (self.sicCode[frame.data[i][frameDataCol.sic]]) ||'');
-                }*/
-
-                self.dtFrame = $('#frame-table').DataTable( {
-                    data: frame.data,
-                    dom: 'Bfrtip',
-                    columns: [ //["AAR CORP", 1750, 3720, "0001104659-18-073842", "US-IL", Array(2), "2018-05-31", 31100000, 1]
-                        {   title: "Entity Name", className: "dt-body-left"  },
-                        {   title: "CIK"},
-                        {   title: "SIC Classification",
-                            render: function(data, type, row, meta){
-                                return data? data+' - '+ixbrlViewer.sicCode[data]:'';
-                            },
-                            className: "dt-body-left" },
-                        {   title: "Accession No.",
-                            render: function (data, type, row, meta) {
-                                return '<a href="https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
-                            }
-                        },
-                        {   title: "Location", className: "dt-body-center" },
-                        {   title: "latLng", visible: false},
-                        {   title: "Date", render: function (data, type, row, meta) {return data.substr(0,7);}},
-                        {   title: frame.tlabel, className: "dt-body-right", render: function(data){ return ixbrlViewer.numberFormatter(data, frame.uom)}},
-                        {   title: "versions", visible: false}
-                    ],
-                    scrollY: "500px",
-                    scrollX: false,
-                    scrollCollapse: true,
-                    scroller: {rowHeight: 'auto'},
-                    deferRender: true,
-                    oLanguage: {"sSearch": "Text search"},
-                    order: [[6, 'desc']],
-                    buttons: [
-                        'copy',
-                        'excel',
-                        'csv'
-                    ]
-                });
-            },
-            fetch_error
-        );
-
-
-        /*var url = 'https://restapi.publicdata.guru/sec/timeseries/'+oVars.tag+'/cik'+oVars.cik;
-        self.getRestfulData(url, function(timeseries){  //this should be from memory
-            //todo: make the play controls
-        });*/
+        fetchFrameTableData(makeFrameTableOptions(oVars), function(){});
 
         function fetch_error(url){
-            $('#scatterchart').html('Unable to load snapshot from API for ' + url);
+            $('#framecontrols').html('Unable to load any frame from API for requested table:<br>' + url);
+        }
+        function makeFrameTableOptions(vars){
+            return {
+                qtrs: vars.qtrs,
+                tags: [
+                        {
+                            tag: vars.tag,
+                            qtrs: qtrs,
+                            uom: vars.uom
+                        }
+                    ],
+                cdates: [
+                    self.cdate(vars.ddate, vars.qtrs)
+                    ]
+            }
+        }
+        function fetchFrameTableData(frameTableOptions, callback){
+            //fetches and integrates frames into single table
+            var t, d, urlsToFetch = {}, requestCount = 0;
+            for(t=0;t<frameTableOptions.tags.length;t++) {
+                for (d = 0; t < frameTableOptions.cdates.length; d++) {
+                    var url = 'https://restapi.publicdata.guru/sec/frames/' + frameTableOptions.tags[t] + '/'
+                        + frameTableOptions.tags[t].uom + '/DQ' + frameTableOptions, tags[t].qtrs + '/' + frameTableOptions.cdates[d];
+                    urlsToFetch[url] = {
+                        order: requestCount++,
+                        tag: frameTableOptions.tags[t].tag,
+                        uom: frameTableOptions.tags[t].uom,
+                        qtrs: frameTableOptions.tags[t].qtrs,
+                        cdate: frameTableOptions.cdates[d]
+                    };
+                }
+            }
+
+            var f, responseCount = 0, foundCount = 0, missingURLs = [];
+            for(url in urlsToFetch)
+                self.getRestfulData(
+                    urlsToFetch[f],
+                    function(data, fetchedURL){
+                        urlsToFetch[fetchedURL].data = data;
+                        foundCount++;
+                        if(responseCount++ == requestCount) {
+                            frameTableOptions.requestedFrames = urlsToFetch;
+                            makeFrameTable(frameTableOptions);
+                        }
+                    },
+                    function(missingURL) {
+                        urlsToFetch[missingURL].data = false;
+                        missingURLs.push(missingURL);
+                        if (responseCount++ == requestCount) {
+                            if(foundCount>0){
+                                frameTableOptions.requestedFrames = urlsToFetch;
+                                makeFrameTable(frameTableOptions);
+                            } else {
+                                fetch_error(missingURLs.join('<br>'));
+                            }
+                        }
+                    });
+
+        }
+        function makeFrameTable(frameTableOptions){
+            var tableData = false;  //fetchedFramesData will be used to array to populate frameTable
+            var columnDefs = [ //["AAR CORP", 1750, 3720, "0001104659-18-073842", "US-IL", Array(2), "2018-05-31", 31100000, 1]
+                {   title: "Entity Name", export: true, className: "dt-body-left"},
+                {   title: "CIK", export: true, className: "dt-body-left"},
+                {   title: "SIC Classification", export: true,
+                    render: function(data, type, row, meta){
+                        return data? data+' - ' + ixbrlViewer.sicCode[data]:'';
+                    },
+                    className: "dt-body-left"},
+                {   title: "Accession No.", export: true,
+                    render: function (data, type, row, meta) {
+                        return '<a href="https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
+                    }
+                },
+                {   title: "Location", export: true, className: "dt-body-center" }
+            ];
+            var headerColumnLength = columnDefs.length;
+            var topHeaderCells = '<th colspan="'+headerColumnLength+'"></th>';
+            for(var i=0; i<frameTableOptions.requestedFrames.length;i++){
+                var frame = frameTableOptions.requestedFrames[i];
+                if(frame.data){ //will be false if frame DNE
+                    frame.data.sort(function(row1,row2){return parseInt(row2[ixbrlViewer.frameDataCol.cik])-parseInt(row1[ixbrlViewer.frameDataCol.cik])});
+                    if(!tableData){  //first frame get sets left 5 header columns
+                        tableData = [];
+                        for(var r=0;r<frame.data.length;r++) tableData.push(frame.data[r].slice(0,headerColumnLength));
+                    }
+                    //add the new column defs
+                    columnDefs = columnDefs.concat([  //note: some fields are displayed in the beowser (visible) while others are exported
+                        {   title: "ending", export: true, render: function (data, type, row, meta) {return data.substr(0,7);}},
+                        {   title: "quarters duration", visible: false},
+                        {   title: "source", export: true, visible: false, render: function(data) {
+                                return 'https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g, '') + '/' + data + '-index.html';
+                            }
+                        },
+                        {   title: "value", export: false, className: "dt-body-right", render: function(data, type, row, meta){
+                              var adsh = row[meta.col-1];
+                            return '<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh .replace(/-/g,'')
+                                + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+1]) + '</a>'}
+                        }, //this version of value includes the units is formatted with commas
+                        {   title: frame.tlabel, export: true, visible: false},  //unformatted clean version for export
+                        {   title: "units", export: false, visible: false},
+                        {   title: "version", export: false, visible: false}
+                    ]);
+                    topHeaderCells += '<th colspan="2">'+ frame.tlabel +'</th>';
+                    //add the new rows
+                    var tableRowIndex = 0, frameRowIndex = 0;
+                    while(frameRowIndex<frame.data.length && tableRowIndex<tableData.length){
+                        var frameRow = frame.data[frameRowIndex];
+                        var frameCIK = parseInt(frameRow[ixbrlViewer.frameDataCol.cik]);
+                        var tableCIK = parseInt(tableData[tableRowIndex][ixbrlViewer.frameDataCol.cik]);
+                        if(frameCIK>tableCIK){ //table is missing this CIk = add header cells and fill any preceding data cells with nulls
+                            var newRow = [frame.data[r].slice(0,headerColumnLength)].concat(new Array(columnDefs.length-headerColumnLength).fill(null));
+                            tableData.splice(tableRowIndex-1,0, newRow);
+                        }
+                        if(frameCIK>=tableCIK){  //insync = add data to current row and advance both indexes together
+                            tableData[tableRowIndex].splice(tableData[tableRowIndex].length, 0,
+                                frameRow[ixbrlViewer.frameDataCol.ddate],
+                                frame.qtrs,
+                                frameRow[ixbrlViewer.frameDataCol.adsh],
+                                frameRow[ixbrlViewer.frameDataCol.value],
+                                frameRow[ixbrlViewer.frameDataCol.value],
+                                frame.uom,
+                                frameRow[ixbrlViewer.frameDataCol.versions]);
+                            tableRowIndex++;
+                            frameRowIndex++;
+                        } else { //this frame does not have a row corresponding to the table's current CIK = fill data cell with nulls
+                            tableData[tableRowIndex].splice(tableData[tableRowIndex].length, 0, new Array(7).fill(null));
+                            tableRowIndex++;
+                        }
+                    }
+                }
+
+            }
+
+            var exportColumns = [];  //will be appended to as tableData is built
+            for(var i=0; i<columnDefs.length;i++) if(columnDefs.export) exportColumns.push(i);
+
+            self.dtFrame = $('#frame-table').DataTable( {
+                data: tableData,
+                dom: 'Bfrtip',
+                columns: columnDefs,
+                scrollY: "500px",
+                scrollX: false,
+                scrollCollapse: true,
+                scroller: {rowHeight: 'auto'},
+                deferRender: true,
+                oLanguage: {"sSearch": "Text search"},
+                order: [[6, 'desc']],
+                buttons: [
+                    {
+                        extend: 'copyHtml5',
+                        exportOptions: { columns: exportColumns}
+                    },
+                    {
+                        extend: 'excelHtml5',
+                        exportOptions: { columns: exportColumns}
+                    },
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: { columns: exportColumns}
+                    }
+                ]
+            });
+
         }
         function initializeFrameControls(options){
             $slider = $('#tabs-frame div.framecontrols').html(self.htmlTemplates.frameControls)
@@ -1219,7 +1333,7 @@ var ixbrlViewer = {
                     }
                 }
                 makeFrameTable(frameColumnTags);
-            })
+            });
         }
     },
 
@@ -1509,7 +1623,7 @@ var ixbrlViewer = {
                 dataType: 'JSON',
                 url: dbUrl || url,
                 type: 'get',
-                success: function (data, status) {
+                success: function (data, url, status) {
                     console.log('successfully fetched ' + url);
                     ixbrlViewer.secDataCache[url] = data;
                     if(success) success(data);
