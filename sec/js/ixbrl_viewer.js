@@ -1115,7 +1115,7 @@ var ixbrlViewer = {
                         },
                         {   title: "Location", className: "dt-body-center" },
                         {   title: "latLng", visible: false},
-                        {   title: "Date", visible: false, render: function (data, type, row, meta) {return data.substr(0,7);}},
+                        {   title: "Date", render: function (data, type, row, meta) {return data.substr(0,7);}},
                         {   title: frame.tlabel, className: "dt-body-right", render: function(data){ return ixbrlViewer.numberFormatter(data, frame.uom)}},
                         {   title: "versions", visible: false}
                     ],
@@ -1146,7 +1146,7 @@ var ixbrlViewer = {
             $('#scatterchart').html('Unable to load snapshot from API for ' + url);
         }
         function initializeFrameControls(options){
-            $slider = $('#tabs-frame div.framecontrols').html('<div class="fameSlider"></div><button class="addCdate">Add Date</button></button><select id="frameTagSelector"></select><div class="frameOptionTags"></div>')
+            $slider = $('#tabs-frame div.framecontrols').html(self.htmlTemplates.frameControls)
                 .find('.fameSlider').slider({
                     min: 0,
                     max: ply.dateIndex.length - 1,
@@ -1175,6 +1175,51 @@ var ixbrlViewer = {
                     makeFrameTable();
                 }
             });
+        }
+        function showFrameColumnTags(frameColumnTags){
+            $('button.frameColumnButton').remove(); //get rid of all and re-add
+            var i;
+            for(i=0; i<frameColumnTags.cdates.length; i++ ){
+                $(self.htmlTemplates.frameColumnButton)
+                    .html(frameColumnTags.tags[i].label)
+                    .attr("tag", frameColumnTags.tags[i].tag)
+                    .attr("duration", frameColumnTags.tags[i].duration)
+                    .attr("uom", frameColumnTags.tags[i].uom)
+                    .addClass("frame-column-tag")
+                    .button({icon: "ui-icon-closethick"})
+                    .appendTo('#frameOptionTags');
+            }
+            for(i=0; i<frameColumnTags.tags.length; i++ ){
+                $(self.htmlTemplates.frameColumnButton)
+                    .html(frameColumnTags.cdates[i].label)
+                    .attr("cdate", frameColumnTags.cdates[i].cdate)
+                    .addClass("frame-column-cdate")
+                    .button({icon: "ui-icon-closethick"})
+                    .appendTo('#frameOptionTags');
+            }
+            $('button.frameColumnButton').click(function(){
+                var $button = $(this),
+                    type = $button.hasClass('frame-column-tag')?'tags':'ccdates',
+                    tagObject;
+
+                    //typeStore = $button.hasClass('frame-column-tag')?'tags':'ccdates';
+                for(var i=0; i<frameColumnTags[type].length; i++){
+                    tagObject = frameColumnTags[type][i];
+                    if(type=='tags'){
+                        if($button.attr('tag')==tagObject.tag && $button.attr('duration')==tagObject.duration && $button.attr('uom')==tagObject.uom){
+                            $button.remove();
+                            frameColumnTags[type].splice(i,1);
+                        }
+                    }
+                    if(type=='ccdates'){
+                        if($button.attr('ccdate')==tagObject.ccdate){
+                            $button.remove();
+                            frameColumnTags[type].splice(i,1);
+                        }
+                    }
+                }
+                makeFrameTable(frameColumnTags);
+            })
         }
     },
 
@@ -1577,6 +1622,9 @@ var ixbrlViewer = {
             '</div>',
         comparedCompanyButton:
             '<button class="comparedCompany"></button>',
+        frameColumnButton:
+            '<button class="frameColumnButton"></button>',
+        frameControls: '<div class="fameSlider"></div><button class="addCdate">Add Date</button></button><select id="frameTagSelector"></select><div class="frameOptionTags"></div>',
         linLogToggle: '<div id="linlog">' +
             '<label for="scatterLinear">linear</label>' +
             '<input type="radio" name="scatterAxesType" id="scatterLinear" value="linear" checked="checked">' +
@@ -1658,10 +1706,6 @@ $(document).ready(function() {
         oQSParams[tuplet[0]] = tuplet[1];
     }
 
-    //fix images source links
-    $('img').each(function(){
-        $(this).attr('src', 'https://www.sec.gov/Archives/edgar/data/'+ixbrlViewer.cik+'/'+ixbrlViewer.adsh+'/' + $(this).attr('src'));
-    });
 
     //calculate the fiscal to calendar relationship and set document reporting period, fy, adsh and cik
     var $reportingPeriod = $('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]'),
@@ -1678,6 +1722,10 @@ $(document).ready(function() {
     ixbrlViewer.adsh = docPart[1];
 
 
+    //fix images source links
+    $('img').each(function(){
+        $(this).attr('src', 'https://www.sec.gov/Archives/edgar/data/'+ixbrlViewer.cik+'/'+ixbrlViewer.adsh+'/' + $(this).attr('src'));
+    });
 
     //get iXBRL context tags make lookup tree for contextRef date values and dimensions
     var $context, start, end, ddate, $this, $start, $member;
