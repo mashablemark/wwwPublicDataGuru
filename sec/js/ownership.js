@@ -96,7 +96,7 @@ var tableColumns = {
         {   title: "Reporter"},
         {   title: "Reporter CIK",
             render: function (data, type, row, meta) {
-                return '<a href="ownership.php#view=reporter&reporter=' + row[9] + '">' + data + '</a>';
+                return '<a href="ownership.php#view='+counter[view]+'&'+counter[view]+'=' + row[9] + '">' + data + '</a>';
             }
         },
         {   title: "Number of Securities Transacted", className: "dt-body-right" },
