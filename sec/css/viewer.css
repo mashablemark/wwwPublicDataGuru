@@ -143,3 +143,20 @@ button.player_play {
 .ui-front{
     z-index: 99999;
 }
+
+.ui-widget-content a {
+    color: rgb(0, 0, 238);
+}
+.frameSlider{
+    width: 1200px;
+    display: inline-block;
+    margin: 10px 15px 0 40px;
+}
+#frameOptionTags{
+    margin-top: 8px;
+}
+
+.frameColumnButton:hover .ui-button-icon {
+    background: url(/global/js/jqueryui/images/ui-icons_cc0000_256x240.png);
+    background-position: -96px -128px;
+}

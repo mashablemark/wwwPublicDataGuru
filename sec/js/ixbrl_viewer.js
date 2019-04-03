@@ -1084,39 +1084,42 @@ var ixbrlViewer = {
     showFrameTable: function(oVars){
         var self = this,
             ply = self.playerIndexes(oVars),
-            $slider;
-        if(this.dtFrame){
-            //destroy existing table
-        } else {
+            $slider,
+            frameTableOptions = false;
+        for(var i in ply.dateIndex) ply.dateIndex[i] = self.cdate(ply.dateIndex[i], oVars.qtrs);  //convert to cdates
+        self.setHashSilently('y=' + oVars.tag +'&d=' +  oVars.ddate  +'&u=' +  oVars.uom  +'&q=' +  oVars.qtrs +'&c=f');
+        if(!this.dtFrame){
+            frameTableOptions = {
+                qtrs: oVars.qtrs,
+                tags: [
+                    {
+                        tag: oVars.tag,
+                        qtrs: oVars.qtrs,
+                        uom: oVars.uom
+                    }
+                ],
+                cdates: [
+                    self.cdate(oVars.ddate, oVars.qtrs)
+                ]
+            };
             initializeFrameControls(oVars);
+            showFrameColumnTags(frameTableOptions);
         }
-        fetchFrameTableData(makeFrameTableOptions(oVars), function(){});
+
+
+        fetchFrameTableData(frameTableOptions, function(){});
 
         function fetch_error(url){
             $('#framecontrols').html('Unable to load any frame from API for requested table:<br>' + url);
         }
-        function makeFrameTableOptions(vars){
-            return {
-                qtrs: vars.qtrs,
-                tags: [
-                        {
-                            tag: vars.tag,
-                            qtrs: qtrs,
-                            uom: vars.uom
-                        }
-                    ],
-                cdates: [
-                    self.cdate(vars.ddate, vars.qtrs)
-                    ]
-            }
-        }
+
         function fetchFrameTableData(frameTableOptions, callback){
             //fetches and integrates frames into single table
             var t, d, urlsToFetch = {}, requestCount = 0;
-            for(t=0;t<frameTableOptions.tags.length;t++) {
-                for (d = 0; t < frameTableOptions.cdates.length; d++) {
-                    var url = 'https://restapi.publicdata.guru/sec/frames/' + frameTableOptions.tags[t] + '/'
-                        + frameTableOptions.tags[t].uom + '/DQ' + frameTableOptions, tags[t].qtrs + '/' + frameTableOptions.cdates[d];
+            for(t=0; t<frameTableOptions.tags.length; t++) {
+                for (d = 0; d<frameTableOptions.cdates.length; d++) {
+                    var url = 'https://restapi.publicdata.guru/sec/frames/' + frameTableOptions.tags[t].tag + '/'
+                        + frameTableOptions.tags[t].uom + '/DQ' + frameTableOptions.tags[t].qtrs + '/' + frameTableOptions.cdates[d];
                     urlsToFetch[url] = {
                         order: requestCount++,
                         tag: frameTableOptions.tags[t].tag,
@@ -1130,11 +1133,12 @@ var ixbrlViewer = {
             var f, responseCount = 0, foundCount = 0, missingURLs = [];
             for(url in urlsToFetch)
                 self.getRestfulData(
-                    urlsToFetch[f],
-                    function(data, fetchedURL){
-                        urlsToFetch[fetchedURL].data = data;
+                    url,
+                    function(frame, fetchedURL){
+                        urlsToFetch[fetchedURL] = frame;
                         foundCount++;
-                        if(responseCount++ == requestCount) {
+                        responseCount++;
+                        if(responseCount == requestCount) {
                             frameTableOptions.requestedFrames = urlsToFetch;
                             makeFrameTable(frameTableOptions);
                         }
@@ -1142,7 +1146,8 @@ var ixbrlViewer = {
                     function(missingURL) {
                         urlsToFetch[missingURL].data = false;
                         missingURLs.push(missingURL);
-                        if (responseCount++ == requestCount) {
+                        responseCount++;
+                        if (responseCount == requestCount) {
                             if(foundCount>0){
                                 frameTableOptions.requestedFrames = urlsToFetch;
                                 makeFrameTable(frameTableOptions);
@@ -1156,14 +1161,17 @@ var ixbrlViewer = {
         function makeFrameTable(frameTableOptions){
             var tableData = false;  //fetchedFramesData will be used to array to populate frameTable
             var columnDefs = [ //["AAR CORP", 1750, 3720, "0001104659-18-073842", "US-IL", Array(2), "2018-05-31", 31100000, 1]
-                {   title: "Entity Name", export: true, className: "dt-body-left"},
-                {   title: "CIK", export: true, className: "dt-body-left"},
+                {   title: "Entity", export: false, className: "dt-body-left", render: function(data, type, row, meta){
+                        return '<a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + row[meta.col+2] + '">' + data + ' ('+row[meta.col+2] + ')</a>';
+                    }},
+                {   title: "Entity Name", visible: false, export: true, className: "dt-body-left"},
+                {   title: "CIK", visible: false, export: true, className: "dt-body-right"},
                 {   title: "SIC Classification", export: true,
                     render: function(data, type, row, meta){
                         return data? data+' - ' + ixbrlViewer.sicCode[data]:'';
                     },
                     className: "dt-body-left"},
-                {   title: "Accession No.", export: true,
+                {   title: "Accession No.", visible: false, export: true,
                     render: function (data, type, row, meta) {
                         return '<a href="https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
                     }
@@ -1171,44 +1179,30 @@ var ixbrlViewer = {
                 {   title: "Location", export: true, className: "dt-body-center" }
             ];
             var headerColumnLength = columnDefs.length;
-            var topHeaderCells = '<th colspan="'+headerColumnLength+'"></th>';
-            for(var i=0; i<frameTableOptions.requestedFrames.length;i++){
-                var frame = frameTableOptions.requestedFrames[i];
-                if(frame.data){ //will be false if frame DNE
-                    frame.data.sort(function(row1,row2){return parseInt(row2[ixbrlViewer.frameDataCol.cik])-parseInt(row1[ixbrlViewer.frameDataCol.cik])});
+            var topHeaderCells = '<th colspan="3"></th>'; //only 3 visible
+            for(var url in frameTableOptions.requestedFrames){
+                var frame = frameTableOptions.requestedFrames[url];
+                if(frame.data){ //will be false if frame DNEresponseCount
+                    frame.data.sort(function(row1,row2){
+                        return parseInt(row1[ixbrlViewer.frameDataCol.cik])-parseInt(row2[ixbrlViewer.frameDataCol.cik])
+                    });
                     if(!tableData){  //first frame get sets left 5 header columns
                         tableData = [];
-                        for(var r=0;r<frame.data.length;r++) tableData.push(frame.data[r].slice(0,headerColumnLength));
+                        for(var r=0;r<frame.data.length;r++) tableData.push(frame.data[r].slice(0,1).concat(frame.data[r].slice(0,headerColumnLength-1)));
                     }
-                    //add the new column defs
-                    columnDefs = columnDefs.concat([  //note: some fields are displayed in the beowser (visible) while others are exported
-                        {   title: "ending", export: true, render: function (data, type, row, meta) {return data.substr(0,7);}},
-                        {   title: "quarters duration", visible: false},
-                        {   title: "source", export: true, visible: false, render: function(data) {
-                                return 'https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g, '') + '/' + data + '-index.html';
-                            }
-                        },
-                        {   title: "value", export: false, className: "dt-body-right", render: function(data, type, row, meta){
-                              var adsh = row[meta.col-1];
-                            return '<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh .replace(/-/g,'')
-                                + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+1]) + '</a>'}
-                        }, //this version of value includes the units is formatted with commas
-                        {   title: frame.tlabel, export: true, visible: false},  //unformatted clean version for export
-                        {   title: "units", export: false, visible: false},
-                        {   title: "version", export: false, visible: false}
-                    ]);
-                    topHeaderCells += '<th colspan="2">'+ frame.tlabel +'</th>';
+
+                    topHeaderCells += '<th colspan="2">'+ frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')</th>';
                     //add the new rows
                     var tableRowIndex = 0, frameRowIndex = 0;
                     while(frameRowIndex<frame.data.length && tableRowIndex<tableData.length){
                         var frameRow = frame.data[frameRowIndex];
                         var frameCIK = parseInt(frameRow[ixbrlViewer.frameDataCol.cik]);
-                        var tableCIK = parseInt(tableData[tableRowIndex][ixbrlViewer.frameDataCol.cik]);
-                        if(frameCIK>tableCIK){ //table is missing this CIk = add header cells and fill any preceding data cells with nulls
-                            var newRow = [frame.data[r].slice(0,headerColumnLength)].concat(new Array(columnDefs.length-headerColumnLength).fill(null));
+                        var tableCIK = parseInt(tableData[tableRowIndex][ixbrlViewer.frameDataCol.cik + 1]);  //+1 because of extra name column for export vs. display
+                        if(frameCIK<tableCIK){ //table is missing this CIK = add header cells and fill any preceding data cells with nulls
+                            var newRow = frame.data[frameRowIndex].slice(0,1).concat(frame.data[frameRowIndex].slice(0,headerColumnLength-1), new Array(columnDefs.length-headerColumnLength).fill(null));
                             tableData.splice(tableRowIndex-1,0, newRow);
                         }
-                        if(frameCIK>=tableCIK){  //insync = add data to current row and advance both indexes together
+                        if(frameCIK<=tableCIK){  //insync = add data to current row and advance both indexes together
                             tableData[tableRowIndex].splice(tableData[tableRowIndex].length, 0,
                                 frameRow[ixbrlViewer.frameDataCol.ddate],
                                 frame.qtrs,
@@ -1220,17 +1214,36 @@ var ixbrlViewer = {
                             tableRowIndex++;
                             frameRowIndex++;
                         } else { //this frame does not have a row corresponding to the table's current CIK = fill data cell with nulls
-                            tableData[tableRowIndex].splice(tableData[tableRowIndex].length, 0, new Array(7).fill(null));
+                            tableData[tableRowIndex]= tableData[tableRowIndex].concat(new Array(7).fill(null));
                             tableRowIndex++;
                         }
                     }
+                    //add the new column defs (must be after to cal
+                    columnDefs = columnDefs.concat([  //note: some fields are displayed in the beowser (visible) while others are exported
+                        {   title: "ending", export: true, render: function (data, type, row, meta) {
+                            return typeof(data)=='undefined' || data===null?'':data.substr(0,7);
+                        }},
+                        {   title: "quarters duration", visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},
+                        {   title: "source", export: true, visible: false, render: function(data) {
+                                return typeof(data)=='undefined' || data===null?'':'https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g, '') + '/' + data + '-index.html';
+                        }},
+                        {   title: "value", export: false, className: "dt-body-right", render: function(data, type, row, meta){
+                                var adsh = row[meta.col-1];
+                                return typeof(data)=='undefined' || data===null?'':'<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh .replace(/-/g,'')
+                                    + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+2]) + '</a>'
+                        }}, //this version of value includes the units is formatted with commas
+                        {   title: frame.tlabel, export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},  //unformatted clean version for export
+                        {   title: "units", export: false, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},
+                        {   title: "version", export: false, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}}
+                    ]);
                 }
 
             }
 
             var exportColumns = [];  //will be appended to as tableData is built
-            for(var i=0; i<columnDefs.length;i++) if(columnDefs.export) exportColumns.push(i);
-
+            for(var i=0; i<columnDefs.length;i++) if(columnDefs[i].export) exportColumns.push(i);
+            if(ixbrlViewer.dtFrame) ixbrlViewer.dtFrame.destroy(true);
+            $('#tabs-frame').append('<table id="frame-table"></table>');
             self.dtFrame = $('#frame-table').DataTable( {
                 data: tableData,
                 dom: 'Bfrtip',
@@ -1257,18 +1270,28 @@ var ixbrlViewer = {
                     }
                 ]
             });
-
+            $('div.dataTables_scrollHead thead').prepend('<tr>' + topHeaderCells + '</tr>')
         }
         function initializeFrameControls(options){
             $slider = $('#tabs-frame div.framecontrols').html(self.htmlTemplates.frameControls)
-                .find('.fameSlider').slider({
+                .find('.frameSlider').slider({
                     min: 0,
                     max: ply.dateIndex.length - 1,
                     value: ply.homeIndex,
-                    stop: function () {
-                        changeFrame($slider.slider('value')); //force change on user slide
+                    slide: function (event, ui) {
+                        var cdate = ply.dateIndex[ui.value];
+                        $('button.addCdate').attr('cdate', cdate).button( "option", "label", cdate);
                     }
                 });
+            $('button.addCdate')
+                .button({icon: 'ui-icon-plusthick', label: ply.dateIndex[ply.homeIndex]})
+                .click(function(){
+                    frameTableOptions.cdates.push($(this).attr('cdate'));
+                    frameTableOptions.cdates.sort();
+                    fetchFrameTableData(frameTableOptions);
+                    showFrameColumnTags();
+                });
+
             var tagOptions = '<option value="null"></option>';
             var tagCombos = [];
             for(var duration in self.standardTagTree){
@@ -1285,54 +1308,57 @@ var ixbrlViewer = {
             }
             $("#frameTagSelector").html(tagOptions).combobox({
                 select: function(){
-                    addTag($(this).val().split(':'));
-                    makeFrameTable();
+                    var tagParts = $(this).val().split(':');
+                    frameTableOptions.tags.push({tag: tagParts[0], uom: tagParts[1], qtrs: parseInt(tagParts[2].substr(2))});
+                    fetchFrameTableData(frameTableOptions);
+                    showFrameColumnTags();
                 }
             });
         }
-        function showFrameColumnTags(frameColumnTags){
+        function showFrameColumnTags(){
+            console.log(frameTableOptions);
             $('button.frameColumnButton').remove(); //get rid of all and re-add
             var i;
-            for(i=0; i<frameColumnTags.cdates.length; i++ ){
+            for(i=0; i<frameTableOptions.tags.length; i++ ){
                 $(self.htmlTemplates.frameColumnButton)
-                    .html(frameColumnTags.tags[i].label)
-                    .attr("tag", frameColumnTags.tags[i].tag)
-                    .attr("duration", frameColumnTags.tags[i].duration)
-                    .attr("uom", frameColumnTags.tags[i].uom)
+                    .html(frameTableOptions.tags[i].tag + ' ('+ixbrlViewer.durationNames[frameTableOptions.tags[i].qtrs] + ' in ' + frameTableOptions.tags[i].uom + ')')
+                    .attr("tag", frameTableOptions.tags[i].tag)
+                    .attr("duration", frameTableOptions.tags[i].duration)
+                    .attr("uom", frameTableOptions.tags[i].uom)
                     .addClass("frame-column-tag")
                     .button({icon: "ui-icon-closethick"})
                     .appendTo('#frameOptionTags');
             }
-            for(i=0; i<frameColumnTags.tags.length; i++ ){
+            for(i=0; i<frameTableOptions.cdates.length; i++ ){
                 $(self.htmlTemplates.frameColumnButton)
-                    .html(frameColumnTags.cdates[i].label)
-                    .attr("cdate", frameColumnTags.cdates[i].cdate)
+                    .html(frameTableOptions.cdates[i])
+                    .attr("cdate", frameTableOptions.cdates[i])
                     .addClass("frame-column-cdate")
                     .button({icon: "ui-icon-closethick"})
                     .appendTo('#frameOptionTags');
             }
             $('button.frameColumnButton').click(function(){
                 var $button = $(this),
-                    type = $button.hasClass('frame-column-tag')?'tags':'ccdates',
+                    type = $button.hasClass('frame-column-tag')?'tags':'cdates',
                     tagObject;
 
                     //typeStore = $button.hasClass('frame-column-tag')?'tags':'ccdates';
-                for(var i=0; i<frameColumnTags[type].length; i++){
-                    tagObject = frameColumnTags[type][i];
+                for(var i=0; i<frameTableOptions[type].length; i++){
+                    tagObject = frameTableOptions[type][i];
                     if(type=='tags'){
                         if($button.attr('tag')==tagObject.tag && $button.attr('duration')==tagObject.duration && $button.attr('uom')==tagObject.uom){
                             $button.remove();
-                            frameColumnTags[type].splice(i,1);
+                            frameTableOptions[type].splice(i,1);
                         }
                     }
                     if(type=='ccdates'){
                         if($button.attr('ccdate')==tagObject.ccdate){
                             $button.remove();
-                            frameColumnTags[type].splice(i,1);
+                            frameTableOptions[type].splice(i,1);
                         }
                     }
                 }
-                makeFrameTable(frameColumnTags);
+                fetchFrameTableData(frameTableOptions);
             });
         }
     },
@@ -1603,7 +1629,7 @@ var ixbrlViewer = {
     getRestfulData: function(url, success, fail){
         if(ixbrlViewer.secDataCache[url]){
             console.log('data found in cache for ' + url);
-            if(success) success(ixbrlViewer.secDataCache[url]);
+            if(success) success(ixbrlViewer.secDataCache[url], url);
         } else {
             var dbUrl = false;
             if(window.location.href.indexOf('maker.publicdata')!=-1){ //use database for maker.publicdata.guru
@@ -1623,10 +1649,10 @@ var ixbrlViewer = {
                 dataType: 'JSON',
                 url: dbUrl || url,
                 type: 'get',
-                success: function (data, url, status) {
+                success: function (data, status) {
                     console.log('successfully fetched ' + url);
                     ixbrlViewer.secDataCache[url] = data;
-                    if(success) success(data);
+                    if(success) success(data, url);
                 },
                 error: function (jqXHR, textStatus, errorThrown) {
                     if(fail){
@@ -1722,7 +1748,7 @@ var ixbrlViewer = {
             '<div id="tabs-ts"><div id="tschart">loading... please wait</div><div id="tscontrols"></div></div>' +
             '<div id="tabs-map"><div id="maptitle"></div><div id="mapchart">loading... please wait</div><div id="mapcontrols"></div><div id="mapdatalinks"></div></div>' +
             '<div id="tabs-scatter"><div id="scatterchart">loading... please wait</div><div id="scattercontrols"></div></div>' +
-            '<div id="tabs-frame"><div class="framecontrols">loading... please wait</div><table id="frame-table"></table></div>' +
+            '<div id="tabs-frame"><div class="framecontrols">loading... please wait</div></div>' +
             '</div>',
         popOptions:
             '<div id="chart-options">' +
@@ -1738,7 +1764,7 @@ var ixbrlViewer = {
             '<button class="comparedCompany"></button>',
         frameColumnButton:
             '<button class="frameColumnButton"></button>',
-        frameControls: '<div class="fameSlider"></div><button class="addCdate">Add Date</button></button><select id="frameTagSelector"></select><div class="frameOptionTags"></div>',
+        frameControls: '<select id="frameTagSelector"></select><div class="frameSlider"></div><button class="addCdate">Add Date</button></button><div id="frameOptionTags"></div>',
         linLogToggle: '<div id="linlog">' +
             '<label for="scatterLinear">linear</label>' +
             '<input type="radio" name="scatterAxesType" id="scatterLinear" value="linear" checked="checked">' +
@@ -1967,7 +1993,7 @@ $(document).ready(function() {
                 function(){ //callback after barChart is loaded
                     if(hash.x) $('a[href="#tabs-scatter"]').click(); //trigger scatter chart load
                     if(hash.c=='m') $('a[href="#tabs-map"]').click(); //trigger map load
-                    if(hash.c=='f') $('a[href="#tabs-frame"]').click(); //trigger map load
+                    if(hash.c=='f') $('a[href="#tabs-frame"]').click(); //trigger frame table load
                 });
         }
     }
