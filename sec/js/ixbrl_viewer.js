@@ -402,7 +402,8 @@ var ixbrlViewer = {
                     self.bubbleMap = false;
                 }
                 $('#popviz_durations, #popviz_units').change(function(){
-                    self.vars.qtrs = $('#popviz_durations').val() || self.vars.qtrs;
+                    var duration = $('#popviz_durations').val();
+                    self.vars.qtrs = (duration && duration.substr(2)) || self.vars.qtrs;
                     self.vars.uom = $('#popviz_units').val() || self.vars.uom;
                     self.fetchTimeSeriesToCache(self.vars, function(aryNewTimeSeries){
                         var oChart = makeTimeSeriesChartObject(aryNewTimeSeries, self.vars);
@@ -424,7 +425,7 @@ var ixbrlViewer = {
             durations.sort();
             var html = '<select id="popviz_durations">';
             for(var i=0; i<durations.length; i++){
-                html += '<option value="' + durations[i] + '"' +(durations[i]==oVars.qtrs?' selected':'')+ '>' + ixbrlViewer.durationNames[durations[i]] + '</option>';
+                html += '<option value="' + durations[i] + '"' +(durations[i]==oVars.qtrs?' selected':'')+ '>' + ixbrlViewer.durationNames[durations[i].substr(2)] + '</option>';
             }
             html += '</select>';
             return html;
@@ -1220,14 +1221,14 @@ var ixbrlViewer = {
                     }
                     //add the new column defs (must be after to cal
                     columnDefs = columnDefs.concat([  //note: some fields are displayed in the beowser (visible) while others are exported
-                        {   title: "ending", export: true, render: function (data, type, row, meta) {
+                        {   title: "Period Ending", export: true, render: function (data, type, row, meta) {
                             return typeof(data)=='undefined' || data===null?'':data.substr(0,7);
                         }},
                         {   title: "quarters duration", visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},
                         {   title: "source", export: true, visible: false, render: function(data) {
                                 return typeof(data)=='undefined' || data===null?'':'https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g, '') + '/' + data + '-index.html';
                         }},
-                        {   title: "value", export: false, className: "dt-body-right", render: function(data, type, row, meta){
+                        {   title: "Disclosure", export: false, className: "dt-body-right", render: function(data, type, row, meta){
                                 var adsh = row[meta.col-1];
                                 return typeof(data)=='undefined' || data===null?'':'<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh .replace(/-/g,'')
                                     + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+2]) + '</a>'
