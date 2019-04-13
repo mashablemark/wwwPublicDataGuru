@@ -1160,6 +1160,7 @@ var ixbrlViewer = {
 
         }
         function makeFrameTable(frameTableOptions){
+            //todo:  make widths constant when scrolling (vertical)
             var tableData = false;  //fetchedFramesData will be used to array to populate frameTable
             var columnDefs = [ //["AAR CORP", 1750, 3720, "0001104659-18-073842", "US-IL", Array(2), "2018-05-31", 31100000, 1]
                 {   title: "Entity", export: false, className: "dt-body-left", render: function(data, type, row, meta){
@@ -1180,7 +1181,7 @@ var ixbrlViewer = {
                 {   title: "Location", export: true, className: "dt-body-center" }
             ];
             var headerColumnLength = columnDefs.length;
-            var topHeaderCells = '<th colspan="3"></th>'; //only 3 visible
+            var topHeaderCells = '<th class="th-no-underline" colspan="3"></th>'; //only 3 visible
             for(var url in frameTableOptions.requestedFrames){
                 var frame = frameTableOptions.requestedFrames[url];
                 if(frame.data){ //will be false if frame DNEresponseCount
@@ -1191,8 +1192,16 @@ var ixbrlViewer = {
                         tableData = [];
                         for(var r=0;r<frame.data.length;r++) tableData.push(frame.data[r].slice(0,1).concat(frame.data[r].slice(0,headerColumnLength-1)));
                     }
-
-                    topHeaderCells += '<th colspan="2">'+ frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')</th>';
+                    var headerLabel = frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')';
+                    var rgxHeaderColSpan = new RegExp('colspan="\(\\d+\)">'+ frame.tlabel +' \\('+ ixbrlViewer.durationNames[frame.qtrs]+'\\)');
+                    var match = topHeaderCells.match(rgxHeaderColSpan);
+                    //add top header cells over date & value; extend span instead of adding repeat
+                    if(match){
+                        var extendedColSpan = parseInt(match[1]) + 2;
+                        topHeaderCells = topHeaderCells.replace(rgxHeaderColSpan, 'colspan="' + extendedColSpan + '">'+ frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')')
+                    } else {
+                        topHeaderCells += '<th  class="th-underline-with-break" colspan="2">'+ frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')</th>';
+                    }
                     //add the new rows
                     var tableRowIndex = 0, frameRowIndex = 0;
                     while(frameRowIndex<frame.data.length && tableRowIndex<tableData.length){
@@ -1219,7 +1228,8 @@ var ixbrlViewer = {
                             tableRowIndex++;
                         }
                     }
-                    //add the new column defs (must be after to cal
+                    //add the new column defs for each frame
+                    //todo:  add a customize function to xls export to convert source ADSH to HYPERLINK.  See https://stackoverflow.com/questions/40243616/jquery-datatables-export-to-excelhtml5-hyperlink-issue/49146977#49146977
                     columnDefs = columnDefs.concat([  //note: some fields are displayed in the beowser (visible) while others are exported
                         {   title: "Period Ending", export: true, render: function (data, type, row, meta) {
                             return typeof(data)=='undefined' || data===null?'':data.substr(0,7);
@@ -1233,9 +1243,9 @@ var ixbrlViewer = {
                                 return typeof(data)=='undefined' || data===null?'':'<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh .replace(/-/g,'')
                                     + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+2]) + '</a>'
                         }}, //this version of value includes the units is formatted with commas
-                        {   title: frame.tlabel, export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},  //unformatted clean version for export
-                        {   title: "units", export: false, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},
-                        {   title: "version", export: false, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}}
+                        {   title: frame.tlabel, export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},  //unformatted clean version for export
+                        {   title: "units", export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},
+                        {   title: "version", export: false, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}}
                     ]);
                 }
 
@@ -1343,7 +1353,7 @@ var ixbrlViewer = {
                     type = $button.hasClass('frame-column-tag')?'tags':'cdates',
                     tagObject;
 
-                    //typeStore = $button.hasClass('frame-column-tag')?'tags':'ccdates';
+                    //typeStore = $button.hasClass('frame-column-tag')?'tags':'cdates';
                 for(var i=0; i<frameTableOptions[type].length; i++){
                     tagObject = frameTableOptions[type][i];
                     if(type=='tags'){
@@ -1352,8 +1362,8 @@ var ixbrlViewer = {
                             frameTableOptions[type].splice(i,1);
                         }
                     }
-                    if(type=='ccdates'){
-                        if($button.attr('ccdate')==tagObject.ccdate){
+                    if(type=='cdates'){
+                        if($button.attr('cdate')==tagObject){
                             $button.remove();
                             frameTableOptions[type].splice(i,1);
                         }

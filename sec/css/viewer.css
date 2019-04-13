@@ -160,3 +160,10 @@ button.player_play {
     background: url(/global/js/jqueryui/images/ui-icons_cc0000_256x240.png);
     background-position: -96px -128px;
 }
+th.th-no-underline{
+    border-bottom: none !important;
+}
+th.th-underline-with-break{
+    border-bottom-left-radius: 3px;
+    border-bottom-right-radius: 3px;
+}
