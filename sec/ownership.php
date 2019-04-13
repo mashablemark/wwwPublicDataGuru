@@ -70,7 +70,6 @@
         -webkit-font-smoothing: inherit;
     }
     table.dataTable tbody{font-size: 13px;}
-    table.dataTable tbody td, table.dataTable tbody th {padding: 4px 5px;}
     table.dataTable tbody tr:hover>.sorting_1, table.dataTable.order-column.hover tbody tr:hover>.sorting_1 {
         background-color: #eaeaea;
     }
@@ -87,6 +86,15 @@
         margin-top: 0.755em;
         float: right;
     }
+    /*
+    table.dataTable tbody td, table.dataTable tbody th {padding: 4px 5px;}
+    table.dataTable th, table.dataTable td {
+        margin: 4px 4px !important;
+        padding: 4px !important;
+    }
+    table.dataTable td{
+        white-space: normal !important;
+    }*/
 </style>
 <body>
 <div id="header">
@@ -119,6 +127,6 @@
         <div id="dateSlider"></div>
     </div>
 </div>
-<table id="transactions">
+<table id="transactions" class="compact">
 </table>
 </body>

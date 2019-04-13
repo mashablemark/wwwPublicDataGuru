@@ -7,7 +7,7 @@ $amendBody = bodyContents(httpGet($edgarPath .$_REQUEST['B']));
 <html>
 <head lang="en">
     <meta charset="UTF-8">
-    <title>Edgar Viz Test Page</title>
+    <title>Redline Prototype</title>
 
     <!--CSS files-->
     <link  rel="stylesheet" href="/global/js/jqueryui/jquery-ui.css" type="text/css" />
@@ -15,11 +15,17 @@ $amendBody = bodyContents(httpGet($edgarPath .$_REQUEST['B']));
     <script type="text/javascript" src="js/wikEdDiff.js"></script>
     <script type="text/javascript" src="/global/js/jquery/jquery-3.3.1.min.js"></script>
     <script type="text/javascript" src="/global/js/jqueryui/jquery-ui.min.js"></script>
+    <style>
+        div.scrollpanel{
+            overflow-y: scroll;
+        }
+        .wikEdDiffDelete {
+            background-color: red !important;
+            text-decoration: line-through;
+        }
+    </style>
 </head>
 <body>
-
-<h2>ORANCO INC for period 7-31-2018</h2>
-
 <div id="tabs" style="width:80%;">
     <!--button class="compare">compare</button-->
     <ul>
@@ -27,10 +33,10 @@ $amendBody = bodyContents(httpGet($edgarPath .$_REQUEST['B']));
           <li><a href="#tabs-amended">Amended Filing</a></li>
           <li><a href="#tabs-redline">Difference</a></li>
         </ul>
-    <div id="tabs-original"><?=$filingBody?></div>
-    <div id="tabs-amended"><?=$amendBody?></div>
-    <div id="tabs-redline">
-        <div class="footerRight">
+    <div id="tabs-original" class="scrollpanel"><?=$filingBody?></div>
+    <div id="tabs-amended" class="scrollpanel"><?=$amendBody?></div>
+    <div id="tabs-redline" class="scrollpanel">
+        <div class="footerRight" style="position:fixed ; top: 200px; right: 5px;" >
             <div class="footerItemTitle">Legend
             </div>
             <div class="footerItemText">
@@ -53,6 +59,7 @@ $amendBody = bodyContents(httpGet($edgarPath .$_REQUEST['B']));
 <script language="JavaScript">
     $(document).ready(function() {
         $('#tabs').tabs();
+        $('div.scrollpanel').height(window.innerHeight-$('ul.ui-tabs-nav').outerHeight()-25);
 
         // calculate the diff on load
         /* for (var option = 0; option < WikEdDiffTool.options.length; option ++) {
