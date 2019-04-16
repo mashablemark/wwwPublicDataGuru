@@ -32,6 +32,7 @@ $sec_uri = "https://www.sec.gov/";
 $cacheRoot = "/var/www/vhosts/mashabledata.com/cache/";
 $cache_TTL = 60; //public_graph and cube cache TTL in minutes
 
+use Aws\S3\S3Client;
 include_once($web_root . "/sec/global/php/common_functions.php");
 date_default_timezone_set('UTC');
 header('Content-type: text/html; charset=utf-8');
@@ -384,6 +385,31 @@ EOL;
             "matches" => $result->fetch_all(MYSQLI_ASSOC)
             ];
         break;
+    case "getSubmissionFilesToTestS3":
+        $adsh = $_REQUEST['adsh'];
+        $parts = explode("-", $adsh);
+        $edgar_root ="https://www.sec.gov/Archives/edgar/data/";
+        //1. get header.index
+        $submission_path = intval($parts[0]) . "/" . implode("", $parts) ."/";
+        $header_filename = $adsh . "-index-headers.html";
+        $header_contents = httpGet($edgar_root . $submission_path  . $header_filename);
+        $files = preg_match_all('/<a href="\S+ml"/', $header_contents, $matches);
+        for($i = 0; $i < count($matches[0]); ++$i) {
+            $filename = substr($matches[0][$i], 9, strlen($matches[0][$i])-9-1);
+            //downloadToS3($edgar_root . $submission_path . $filename, $submission_path . $filename);
+            //downloadToS3 created in case CURL did not work.  Problem was S3 credentials and config files needed in /usr/share/httpd/.aws (from ~/.aws)
+            $cmd = 'curl "'. $edgar_root . $submission_path . $filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/' . $submission_path . $filename;
+            logEvent("getSubmissionFilesToTestS3", $cmd);
+            shell_exec($cmd);
+        }
+        //downloadToS3($edgar_root . $submission_path . $header_filename, $submission_path . $header_filename);
+        $cmd = 'curl "'. $edgar_root . $submission_path . $header_filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/' . $submission_path . $header_filename;
+        shell_exec($cmd);
+        $output = [
+            "status" => "ok",
+            "headerbody" => $header_contents
+        ];
+        break;
     default:
         $output = array("status" => "invalid command");
 }
@@ -396,5 +422,17 @@ closeConnection();
 function jString($var){
     return str_replace('\\', "\\\\", str_replace('"', '"""', $var));
 }
-
-
+function downloadToS3($sourceURL, $S3Path){
+    global $localBulkFolder;
+    //download the web resource to local file (S3 cp source can be S3 or EC2 file, but not a web resource)
+    $fsec = @fopen($sourceURL, 'r');
+    $ftmp = @fopen($localBulkFolder."tmp", 'w');
+    stream_copy_to_stream ($fsec, $ftmp);
+    fclose($fsec);
+    fclose($ftmp);
+    //cp the tmp file to S3 destination (correct file path and name)
+    $s3cmd = "aws s3 cp ".$localBulkFolder."tmp s3://restapi.publicdata.guru/sec/edgar/".$S3Path." --profile default 2>&1";
+    logEvent("downloadToS3", $s3cmd);
+    //note:  for php to have access to S3, credentials and config file must be copied from ~/.aws to /usr/share/httpd/.aws!!!
+    exec($s3cmd, $output);
+}

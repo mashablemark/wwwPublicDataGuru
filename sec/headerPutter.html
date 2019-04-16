@@ -24,28 +24,35 @@ Enter a valid accession number: <input name="adsh" id="adsh"><button id="copy" d
 </body>
 <script language="JavaScript">
     $(document).ready(function() {
-        $('#adsh').change(function () {
-            var adsh = $(this).value().trim();
-            if(adsh.match(/\b\d{10}-\d{2}-\d{5}\b/)){  //0000027996-19-000051
+        $('#adsh').keyup(function () {
+            var adsh = $(this).val().trim();
+            if(adsh.match(/\b\d{10}-\d{2}-\d{6}\b/)){  //0000027996-19-000051
                 var parts = adsh.split('-');
                 $('#copy').removeAttr('disabled');
-                $('#links').html(
-                    '<a target="_blank" href="https://www.publicdata.guru/sec/ownership.php#view=issuer&issuer='+parts[0]+'">prototype of issuer table for CIK '+parts[0]+'</a><br>'
-                    + '<a target="_blank" href="https://www.sec.gov/cgi-bin/own-disp?action=getissuer&CIK='+parts[0]+'">sec.gov issuer table for CIK '+parts[0]+'</a><br>'
-                    + '<a target="_blank" href="https://www.publicdata.guru/sec/ownership.php#view=reporter&reporter='+parts[0]+'">prototype of reporter table for CIK '+parts[0]+'</a><br>'
-                    + '<a target="_blank" href="https://www.sec.gov/cgi-bin/own-disp?action=getowner&CIK='+parts[0]+'">sec.gov reporter table for '+parts[0]+'</a><br>'
-                    + '<a target="_blank" href="https://www.publicdata.guru/sec/viewer.php?doc='+parseInt(parts[0])+'/'+parts.join('')+'/'+adsh+'&u=u&q=0&d=2018-09-30&t=x">prototype inline viewer</a>'
+                var today = new Date();
+                $('#links').html('<ol>'
+                    + '<li><a target="_blank" href="https://www.publicdata.guru/sec/ownership.php#view=issuer&issuer='+parts[0]+'">prototype of issuer table for CIK '+parts[0]+'</a></li>'
+                    + '<li><a target="_blank" href="https://www.sec.gov/cgi-bin/own-disp?action=getissuer&CIK='+parts[0]+'">sec.gov issuer table for CIK '+parts[0]+'</a></li>'
+                    + '<li><a target="_blank" href="https://www.publicdata.guru/sec/ownership.php#view=reporter&reporter='+parts[0]+'">prototype of reporter table for CIK '+parts[0]+'</a></li>'
+                    + '<li><a target="_blank" href="https://www.sec.gov/cgi-bin/own-disp?action=getowner&CIK='+parts[0]+'">sec.gov reporter table for '+parts[0]+'</a></li>'
+                    + '<li><a target="_blank" href="https://www.publicdata.guru/sec/viewer.php?doc='+parseInt(parts[0])+'/'+parts.join('')+'/'+adsh+'&u=u&q=0&d=2018-09-30&t=x">prototype inline viewer</a></li>'
+                    + '<li><a href="https://restapi.publicdata.guru/indexes/EDGARLatest10.json">Latest 10 micro-index (updated first)</a></li>'
+                    + '<li><a href="https://restapi.publicdata.guru/indexes/EDGAR'+today.toISOString().substr(0,10)+'FileIndex.json">Daily index (updated next)</a></li>'
+                    + '</ol>'
                 );
             } else {
-                $('#links').html('not a valid accession number (e.g. 0000027996-19-00005)');
+                $('#links').html('not a valid accession number (e.g. 0000027996-19-000051)');
                 $('#copy').attr('disabled', 'disabled');
             }
 
+        }).on('paste', function(e){
+            var $input = $(this);
+            setTimeout(function(){ $input.trigger("keypress")}, 100);
         });
         $('#copy').click(function () {
             params = {
                 process: 'getSubmissionFilesToTestS3',
-                adsh: $(this).value().trim()
+                adsh: $('#adsh').val().trim()
             };
             console.log('invoking server process');
             $.ajax({
@@ -54,7 +61,7 @@ Enter a valid accession number: <input name="adsh" id="adsh"><button id="copy" d
                 type: 'post',
                 data: params,
                 success: function (data, status) {
-                    $('#header-contents').html(data);
+                    $('#header-contents').html('<PRE>' + data.headerbody + '</PRE>');
                 },
                 error: function (jqXHR, textStatus, errorThrown) {
                     console.log(jqXHR);
