@@ -15,6 +15,10 @@
 
 <textarea id="files" style="width: 1000px;height: 500px;">{
     "files": [
+        "ownership/reporter/cik1178437",
+        "ownership/reporter/cik1215126",
+        "ownership/reporter/cik1035140",
+        "ownership/reporter/cik1176442",
         "ownership/reporter/cik1224944",
         "ownership/reporter/cik1059235",
         "ownership/issuer/cik320193"
@@ -22,22 +26,27 @@
 }
 </textarea><br>
 <button>fetch files</button>
-
-<div id="results">
+<p>Fetches done in parallel.  Seven objects billed at 900ms.  74MB max memory used (out of 128MB Lambda config)</p>
+<div id="results" style="border: thin solid black;">
 </div>
 </body>
 <script language="JavaScript">
     $(document).ready(function() {
         $('button').click(function () {
             var params = $('textarea').text();
+            console.time('ajax call');
+            let start = new Date();
+            $('#results').html('');
             $.ajax({
                 data: params,
                 dataType: 'JSON',
                 type: 'post',
                 url: 'https://bulk.publicdata.guru/zip/',
                 success: function (data, status) {
+                    let end = new Date();
                     console.log('successfully talked to Lambda function!');
-                    console.log(data);
+                    console.timeEnd('ajax call');
+                    $('#results').html(JSON.stringify(data));
                 },
                 error: function (jqXHR, textStatus, errorThrown) {
                     console.log(textStatus);

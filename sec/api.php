@@ -393,6 +393,7 @@ EOL;
         $submission_path = intval($parts[0]) . "/" . implode("", $parts) ."/";
         $header_filename = $adsh . "-index-headers.html";
         $header_contents = httpGet($edgar_root . $submission_path  . $header_filename);
+        //echo($edgar_root . $submission_path  . $header_filename);
         $files = preg_match_all('/<a href="\S+ml"/', $header_contents, $matches);
         for($i = 0; $i < count($matches[0]); ++$i) {
             $filename = substr($matches[0][$i], 9, strlen($matches[0][$i])-9-1);

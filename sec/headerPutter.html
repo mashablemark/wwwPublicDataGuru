@@ -10,15 +10,16 @@
 </style>
 <body>
 <h2>Test Page for processing new <i>*-header-index.html</i> S3 objects</h2>
-<p>This test bed copies a requested submissions file from SEC.gov to a S3 Bucket in this AWS account.  The bucket trigger the serverless Lambda function <b>processIndexHeader</b> on the S3 put event for file names ending with <i>-header-index.html</i>.  The <b>processIndexHeader</b> will update the <span class="">dailyIndex.json</span> and <a target="_blank" href="">last10Submissions.json</a> index files.</p>
+<p>This test bed copies a requested submissions file from SEC.gov to a S3 Bucket in this AWS account.  The bucket trigger the serverless Lambda function <b>processIndexHeader</b> on the S3 put event for file names ending with <i>-header-index.html</i>.  The <b>processIndexHeader</b> will update the <span class="">dailyIndex.json</span> and <a target="_blank" href="https://restapi.publicdata.guru/sec/indexes/last10EDGARSubmissionsFastIndex.json">last10Submissions.json</a> index files.</p>
 <p><b>processIndexHeader</b> will fire off secondary Lambda functions depending on the form type of the submission:</p>
 <ul>
     <li><b>processOwnershipFiling</b> is fired for forms 3, 3/A, 4, 4/A, 5 and 5/A to update the Issuer and Reporter API using the replicated ownership table.</li>
     <li><b>processFinancialStatement</b> is fired for forms 10K, 10K/A, 10Q, and 10Q/A to parse iXBRL and update the Issuer and Reporter API using the replicated ownership table.</li>
 </ul>
 <p><b>processIndexHeader</b> runs as a single instance, ensuring processing in order.  <b>processOwnershipFiling</b> and <b>processFinancialStatement</b> allow up to 10 concurrent instance to run. With run time in the 1 to 5 second range and <a href="https://aws.amazon.com/lambda/pricing/">Lammbda's lost cost model</a>, the annual cost of processing approximately 500,000 index headers, 202,000 ownership submission, and 19,000 financial statements is $X.XX based on actual run times.</p>
-Enter a valid accession number: <input name="adsh" id="adsh"><button id="copy" disabled="disabled">put submission files in test bucket</button>
-<div id="links">Enter a valid accession number for resource links</div>
+Enter a valid accession number for resource links (copy from <a target="_blank" href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent">Latest EDGAR Filing page</a>):<br>
+<input name="adsh" id="adsh"><button id="copy" disabled="disabled">put submission files in test bucket</button>
+<div id="links"></div>
 <h3>header index contents</h3>
 <div id="header-contents">Shown after submission files are put in test bucket</div>
 </body>
@@ -36,8 +37,8 @@ Enter a valid accession number: <input name="adsh" id="adsh"><button id="copy" d
                     + '<li><a target="_blank" href="https://www.publicdata.guru/sec/ownership.php#view=reporter&reporter='+parts[0]+'">prototype of reporter table for CIK '+parts[0]+'</a></li>'
                     + '<li><a target="_blank" href="https://www.sec.gov/cgi-bin/own-disp?action=getowner&CIK='+parts[0]+'">sec.gov reporter table for '+parts[0]+'</a></li>'
                     + '<li><a target="_blank" href="https://www.publicdata.guru/sec/viewer.php?doc='+parseInt(parts[0])+'/'+parts.join('')+'/'+adsh+'&u=u&q=0&d=2018-09-30&t=x">prototype inline viewer</a></li>'
-                    + '<li><a href="https://restapi.publicdata.guru/indexes/EDGARLatest10.json">Latest 10 micro-index (updated first)</a></li>'
-                    + '<li><a href="https://restapi.publicdata.guru/indexes/EDGAR'+today.toISOString().substr(0,10)+'FileIndex.json">Daily index (updated next)</a></li>'
+                    + '<li><a href="https://restapi.publicdata.guru/sec/indexes/last10EDGARSubmissionsFastIndex.json">Latest 10 micro-index (updated first)</a></li>'
+                    + '<li><a href="https://restapi.publicdata.guru/sec/indexes/EDGARDailyFileIndex_'+today.toISOString().substr(0,10)+'.json">Daily index (updated second)</a></li>'
                     + '</ol>'
                 );
             } else {
