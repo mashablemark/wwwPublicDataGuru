@@ -50,11 +50,12 @@ var form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pdf
 };
 
 var s3 = new AWS.S3();
+const bucket = "restapi.publicdata.guru";
 async function readS3(file){
     return new Promise((resolve, reject) => {
         let params = {
-            Bucket: "restapi.publicdata.guru",
-            Key: "sec/" + file
+            Bucket: bucket,
+            Key: file
         };
         s3.getObject(params, (err, data) => {
             if (err) console.log(err, err.stack); // an error occurred
@@ -66,7 +67,7 @@ async function writeS3(fileKey, body) {
     return new Promise((resolve, reject) => {
         s3.putObject({
             Body: JSON.stringify(body),
-            Bucket: "restapi.publicdata.guru",
+            Bucket: bucket,
             Key: fileKey
         }, (err, data) => {
             if (err) console.log(err, err.stack); // an error occurred
@@ -75,7 +76,9 @@ async function writeS3(fileKey, body) {
     });
 }
 
+
 exports.handler = async (event, context) => {
+    const db_info = secure.secdata();
     con = await mysql2.createConnection({ //global db connection
         host: db_info.host,
         user: db_info.uid,
@@ -83,19 +86,34 @@ exports.handler = async (event, context) => {
         database: 'secdata'
     });
 
-    const adsh = event.adsh;
-    const filing = {
-        xmlBody: await readS3(event.file),
-        fileName: event.fileName,
+    let filing = {
+        path: event.path,
+        fileNum: event.fileNum,
         form: event.form,
         adsh: event.adsh,
-        filerCik: event.filerCik,
+        filerCik: event.cik,
         filedDate: event.filingDate,
-        period: event.period
+        acceptanceDateTime: event.acceptanceDateTime,
+        period: event.period,
+        files: event.files
     };
-    process345Submission(filing, false);
 
+    let primaryDoc = false;
+    for (let i = 1; i < filing.files.length; i++) {
+        if (filing.files[i].title.indexOf('Document 1 - RAW XML') !== -1) {
+            filing.primaryDocumentName = files[i].file.substr(0, 4) == "sec/" ? files[i].file.substr(4) : files[i].file;
+            filing.xmlBody = await readS3(filing.path + '/' + filing.primaryDocumentName);
+        }
+    }
+
+    if (filing.xmlBody) {
+        process345Submission(filing, false);
+    } else {
+        logEvent('ownership read error', JSON.stringify(filing), true);
+    }
 };
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 function process345Submission(filing, remainsChecking){
     var $xml = cheerio.load(filing.xmlBody, {xmlMode: true});
@@ -215,7 +233,7 @@ function process345Submission(filing, remainsChecking){
 
     save345Submission(submission);
 
-    await runQuery("call updateOwnershipAPI('"+filing.adsh+"')");
+    runQuery("call updateOwnershipAPI('"+filing.adsh+"')");
 
     let invalidationParams = {
         DistributionId: 'EJG0KMRDV8F9E',
@@ -227,24 +245,30 @@ function process345Submission(filing, remainsChecking){
             }
         }
     };
-    let updatedReporterAPIDataset = await runQuery("select * from ownership_api_reporter where reportercik in ('"+reporterCiks.join("','")+"')");
-    let writePromises = [], body;
+    let updatedReporterAPIDataset = runQuery(
+        "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip "
+        + " from ownership_api_reporter where reportercik in ('"+reporterCiks.join("','")+"')"
+    );
+    let s3WritePromises = [], body;
     //reporters (one or more per submission)
-    for(let i=0; i<updatedIssuerAPIDataset.data.length;i++){
-        body =
-        writePromises.push(writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), body));
+    for(let r=0; r<updatedIssuerAPIDataset.data.length;r++){
+        body = rowToObject(updatedIssuerAPIDataset.data[r], updatedIssuerAPIDataset.fields);
+            s3WritePromises.push(writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), body));
         invalidationParams.InvalidationBatch.Paths.Items.push();
     }
-    let updatedIssuerAPIDataset = await runQuery("select * from ownership_api_issuer where issuercik = '"+submission.issuer.cik+"'");
+    let updatedIssuerAPIDataset = runQuery(
+        "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip, bastreet1, bastreet2, bacity, bastate, bazip "
+        + " from ownership_api_issuer where issuercik = '" + submission.issuer.cik+"'"
+    );
     //issuer (only one per submissions
-    writePromises.push(writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), body));
+    s3WritePromises.push(writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), body));
     invalidationParams.InvalidationBatch.Paths.Items.push();
 
     for(let i=0; i<writePromises.length;i++){
-        await writePromises[i];  //collect the S3 writer promises
+        await s3WritePromises[i];  //collect the S3 writer promises
     }
 
-    let cloudFront = AWS.CloudFront();
+    let cloudFront = AWS.CloudFront(); //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#createInvalidation-property
     invalidationParams.InvalidationBatch.Paths.Quantity = invalidationParams.InvalidationBatch.Paths.Items.length;
     await cloudFront.createInvalidation(invalidationParams);
 
@@ -260,7 +284,13 @@ function process345Submission(filing, remainsChecking){
     }
 }
 
-
+function rowToObject(row, fields){
+    let obj = {};
+    for(let f=0; f<row.length;f++){
+        obj[fields[f]] = row[f];
+    }
+    return obj;
+}
 function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
     var sql = 'INSERT INTO ownership_submission (adsh, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
@@ -333,3 +363,23 @@ function logEvent(type, msg, display){
     runQuery("insert into eventlog (event, data) values ("+q(type)+q(msg, true)+")");
     if(display) console.log(type, msg);
 }
+
+
+
+//////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
+const event = {
+    "path":"sec/edgar/27996/000002799619000051",
+    "adsh":"0000027996-19-000051",
+    "cik":"0001770249",
+    "fileNum":"001-07945",
+    "form":"4",
+    "filingDate":"20190403",
+    "acceptanceDateTime":"20190403153546",
+    "files":[
+        {"file":"xslF345X03/edgar.xml","title":"Document 1 - file: edgar.html"},
+        {"file":"edgar.xml","title":"Document 1 - RAW XML: edgar.xml"}
+    ]
+};
+//another from index    {"path":"sec/edgar/27996/000002799619000051","adsh":"0000027996-19-000051","cik":"0001770249","fileNum":"001-07945","form":"4","filingDate":"20190403","acceptanceDateTime":"20190403153546","files":[{"file":"xslF345X03/edgar.xml","title":"Document 1 - file: edgar.html"},{"file":"edgar.xml","title":"Document 1 - RAW XML: edgar.xml"}]
+await exports.handler(event);
+////////////////////////////////////////////////////////////////////////////////////////////////

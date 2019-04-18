@@ -13,7 +13,7 @@ exports.handler = async (event, context) => {
     const today = new Date();
     const isoStringToday = today.toISOString().substr(0,10);
 
-    //1. start async reading of daily index file
+    //1. start async reading of daily index file (completed in step 5)
     const dailyIndexObject = new Promise((resolve, reject) => {
         s3.getObject({
             Bucket: "restapi.publicdata.guru",
@@ -52,7 +52,10 @@ exports.handler = async (event, context) => {
         fileNum: headerInfo(indexHeaderBody, '<FILE-NUMBER>'),
         form: headerInfo(indexHeaderBody, '<FORM-TYPE>'),
         filingDate: headerInfo(indexHeaderBody, '<FILING-DATE>'),
+        period: headerInfo(indexHeaderBody, '<PERIOD>'),
         acceptanceDateTime:  headerInfo(indexHeaderBody, '<ACCEPTANCE-DATETIME>'),
+        bucket: firstS3record.bucket.name,
+        indexHeaderFileName: firstS3record.object.key,
         files: []
     };
     //4. parse and add hyperlinks to submission object
@@ -72,7 +75,7 @@ exports.handler = async (event, context) => {
     //6. add new submission
     dailyIndex.submissions.push(thisSubmission);
 
-    //7. write out last10Index.json
+    //7. async write out last10Index.json (complete in step 9
     const last10IndexBody = {
         lastUpdated: today.toISOString(),
         "title": "last 10 EDGAR submissions micro-index (updated prior to full indexes)",
@@ -90,7 +93,7 @@ exports.handler = async (event, context) => {
             else     console.log(data);           // successful response
         });
     });
-    //8. write out full dailyindex.json
+    //8. sync write out full dailyindex.json (complete in step 9)
     const revisedIndex = new Promise((resolve, reject) => {
         s3.putObject({
             Body: JSON.stringify(dailyIndex),
@@ -101,10 +104,46 @@ exports.handler = async (event, context) => {
             else     console.log(data);           // successful response
         });
     });
-    //8. write out full dailyindex.json
     //9.ensure writes are completed before letting this Lambda function terminate
     await last10Index;
     await revisedIndex;
+
+    //10.  if this submission an ownership filing?  If so, launch updateOwnershipAPI Lambda function before dying
+    const ownsershipForms = {
+        '3': 'xml',
+        '3/A': 'xml',
+        '4': 'xml',
+        '4/A': 'xml',
+        '5': 'xml',
+        '5/A': 'xml'
+    };
+    if(ownsershipForms[thisSubmission.form]) {
+        let lambda = new AWS.Lambda({
+            region: 'us-east-1'
+        });
+        lambda.invoke({ //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+            FunctionName: 'updateOwnershipAPI',
+            Payload: JSON.stringify(thisSubmission, null, 2), // include all props with 2 spaces (not sure if truly required)
+            InvocationType: 'Event' //for debug, comment out to default to synchronous mode and add err handler
+        });
+    }
+    //11. if isFinancialStatement submission?  If so, launch updateXBRLAPI Lambda function before dying
+    const financialStatementForms = {
+        '10Q': 'html',
+        '10Q/A': 'html',
+        '10K': 'html',
+        '10K/A': 'html',
+    };
+    if(financialStatementForms[thisSubmission.form]) {
+        let lambda = new AWS.Lambda({
+            region: 'us-east-1'
+        });
+        lambda.invoke({  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+            FunctionName: 'updateXBRLAPI',
+            Payload: JSON.stringify(thisSubmission, null, 2),
+            InvocationType: 'Event'  //for debug, comment out to default to synchronous mode and add err handler
+        });
+    }
 };
 
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
