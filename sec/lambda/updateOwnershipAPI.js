@@ -7,7 +7,7 @@
 //     - ownership_reporter
 //     - ownership_transaction
 //     - ownership_footnote
-//   3. call makeOwnerShipAPI(adsh) to update the rows affected by the submission in
+//   3. call updateOwnerShipAPI(adsh) to update the rows affected by the submission in
 //     - ownership_api_reporter
 //     - ownership_api_issuer
 //   4. update the reporter REST API
@@ -22,7 +22,6 @@
 // execution time = ??
 // executions per year = 210,000
 // cost per year =
-
 var cheerio = require('cheerio');
 var mysql2 = require('mysql2/promise');
 var AWS = require('aws-sdk');
@@ -70,20 +69,25 @@ async function writeS3(fileKey, body) {
             Bucket: bucket,
             Key: fileKey
         }, (err, data) => {
-            if (err) console.log(err, err.stack); // an error occurred
-            else     console.log(data);           // successful response
+            if (err) {
+                console.log(err, err.stack);
+                reject(err, err.stack);
+            } // an error occurred
+            else  resolve(data);           // successful response
         });
     });
 }
 
 
 exports.handler = async (event, context) => {
-    const db_info = secure.secdata();
+    const db_info = secure.publicdataguru_dbinfo();
+    console.log(db_info);
     con = await mysql2.createConnection({ //global db connection
-        host: db_info.host,
+        host: 'localhost',  //db_info.host,
         user: db_info.uid,
+        uid: db_info.uid,
         password: db_info.password,
-        database: 'secdata'
+        database: db_info.database
     });
 
     let filing = {
@@ -113,9 +117,8 @@ exports.handler = async (event, context) => {
     }
 };
 
-////////////////////////////////////////////////////////////////////////////////////////////////
 
-function process345Submission(filing, remainsChecking){
+async function process345Submission(filing, remainsChecking){
     var $xml = cheerio.load(filing.xmlBody, {xmlMode: true});
     if($xml('issuerCik').length!=1)
         throw 'issuerCik error in ' + filing.fileName;
@@ -233,7 +236,7 @@ function process345Submission(filing, remainsChecking){
 
     save345Submission(submission);
 
-    runQuery("call updateOwnershipAPI('"+filing.adsh+"')");
+    runQuery("call updateOwnershipAPI('"+filing.adsh+"');");
 
     let invalidationParams = {
         DistributionId: 'EJG0KMRDV8F9E',
@@ -253,7 +256,23 @@ function process345Submission(filing, remainsChecking){
     //reporters (one or more per submission)
     for(let r=0; r<updatedIssuerAPIDataset.data.length;r++){
         body = rowToObject(updatedIssuerAPIDataset.data[r], updatedIssuerAPIDataset.fields);
-            s3WritePromises.push(writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), body));
+        body.view = 'reporter';
+        body.mailingAddress = {
+            street1: body.mastreet1,
+            street2: body.mastreet2,
+            city: body.macity,
+            state: body.mastate,
+            zip: body.mazip,
+        };
+        delete body.mastreet1;
+        delete body.mastreet2;
+        delete body.macity;
+        delete body.mastate;
+        delete body.mazip;
+        body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
+        body.transactions = JSON.parse(body.transactions);
+        await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
+        //s3WritePromises.push(writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
         invalidationParams.InvalidationBatch.Paths.Items.push();
     }
     let updatedIssuerAPIDataset = runQuery(
@@ -261,9 +280,38 @@ function process345Submission(filing, remainsChecking){
         + " from ownership_api_issuer where issuercik = '" + submission.issuer.cik+"'"
     );
     //issuer (only one per submissions
-    s3WritePromises.push(writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), body));
+    body = rowToObject(updatedIssuerAPIDataset.data[0], updatedIssuerAPIDataset.fields);
+    body.view = 'issuer';
+    body.mailingAddress = {
+        street1: body.mastreet1,
+        street2: body.mastreet2,
+        city: body.macity,
+        state: body.mastate,
+        zip: body.mazip,
+    };
+    delete body.mastreet1;
+    delete body.mastreet2;
+    delete body.macity;
+    delete body.mastate;
+    delete body.mazip;
+    body.businessAddress = {
+        street1: body.bastreet1,
+        street2: body.bastreet2,
+        city: body.bacity,
+        state: body.bastate,
+        zip: body.bazip,
+    };
+    delete body.bastreet1;
+    delete body.bastreet2;
+    delete body.bacity;
+    delete body.bastate;
+    delete body.bazip;
+    body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
+    body.transactions = JSON.parse(body.transactions);
+    s3WritePromises.push(writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
     invalidationParams.InvalidationBatch.Paths.Items.push();
 
+    console.log('hi mom');
     for(let i=0; i<writePromises.length;i++){
         await s3WritePromises[i];  //collect the S3 writer promises
     }
@@ -291,6 +339,7 @@ function rowToObject(row, fields){
     }
     return obj;
 }
+
 function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
     var sql = 'INSERT INTO ownership_submission (adsh, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
@@ -348,9 +397,9 @@ function q(value, isLast){
     }
 }
 
-function runQuery(sql){
+async function runQuery(sql){
     try{
-        let [result, fields] = await con.exec(sql);
+        let [result, fields] = await con.execute(sql);
     } catch(err) {
         console.log(sql);
         logEvent("fatal MySQL error", sql, true);
@@ -381,5 +430,5 @@ const event = {
     ]
 };
 //another from index    {"path":"sec/edgar/27996/000002799619000051","adsh":"0000027996-19-000051","cik":"0001770249","fileNum":"001-07945","form":"4","filingDate":"20190403","acceptanceDateTime":"20190403153546","files":[{"file":"xslF345X03/edgar.xml","title":"Document 1 - file: edgar.html"},{"file":"edgar.xml","title":"Document 1 - RAW XML: edgar.xml"}]
-await exports.handler(event);
+  exports.handler(event);
 ////////////////////////////////////////////////////////////////////////////////////////////////
