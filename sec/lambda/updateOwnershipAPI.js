@@ -57,12 +57,17 @@ async function readS3(file){
             Key: file
         };
         s3.getObject(params, (err, data) => {
-            if (err) console.log(err, err.stack); // an error occurred
-            else     resolve(data.Body.toString('utf-8'));   // successful response  (alt method = createreadstreeam)
+            if (err) {  // an error occurred
+                console.log(err, err.stack);
+                reject(err, err.stack);
+            }
+            else { // successful response  (alt method = createreadstreeam)
+                resolve(data.Body.toString('utf-8'));
+            }
         });
     });
 }
-async function writeS3(fileKey, body) {
+function writeS3(fileKey, body) {
     return new Promise((resolve, reject) => {
         s3.putObject({
             Body: JSON.stringify(body),
@@ -80,12 +85,11 @@ async function writeS3(fileKey, body) {
 
 
 exports.handler = async (event, context) => {
+    console.time('updateOwnershipAPI');
     const db_info = secure.publicdataguru_dbinfo();
-    console.log(db_info);
     con = await mysql2.createConnection({ //global db connection
         host: 'localhost',  //db_info.host,
-        user: db_info.uid,
-        uid: db_info.uid,
+        user: db_info.user,
         password: db_info.password,
         database: db_info.database
     });
@@ -101,20 +105,20 @@ exports.handler = async (event, context) => {
         period: event.period,
         files: event.files
     };
-
     let primaryDoc = false;
     for (let i = 1; i < filing.files.length; i++) {
         if (filing.files[i].title.indexOf('Document 1 - RAW XML') !== -1) {
-            filing.primaryDocumentName = files[i].file.substr(0, 4) == "sec/" ? files[i].file.substr(4) : files[i].file;
-            filing.xmlBody = await readS3(filing.path + '/' + filing.primaryDocumentName);
+            filing.primaryDocumentName = filing.files[i].file.substr(0, 4) == "sec/" ? filing.files[i].file.substr(4) : filing.files[i].file;
+            filing.xmlBody = await readS3(filing.path + filing.primaryDocumentName);
         }
     }
 
     if (filing.xmlBody) {
-        process345Submission(filing, false);
+        await process345Submission(filing, false);
     } else {
-        logEvent('ownership read error', JSON.stringify(filing), true);
+        await logEvent('ownership read error', JSON.stringify(filing), true);
     }
+    console.log('end of lambda event handler!');
 };
 
 
@@ -146,7 +150,7 @@ async function process345Submission(filing, remainsChecking){
 
     var $owner;
     let reporterCiks = [];
-    $xml('reportingOwner').each(function (i, elem) {
+    $xml('reportingOwner').each(async function (i, elem) {
         $owner =  $xml(elem);
         let reportingOwner = {
             cik: readAndRemoveTag($owner, 'reportingOwner rptOwnerCik'), //0001112668</rptOwnerCik>
@@ -169,7 +173,7 @@ async function process345Submission(filing, remainsChecking){
         //check to see if data or values were not read (and subsequently removed)
         if(remainsChecking){
             var remains = $owner.text().trim();
-            if(remains.length>0) logEvent('reporter remains', submission.fileName + ': '+ $owner.html())
+            if(remains.length>0) await logEvent('reporter remains', submission.fileName + ': '+ $owner.html())
         }
     });
 
@@ -188,7 +192,7 @@ async function process345Submission(filing, remainsChecking){
     ];
 
     transactionRecordTypes.forEach(function(transactionRecordType, index){
-        $xml(transactionRecordType.path).each(function (i, elem) {
+        $xml(transactionRecordType.path).each(async function (i, elem) {
             //need to
             $trans = $xml(elem);
             trans = {
@@ -226,17 +230,18 @@ async function process345Submission(filing, remainsChecking){
             if(remainsChecking) {
                 $trans.find('footnoteId').remove();
                 var remains = $trans.text().trim();
-                if(remains.length>0) logEvent(transactionRecordType.path + ' remains', submission.fileName + ': '+ $trans.html())
+                if(remains.length>0) {
+                    await logEvent(transactionRecordType.path + ' remains', submission.fileName + ': '+ $trans.html());
+                }
                 delete $trans;
             }
         });
 
     });
     if(transactions.length) submission.transactions = transactions;
-
-    save345Submission(submission);
-
-    runQuery("call updateOwnershipAPI('"+filing.adsh+"');");
+    //console.log(submission);
+    await save345Submission(submission);
+    await runQuery("call updateOwnershipAPI('"+filing.adsh+"');");
 
     let invalidationParams = {
         DistributionId: 'EJG0KMRDV8F9E',
@@ -248,14 +253,14 @@ async function process345Submission(filing, remainsChecking){
             }
         }
     };
-    let updatedReporterAPIDataset = runQuery(
+    let updatedReporterAPIDataset = await runQuery(
         "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip "
-        + " from ownership_api_reporter where reportercik in ('"+reporterCiks.join("','")+"')"
+        + " from ownership_api_reporter where cik in ('"+reporterCiks.join("','")+"')"
     );
     let s3WritePromises = [], body;
     //reporters (one or more per submission)
-    for(let r=0; r<updatedIssuerAPIDataset.data.length;r++){
-        body = rowToObject(updatedIssuerAPIDataset.data[r], updatedIssuerAPIDataset.fields);
+    for(let r=0; r<updatedReporterAPIDataset.data.length;r++){
+        body = updatedReporterAPIDataset.data[r];
         body.view = 'reporter';
         body.mailingAddress = {
             street1: body.mastreet1,
@@ -271,16 +276,17 @@ async function process345Submission(filing, remainsChecking){
         delete body.mazip;
         body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
         body.transactions = JSON.parse(body.transactions);
-        await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
-        //s3WritePromises.push(writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
+        console.log(body);
+        //await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
+        s3WritePromises.push(writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
         invalidationParams.InvalidationBatch.Paths.Items.push();
     }
-    let updatedIssuerAPIDataset = runQuery(
+    let updatedIssuerAPIDataset = await runQuery(
         "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip, bastreet1, bastreet2, bacity, bastate, bazip "
-        + " from ownership_api_issuer where issuercik = '" + submission.issuer.cik+"'"
+        + " from ownership_api_issuer where cik = '" + submission.issuer.cik+"'"
     );
     //issuer (only one per submissions
-    body = rowToObject(updatedIssuerAPIDataset.data[0], updatedIssuerAPIDataset.fields);
+    body = updatedIssuerAPIDataset.data[0];
     body.view = 'issuer';
     body.mailingAddress = {
         street1: body.mastreet1,
@@ -311,12 +317,11 @@ async function process345Submission(filing, remainsChecking){
     s3WritePromises.push(writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
     invalidationParams.InvalidationBatch.Paths.Items.push();
 
-    console.log('hi mom');
-    for(let i=0; i<writePromises.length;i++){
+    for(let i=0; i<s3WritePromises.length;i++){
         await s3WritePromises[i];  //collect the S3 writer promises
     }
-
-    let cloudFront = AWS.CloudFront(); //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#createInvalidation-property
+    console.log('promises collected');
+    let cloudFront = new AWS.CloudFront(); //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#createInvalidation-property
     invalidationParams.InvalidationBatch.Paths.Quantity = invalidationParams.InvalidationBatch.Paths.Items.length;
     await cloudFront.createInvalidation(invalidationParams);
 
@@ -340,14 +345,15 @@ function rowToObject(row, fields){
     return obj;
 }
 
-function save345Submission(s){
+async function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
+    console.time('updateOwnershipAPI');
     var sql = 'INSERT INTO ownership_submission (adsh, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
         + ' remarks, signatures, txtfilesize, tries) '
         + " VALUES (" +q(s.adsh) + q(s.documentType) + q(s.schemaVersion) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
         + q(s.issuer.cik) + q(s.issuer.name)+q(s.issuer.tradingSymbol)+q(s.remarks)+q(s.signatures) + s.fileSize +',1)'
             + ' on duplicate key update tries = tries + 1';
-    runQuery(sql);
+    await runQuery(sql);
 
     //save reporting owner records
     for(var ro=0; ro<s.reportingOwners.length;ro++){
@@ -358,7 +364,7 @@ function save345Submission(s){
         + q(owner.state) + q(owner.stateDescription) +  q(owner.zip) + q(owner.isDirector)+q(owner.isOfficer)
         + q(owner.isTenPercentOwner)+ q(owner.isOther )+ q(owner.otherText, true) + ')'
             + ' on duplicate key update ownernum = ownernum';
-        runQuery(sql);
+        await runQuery(sql);
     }
     //save any footnote records
     for(var f=0; f<s.footnotes.length;f++){
@@ -366,7 +372,7 @@ function save345Submission(s){
         sql ='INSERT INTO ownership_footnote (adsh, fnum, footnote) '
             + ' value ('+q(s.adsh)+foot.id.substr(1)+','+q(foot.text, true) + ')'
             + ' on duplicate key update adsh = adsh';
-        runQuery(sql);
+        await runQuery(sql);
     }
 
     //save transaction records
@@ -381,9 +387,9 @@ function save345Submission(s){
         + q(trans.underlyingSecurityShares)+ q(trans.underlyingSecurityValue) + q(trans.sharesOwnedFollowingTransaction)+ q(trans.valueOwnedFollowingTransaction)
         + q(trans.directOrIndirectOwnership) + q(trans.natureOfOwnership, true) + ')'
             + ' on duplicate key update transnum = transnum';
-        runQuery(sql);
+        await runQuery(sql);
         for(var tf=0; tf<trans.footnotes.length;tf++){
-            runQuery('INSERT INTO ownership_transaction_footnote (adsh, tnum, fnum) values ('+q(s.adsh)+(t+1)+','+trans.footnotes[tf].substr(1)+')'
+            await runQuery('INSERT INTO ownership_transaction_footnote (adsh, tnum, fnum) values ('+q(s.adsh)+(t+1)+','+trans.footnotes[tf].substr(1)+')'
              + ' on duplicate key update tnum = '+(t+1));
         }
     }
@@ -400,16 +406,16 @@ function q(value, isLast){
 async function runQuery(sql){
     try{
         let [result, fields] = await con.execute(sql);
+        return {data: result, fields: fields}
     } catch(err) {
         console.log(sql);
-        logEvent("fatal MySQL error", sql, true);
+        await logEvent("fatal MySQL error", sql, true);
         throw err;
     }
-    return {data: result, fields: fields}
 }
 
-function logEvent(type, msg, display){
-    runQuery("insert into eventlog (event, data) values ("+q(type)+q(msg, true)+")");
+async function logEvent(type, msg, display){
+    await runQuery("insert into eventlog (event, data) values ("+q(type)+q(msg, true)+")");
     if(display) console.log(type, msg);
 }
 
@@ -417,7 +423,7 @@ function logEvent(type, msg, display){
 
 //////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 const event = {
-    "path":"sec/edgar/27996/000002799619000051",
+    "path":"sec/edgar/27996/000002799619000051/",
     "adsh":"0000027996-19-000051",
     "cik":"0001770249",
     "fileNum":"001-07945",

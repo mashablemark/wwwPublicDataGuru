@@ -34,7 +34,7 @@ allowing 10 years of ownership (~1.2 million files) to be ingesting in under 5h.
 var request = require('request');
 var util = require('util');
 var cheerio = require('cheerio');
-var mysql = require('mysql');
+var mysql = require('mysql2');
 var fs = require('fs');
 var exec = require('child_process').exec;
 var secure = require('./secure');
@@ -82,16 +82,18 @@ startCrawl(processControl);
 
 function startCrawl(processControl){
     exec('rm -r '+processControl.directory +'*').on('exit', function(code) { //clear the any remains of last crawl
-        var db_info = secure.secdata();
+        var db_info = secure.publicdataguru_dbinfo();
+        console.log(db_info);
         con = mysql.createConnection({ //global db connection
             host: db_info.host,
-            user: db_info.uid,
-            password: db_info.password,
-            database: 'secdata'
+            database: db_info.database,
+            user: db_info.user,
+            password: db_info.password
         });
 
         con.connect(function(err) {
             if (err) throw err;
+            //console.log('connected!');process.exit();
             startDownloadManager(processControl, function(){
                 console.log(processControl);
                 logEvent('processing finished',JSON.stringify(processControl), true);
