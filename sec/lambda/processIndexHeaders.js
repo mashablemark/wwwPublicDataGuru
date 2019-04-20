@@ -9,7 +9,7 @@ exports.handler = async (event, context) => {
     let bucket = firstS3record.bucket.name;
     let key = firstS3record.object.key;
     const size = firstS3record.object.bytes;
-    const folder = key.substr(0, key.lastIndexOf('/'));
+    const folder = key.substr(0, key.lastIndexOf('/')+1);
     const today = new Date();
     const isoStringToday = today.toISOString().substr(0,10);
 
@@ -89,8 +89,14 @@ exports.handler = async (event, context) => {
             Bucket: "restapi.publicdata.guru",
             Key: "sec/indexes/last10EDGARSubmissionsFastIndex.json"
         }, (err, data) => {
-            if (err) console.log(err, err.stack); // an error occurred
-            else     console.log(data);           // successful response
+            if (err) {
+                console.log('S3 write error');
+                console.log(err, err.stack); // an error occurred
+                reject(err);
+            }
+            else {
+                resolve(data); // successful response
+            }
         });
     });
     //8. sync write out full dailyindex.json (complete in step 9)
@@ -100,13 +106,19 @@ exports.handler = async (event, context) => {
             Bucket: "restapi.publicdata.guru",
             Key: "sec/indexes/EDGARDailyFileIndex_"+ isoStringToday + ".json"
         }, (err, data) => {
-            if (err) console.log(err, err.stack); // an error occurred
-            else     console.log(data);           // successful response
+            if (err) {
+                console.log('S3 write error');
+                console.log(err, err.stack); // an error occurred
+                reject(err);
+            }
+            else {
+                resolve('successful s3 write'); // data); // successful response
+            }
         });
     });
     //9.ensure writes are completed before letting this Lambda function terminate
-    await last10Index;
-    await revisedIndex;
+    console.log(await last10Index);
+    console.log(await revisedIndex);
 
     //10.  if this submission an ownership filing?  If so, launch updateOwnershipAPI Lambda function before dying
     const ownsershipForms = {
@@ -121,11 +133,18 @@ exports.handler = async (event, context) => {
         let lambda = new AWS.Lambda({
             region: 'us-east-1'
         });
-        lambda.invoke({ //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
-            FunctionName: 'updateOwnershipAPI',
-            Payload: JSON.stringify(thisSubmission, null, 2), // include all props with 2 spaces (not sure if truly required)
-            InvocationType: 'Event' //for debug, comment out to default to synchronous mode and add err handler
-        });
+        lambda.invokeAsync(
+            { //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+                FunctionName: 'arn:aws:lambda:us-east-1:008161247312:function:updateOwnershipAPI',
+                Payload: JSON.stringify(thisSubmission, null, 2) // include all props with 2 spaces (not sure if truly required)
+                InvocationType: 'Event' //for debug, comment out to default to synchronous mode and add err handler
+            },
+            function(err, data) {
+                //if (err) console.log(err, err.stack); // an error occurred
+                //else     console.log(data);           // successful response
+            });
+        //console.log(output);
+        //console.log('found an ownership form and invoked updateOwnershipAPI');
     }
     //11. if isFinancialStatement submission?  If so, launch updateXBRLAPI Lambda function before dying
     const financialStatementForms = {
@@ -138,12 +157,13 @@ exports.handler = async (event, context) => {
         let lambda = new AWS.Lambda({
             region: 'us-east-1'
         });
-        lambda.invoke({  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+        lambda.invokeAsync({  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
             FunctionName: 'updateXBRLAPI',
             Payload: JSON.stringify(thisSubmission, null, 2),
             InvocationType: 'Event'  //for debug, comment out to default to synchronous mode and add err handler
         });
     }
+    return {status: 'ok'}
 };
 
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars

@@ -19,9 +19,10 @@
 //     - write to S3: restdata.publicdata.guru/sec/
 //     - tell cloudFront to refresh the cache for the updated issuer API file
 
-// execution time = ??
+// to compile:  zip -r updateOwnershipAPI.zip updateOwnershipAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js
+// execution time = 2.9s
 // executions per year = 210,000
-// cost per year =
+// cost per year = $1.27
 var cheerio = require('cheerio');
 var mysql2 = require('mysql2/promise');
 var AWS = require('aws-sdk');
@@ -67,10 +68,10 @@ async function readS3(file){
         });
     });
 }
-function writeS3(fileKey, body) {
+function writeS3(fileKey, text) {
     return new Promise((resolve, reject) => {
         s3.putObject({
-            Body: JSON.stringify(body),
+            Body: text,
             Bucket: bucket,
             Key: fileKey
         }, (err, data) => {
@@ -85,10 +86,9 @@ function writeS3(fileKey, body) {
 
 
 exports.handler = async (event, context) => {
-    console.time('updateOwnershipAPI');
     const db_info = secure.publicdataguru_dbinfo();
     con = await mysql2.createConnection({ //global db connection
-        host: 'localhost',  //db_info.host,
+        host: db_info.host, //'localhost',  //,
         user: db_info.user,
         password: db_info.password,
         database: db_info.database
@@ -246,7 +246,7 @@ async function process345Submission(filing, remainsChecking){
     let invalidationParams = {
         DistributionId: 'EJG0KMRDV8F9E',
         InvalidationBatch: {
-            CallerReference: submission.adsh,
+            CallerReference: submission.adsh+'_'+ new Date().getTime(),
             Paths: {
                 Quantity: 0,
                 Items: []
@@ -279,7 +279,7 @@ async function process345Submission(filing, remainsChecking){
         console.log(body);
         //await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
         s3WritePromises.push(writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
-        invalidationParams.InvalidationBatch.Paths.Items.push();
+        invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/reporter/cik'+parseInt(body.cik));
     }
     let updatedIssuerAPIDataset = await runQuery(
         "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip, bastreet1, bastreet2, bacity, bastate, bazip "
@@ -315,7 +315,7 @@ async function process345Submission(filing, remainsChecking){
     body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
     body.transactions = JSON.parse(body.transactions);
     s3WritePromises.push(writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
-    invalidationParams.InvalidationBatch.Paths.Items.push();
+    invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik));
 
     for(let i=0; i<s3WritePromises.length;i++){
         await s3WritePromises[i];  //collect the S3 writer promises
@@ -328,6 +328,7 @@ async function process345Submission(filing, remainsChecking){
     //close connection and terminate lambda function by ending handler function
     await con.end();
 
+    return {status: 'ok'};
 
     function readAndRemoveTag($xml, tagPath, remainsChecking){
         var $tag = $xml.find(tagPath);
@@ -347,7 +348,6 @@ function rowToObject(row, fields){
 
 async function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
-    console.time('updateOwnershipAPI');
     var sql = 'INSERT INTO ownership_submission (adsh, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
         + ' remarks, signatures, txtfilesize, tries) '
         + " VALUES (" +q(s.adsh) + q(s.documentType) + q(s.schemaVersion) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
@@ -421,7 +421,7 @@ async function logEvent(type, msg, display){
 
 
 
-//////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
+/*////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 const event = {
     "path":"sec/edgar/27996/000002799619000051/",
     "adsh":"0000027996-19-000051",
@@ -435,6 +435,5 @@ const event = {
         {"file":"edgar.xml","title":"Document 1 - RAW XML: edgar.xml"}
     ]
 };
-//another from index    {"path":"sec/edgar/27996/000002799619000051","adsh":"0000027996-19-000051","cik":"0001770249","fileNum":"001-07945","form":"4","filingDate":"20190403","acceptanceDateTime":"20190403153546","files":[{"file":"xslF345X03/edgar.xml","title":"Document 1 - file: edgar.html"},{"file":"edgar.xml","title":"Document 1 - RAW XML: edgar.xml"}]
   exports.handler(event);
-////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////*/
