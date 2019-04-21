@@ -59,16 +59,24 @@ exports.handler = async (event, context) => {
         files: []
     };
     //4. parse and add hyperlinks to submission object
+    const rgxSECTableLinks = /\bR\d+\.htm\b/;
     const links = indexHeaderBody.match(/<a href="[^<]+<\/a>/g); // '/<a href="\S+"/g');
     for(let i=0; i<links.length;i++){
         let firstQuote = links[i].indexOf('"');
         let relativeKey = links[i].substr(firstQuote+1, links[i].indexOf('"',firstQuote+1)-firstQuote-1);
         let firstCloseCarrot = links[i].indexOf('>');
         let description = links[i].substr(firstCloseCarrot+1, links[i].indexOf('<',firstCloseCarrot+1)-firstCloseCarrot-1);
-        thisSubmission.files.push({
+        let linkLocation = indexHeaderBody.indexOf(links[i]);
+        let linkSection = indexHeaderBody.substring(indexHeaderBody.substr(0, linkLocation).lastIndexOf('&lt;DOCUMENT&gt;'), linkLocation);
+        let fileType = headerInfo(linkSection, '&lt;TYPE&gt;');
+        let fileDescription = headerInfo(linkSection, '&lt;DESCRIPTION&gt;');
+        let skip = fileDescription=='IDEA: XBRL DOCUMENT' && rgxSECTableLinks.test(relativeKey); //dont add the OSD created derived table to the JSON index
+        if(!skip) thisSubmission.files.push({
             file: relativeKey,
-            title: description
-        })
+            title: description,
+            type: fileType,
+            desc: fileDescription
+        });
     }
     //5. read daily archive (create new archive if not found)
     const dailyIndex = await dailyIndexObject;
@@ -133,18 +141,26 @@ exports.handler = async (event, context) => {
         let lambda = new AWS.Lambda({
             region: 'us-east-1'
         });
-        lambda.invokeAsync(
-            { //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
-                FunctionName: 'arn:aws:lambda:us-east-1:008161247312:function:updateOwnershipAPI',
-                Payload: JSON.stringify(thisSubmission, null, 2) // include all props with 2 spaces (not sure if truly required)
-                InvocationType: 'Event' //for debug, comment out to default to synchronous mode and add err handler
+        console.log('about to invoke updateOwnershipAPI');
+        let li = lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+            {
+                FunctionName: 'updateOwnershipAPI',
+                Payload: JSON.stringify(thisSubmission, null, 2), // include all props with 2 spaces (not sure if truly required)
+                InvocationType: 'Event'
             },
-            function(err, data) {
-                //if (err) console.log(err, err.stack); // an error occurred
-                //else     console.log(data);           // successful response
-            });
-        //console.log(output);
-        //console.log('found an ownership form and invoked updateOwnershipAPI');
+            function(error, data) {
+                if (error) {
+                    console.log(error);
+                }
+                if(data.Payload){
+                    context.succeed(data.Payload);
+                    console.log('succeeded in invoking updateOwnershipAPI');
+                }
+            }
+        );
+        li.send();
+        console.log('after invoke (but not from inside)');
+        //console.log(li);
     }
     //11. if isFinancialStatement submission?  If so, launch updateXBRLAPI Lambda function before dying
     const financialStatementForms = {
@@ -170,5 +186,5 @@ const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whi
 function headerInfo(fileBody, tag){
     let tagStart = fileBody.indexOf(tag);
     if(tagStart==-1) return false;
-    return fileBody.substring(tagStart + tag.length, fileBody.indexOf('<', tagStart+1)-1).replace(rgxTrim,'');
+    return fileBody.substring(tagStart + tag.length, fileBody.indexOf('\n', tagStart+1)).replace(rgxTrim,'');
 }

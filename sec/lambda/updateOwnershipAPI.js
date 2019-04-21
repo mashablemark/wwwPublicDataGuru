@@ -21,8 +21,9 @@
 
 // to compile:  zip -r updateOwnershipAPI.zip updateOwnershipAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js
 // execution time = 2.9s
-// executions per year = 210,000
-// cost per year = $1.27
+// ownership submissions per year = 210,000
+// Lambda execution costs for updateOwnershipAPI per year = $1.27
+// CloudFront Ownership invalidation costs per year = 210,000 * (1 issuer path + 1 reporter path) = $2,100 per year
 var cheerio = require('cheerio');
 var mysql2 = require('mysql2/promise');
 var AWS = require('aws-sdk');
@@ -93,6 +94,7 @@ exports.handler = async (event, context) => {
         password: db_info.password,
         database: db_info.database
     });
+    await logEvent('updateOwnerShip API invoked', JSON.stringify(event));
 
     let filing = {
         path: event.path,
