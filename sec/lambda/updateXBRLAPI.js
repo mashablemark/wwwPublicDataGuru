@@ -42,16 +42,17 @@ var secure = require('./secure');  //must not be committed
 
 var skipNameSpaces = ['dei','xbrli'];  //already scrapped in parts 1. of this routine, but for "deiNumTags" exceptions
 var standardNumericalTaxonomies = ['us-gaap', 'ifrs', 'invest', 'dei', 'srt'];
+var standardQuarters = [0, 1, 4];
 var deiNumTags = ['EntityCommonStockSharesOutstanding', 'EntityListingParValuePerShare',
     'EntityNumberOfEmployees' ,'EntityPublicFloat'];  //dei tags scraped by DERA (but not other such as period, fy...
 
 var con;  //global db connection
 var XBRLDocuments= {
     iXBRL: {
-        'FORM 10-Q': 'html',
-        'FORM 10-Q/A': 'html',
-        'FORM 10-K': 'html',
-        'FORM 10-K/A': 'html',
+        '10-Q': 'html',
+        '10-Q/A': 'html',
+        '10-K': 'html',
+        '10-K/A': 'html',
     },
     XBRL: {
         'XBRL INSTANCE DOCUMENT': 'xml'
@@ -102,7 +103,7 @@ exports.handler = async (event, context) => {
         password: db_info.password,
         database: db_info.database
     });
-    await logEvent('updateXBRL API invoked', JSON.stringify(event));
+    await logEvent('updateXBRL API started', JSON.stringify(event));
 
     let filing = {
         path: event.path,
@@ -115,18 +116,26 @@ exports.handler = async (event, context) => {
         period: event.period,
         files: event.files
     };
-    for (let i = 1; i < filing.files.length; i++) {
-        if(XBRLDocuments.iXBRL[filing.files[i].type]) {
+    let submission = {};
+    for (let i = 0; i < filing.files.length; i++) {
+        console.log(i, filing.files[i].fileType);
+        if(XBRLDocuments.iXBRL[filing.files[i].fileType]) {
+            console.log('found iXBRL document');
             let fileBody = await readS3(filing.path + filing.primaryDocumentName);
             await parseIXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
         }
-        if(XBRLDocuments.XBRL[filing.files[i].type]) {
+       /* if(XBRLDocuments.XBRL[filing.files[i].type]) {
             let fileBody = await readS3(filing.path + filing.primaryDocumentName);
             await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
-        }
+        }*/
     }
-    if(submission)
-    console.log('end of lambda event handler!');
+    console.log('parsed document');
+    console.log(submission);
+    if(submission.contextTree) {
+        console.log('saving submission...');
+        await saveXBRLSubmission(submission);
+    }
+    console.log('sub mission saved: end of updateXBRL lambda event handler!');
 };
 
 
@@ -304,100 +313,120 @@ function parseXBRL($, submission){
     }
 }
 
-function parseIXBRL($, submission){
+function parseIXBRL($, parsedFacts){
     console.log('parseIXBRL');
-    var $reportingPeriod = $('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]'),
+    let $reportingPeriod = $('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]');
+    if($reportingPeriod)
         contextref = $reportingPeriod.attr('contextref'),
-        ddate = new Date($reportingPeriod.text()),
+        cdate = new Date($reportingPeriod.text()),
         fy = parseInt(contextref.substr(2,4)),
         fq = parseInt(contextref.substr(7,1)),
-        fdate = new Date(fy, fq*3, 0),
-        ixbrlViewer = {contextTree: {}, standardTagTree: {}};
-    ixbrlViewer.deltaMonth = (fy-ddate.getFullYear())*12 + (fdate.getMonth()-ddate.getMonth());
-    ixbrlViewer.reportForm = $('ix\\:nonnumeric[name="dei\\:DocumentType"]').text();
-    ixbrlViewer.reportPeriod = fy + (fq==4?' FY':' Q'+fq);
+        fdate = new Date(fy, fq*3, 0);
+    if(!parsedFacts ) parsedFacts = {};
+    if(!parsedFacts.contextTree ) parsedFacts.contextTree = {};
+    if(!parsedFacts.standardTagTree ) parsedFacts.standardTagTree = {};
+    parsedFacts.deltaMonth = (fy-ddate.getFullYear())*12 + (fdate.getMonth()-ddate.getMonth());
+    parsedFacts.reportForm = $('ix\\:nonnumeric[name="dei\\:DocumentType"]').text();
+    parsedFacts.reportPeriod = fy + (fq==4?' FY':' Q'+fq);
     var docPart = window.location.href.split('?doc=')[1].split('/');
-    ixbrlViewer.cik = docPart[0];
-    ixbrlViewer.adsh = docPart[1];
+    parsedFacts.cik = docPart[0];
+    parsedFacts.adsh = docPart[1];
 
     //get iXBRL context tags make lookup tree for contextRef date values and dimensions
-    var $context, start, end, ddate, $this, $start, $member;
+    let $context, $start, start, end, dtStart, dtEnd, $this, $member;
     $('xbrli\\:context').each(function(i) {
         $this = $(this);
         $start = $this.find('xbrli\\:startdate');
+        //todo:  check that if a date format is given, it is either ISO or d/m/y
         if($start.length==1) {
-            start = new Date($start.html().trim());
-            ddate = $this.find('xbrli\\:enddate').html().trim();
-            end = new Date(ddate);
-            ixbrlViewer.contextTree[$this.attr('id')] = {
-                ddate: ddate,
-                qtrs: ((end.getFullYear() - start.getFullYear())*12 + (end.getMonth() - start.getMonth())) / 3
+            start = $start.html().trim();
+            dtStart = new Date(start);
+            end = $this.find('xbrli\\:enddate').html().trim();
+            dtEnd = new Date(ddate);
+            parsedFacts.contextTree[$this.attr('id')] = {
+                start: start,
+                end: end,
+                qtrs: Math.round((dtEnd.parse() - dtStart.parse())/(24*3600)/(365/4))  //account for non calendar quarters (e.g. "closest Friday to ...")
             }
         } else {
-            ddate = $this.find('xbrli\\:instant').html();
-            ixbrlViewer.contextTree[$this.attr('id')] = {
-                ddate: ddate,
+            end = $this.find('xbrli\\:instant').html();
+            parsedFacts.contextTree[$this.attr('id')] = {
+                end: end,
                 qtrs: 0
             }
         }
         $member = $this.find('xbrldi\\:explicitmember');
         if($member.length && $member.attr('dimension')){
-            ixbrlViewer.contextTree[$this.attr('id')].member = $member.html().trim();
-            ixbrlViewer.contextTree[$this.attr('id')].dim = $member.attr('dimension');
+            parsedFacts.contextTree[$this.attr('id')].member = $member.html().trim();
+            parsedFacts.contextTree[$this.attr('id')].dim = $member.attr('dimension');
         }
     });
 
     //get iXBRL unit tags and make lookup tree for unitRef values
-    var $measure, unitParts;
+    var $measure, $num, $denom, unitParts;
     $('xbrli\\:unit').each(function(i) {
         $this = $(this);
-        $measure = $this.find('xbrli\\:unitnumerator xbrli\\:measure');
-        if($measure.length==0) $measure = $this.find('xbrli\\:measure');
-        if($measure.length==1){
-            unitParts = $measure.html().split(':');
-            ixbrlViewer.unitTree[$this.attr('id')] = unitParts.length>1?unitParts[1]:unitParts[0];
+        $num = $this.find('xbrli\\:unitNumerator xbrli\\:measure');
+        if (!$num.length) $num = $this.find('unitNumerator measure');
+        $denom = $this.find('xbrli\\:unitDenominator xbrli\\:measure');
+        if (!$denom.length) $denom = $this.find('unitDenominator measure');
+
+        if ($num.length == 1 && $denom.length == 1) {
+            parsedFacts.unitTree[this.attribs.id] = {
+                nomid: $num.text().split(':').pop(),
+                denomid: $denom.text().split(':').pop()
+            }
         } else {
-            console.log('error parsing iXBRL unit tag:', this);
-            process.exit();
+            $measure = $this.find('xbrli\\:measure');
+            if (!$measure.length) $measure = $this.find('measure');
+            if ($measure.length == 1) {
+                parsedFacts.unitTree[this.attribs.id] = $measure.html().split(':').pop();
+            } else {
+                console.log('error parsing XBRL unit tag:', this.attribs.id);
+                process.exit();
+            }
         }
     });
 
-    var $standardTag, navigateToTag = false;
     $('ix\\:nonfraction').each(function(i){
         var xbrl = extractXbrlInfo(this);
         if(xbrl.isStandard){
-            if(!xbrl.dim && (xbrl.qtrs ==0 || xbrl.qtrs ==1 || xbrl.qtrs ==4)) {
-                if (!ixbrlViewer.standardTagTree['Q' + xbrl.qtrs]) ixbrlViewer.standardTagTree['Q' + xbrl.qtrs] = {};
-                if (!ixbrlViewer.standardTagTree['Q' + xbrl.qtrs][xbrl.uom]) ixbrlViewer.standardTagTree['Q' + xbrl.qtrs][xbrl.uom] = [];
-                if (ixbrlViewer.standardTagTree['Q' + xbrl.qtrs][xbrl.uom].indexOf(xbrl.tag) === -1) {
-                    ixbrlViewer.standardTagTree['Q' + xbrl.qtrs][xbrl.uom].push(xbrl.tag);
+            if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
+                if (!parsedFacts.standardTagTree['Q' + xbrl.qtrs]) parsedFacts.standardTagTree['Q' + xbrl.qtrs] = {};
+                if (!parsedFacts.standardTagTree['Q' + xbrl.qtrs][xbrl.uom]) parsedFacts.standardTagTree['Q' + xbrl.qtrs][xbrl.uom] = [];
+                if (parsedFacts.standardTagTree['Q' + xbrl.qtrs][xbrl.uom].indexOf(xbrl.tag) === -1) {
+                    parsedFacts.standardTagTree['Q' + xbrl.qtrs][xbrl.uom].push(xbrl.tag);
                 }
             }
         }
     });
+    return parsedFacts;
 }
 
 function extractXbrlInfo(ix){
-    var $ix = $(ix),
-        nameParts = $ix.attr('name').split(':'),
-        contextRef = $ix.attr('contextref'),
-        unitRef = $ix.attr('unitref');
-    var xbrl = {
+    let $ix = $(ix),
+    nameParts = $ix.attr('name').split(':'),
+    contextRef = $ix.attr('contextref'),
+    unitRef = $ix.attr('unitref'),
+    xbrl = {
         uom: this.unitTree[unitRef],
         taxonomy: nameParts[0],
         tag: nameParts[1],
         sign: $(ix).attr('sign'),
         isGaap: nameParts[0]=='us-gaap',
-        isStandard: this.standardNumericalTaxonomies.indexOf(nameParts[0])!==-1,
-        value: $(ix).text(),
+        isStandard: standardNumericalTaxonomies.indexOf(nameParts[0])!==-1,
+        value: $(ix).text().trim(),
         cik: this.cik,
         num_adsh: this.adsh
     };
     if(this.contextTree[contextRef]){
         xbrl.qtrs = this.contextTree[contextRef].qtrs;
-        xbrl.ddate = this.contextTree[contextRef].ddate;
+        xbrl.end = this.contextTree[contextRef].end;
+        if(xbrl.start) xbrl.start = this.contextTree[contextRef].start;
         xbrl.member = (xbrl.member?xbrl.member:false);
         xbrl.dim = (xbrl.dim?xbrl.dim:false);
+    } else {
+        console.log('no contextRef for ' + JSON.stringify(xbrl));
     }
     return xbrl;
 }
@@ -438,9 +467,9 @@ async function saveXBRLSubmission(s){
                 if (coreg.length > 5 && coreg.substr(-5, 5) == 'Member') coreg = coreg.substr(0, coreg.length - 5);  //hack to match DERA dataset
             } else coreg = '';
             version = (standardNumericalTaxonomies.indexOf(fact.ns) == -1) ? s.adsh : fact.ns;
-            numSQL = 'insert into fin_num (adsh, tag, version, coreg, ddate, qtrs, uom, value, footnote) values '
-                + "('" + s.adsh + "','" + fact.tag + "','" + version + "','" + coreg + "','" + context.ddate + "','" + context.qtrs
-                + "','" + unit + "','" + fact.val + "','')";
+            numSQL = 'insert into fin_num (adsh, tag, version, coreg, start, end, qtrs, uom, value, footnote) values '
+                + "(" + q(s.adsh) + q(fact.tag) + q(version) + a(coreg) + q(context.start)  + q(context.end)  + q(context.qtrs)
+                + q(unit)+ q(fact.val) + "','')";
             await runQuery(numSQL);
         } else {
             logError('context not found', s.urlIndexFile + ': ' + JSON.stringify(fact));  //must have a context ref to save
@@ -474,9 +503,8 @@ async function logEvent(type, msg, display){
 }
 
 
-
 /////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
-// iXBRL 10Q test:  https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index.htm
+// TEST Card A: iXBRL 10Q:  https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index.htm
 const event = {"path":"sec/edgar/29905/000002990519000029/",
     "adsh":"0000029905-19-000029",
     "cik":"0000029905",
@@ -488,32 +516,33 @@ const event = {"path":"sec/edgar/29905/000002990519000029/",
     "bucket":"restapi.publicdata.guru",
     "indexHeaderFileName":"sec/edgar/29905/000002990519000029/0000029905-19-000029-index-headers.html",
     "files":[
-        {"file":"dov-20190331.htm","title":"Document 1 - file: dov-20190331.htm","type":"10-Q","desc":"10-Q"},
-        {"file":"a2019033110-qex101.htm","title":"Document 2 - file: a2019033110-qex101.htm","type":"EX-10.1","desc":"EX - 10.1"},
-        {"file":"a2019033110-qexhibit102.htm","title":"Document 3 - file: a2019033110-qexhibit102.htm","type":"EX-10.2","desc":"EX - 10.2"},
-        {"file":"a2019033110-qexhibit103.htm","title":"Document 4 - file: a2019033110-qexhibit103.htm","type":"EX-10.3","desc":"EX - 10.3"},
-        {"file":"a2019033110-qex104.htm","title":"Document 5 - file: a2019033110-qex104.htm","type":"EX-10.4","desc":"EX - 10.4"},
-        {"file":"a2019033110-qexhibit311.htm","title":"Document 6 - file: a2019033110-qexhibit311.htm","type":"EX-31.1","desc":"EX - 31.1"},
-        {"file":"a2019033110-qexhibit312.htm","title":"Document 7 - file: a2019033110-qexhibit312.htm","type":"EX-31.2","desc":"EX - 31.2"},
-        {"file":"a2019033110-qexhibit32.htm","title":"Document 8 - file: a2019033110-qexhibit32.htm","type":"EX-32","desc":"EX - 32"},
-        {"file":"dov-20190331.xsd","title":"Document 9 - file: dov-20190331.xsd","type":"EX-101.SCH","desc":"XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT"},
-        {"file":"dov-20190331_cal.xml","title":"Document 10 - file: dov-20190331_cal.xml","type":"EX-101.CAL","desc":"XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT"},
-        {"file":"dov-20190331_def.xml","title":"Document 11 - file: dov-20190331_def.xml","type":"EX-101.DEF","desc":"XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT"},
-        {"file":"dov-20190331_lab.xml","title":"Document 12 - file: dov-20190331_lab.xml","type":"EX-101.LAB","desc":"XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT"},
-        {"file":"dov-20190331_pre.xml","title":"Document 13 - file: dov-20190331_pre.xml","type":"EX-101.PRE","desc":"XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT"},
-        {"file":"dov-20190331_g1.jpg","title":"Document 14 - file: dov-20190331_g1.jpg","type":"GRAPHIC","desc":false},
-        {"file":"image1.jpg","title":"Document 15 - file: image1.jpg","type":"GRAPHIC","desc":false},
-        {"file":"image2.jpg","title":"Document 16 - file: image2.jpg","type":"GRAPHIC","desc":false},
-        {"file":"image3.jpg","title":"Document 17 - file: image3.jpg","type":"GRAPHIC","desc":false},
-        {"file":"xsl/dov-20190331_htm.xml","title":"Document 18 - file: dov-20190331_htm.html","type":"XML","desc":"IDEA: XBRL DOCUMENT"},
-        {"file":"dov-20190331_htm.xml","title":"Document 18 - RAW XML: dov-20190331_htm.xml","type":"XML","desc":"IDEA: XBRL DOCUMENT"},
-        {"file":"Financial_Report.xlsx","title":"Document 98 - file: Financial_Report.xlsx","type":"EXCEL","desc":"IDEA: XBRL DOCUMENT"},
-        {"file":"Show.js","title":"Document 99 - file: Show.js","type":"XML","desc":"IDEA: XBRL DOCUMENT"},
-        {"file":"report.css","title":"Document 100 - file: report.css","type":"XML","desc":"IDEA: XBRL DOCUMENT"},
-        {"file":"xsl/FilingSummary.xml","title":"Document 101 - file: FilingSummary.html","type":"XML","desc":"IDEA: XBRL DOCUMENT"},
-        {"file":"FilingSummary.xml","title":"Document 101 - RAW XML: FilingSummary.xml","type":"XML","desc":"IDEA: XBRL DOCUMENT"},
-        {"file":"MetaLinks.json","title":"Document 104 - file: MetaLinks.json","type":"JSON","desc":"IDEA: XBRL DOCUMENT"},
-        {"file":"0000029905-19-000029-xbrl.zip","title":"Document 105 - file: 0000029905-19-000029-xbrl.zip","type":"ZIP","desc":"IDEA: XBRL DOCUMENT"}
-        ]};
-  exports.handler(event);
-///////////////////////////////////////////////////////////////////////////////////////////////\/
+        {"file":"dov-20190331.htm","title":"Document 1 - file: dov-20190331.htm","fileType":"10-Q","fileDescription":"10-Q"},
+        {"file":"a2019033110-qex101.htm","title":"Document 2 - file: a2019033110-qex101.htm","fileType":"EX-10.1","fileDescription":"EX - 10.1"},
+        {"file":"a2019033110-qexhibit102.htm","title":"Document 3 - file: a2019033110-qexhibit102.htm","fileType":"EX-10.2","fileDescription":"EX - 10.2"},
+        {"file":"a2019033110-qexhibit103.htm","title":"Document 4 - file: a2019033110-qexhibit103.htm","fileType":"EX-10.3","fileDescription":"EX - 10.3"},
+        {"file":"a2019033110-qex104.htm","title":"Document 5 - file: a2019033110-qex104.htm","fileType":"EX-10.4","fileDescription":"EX - 10.4"},
+        {"file":"a2019033110-qexhibit311.htm","title":"Document 6 - file: a2019033110-qexhibit311.htm","fileType":"EX-31.1","fileDescription":"EX - 31.1"},
+        {"file":"a2019033110-qexhibit312.htm","title":"Document 7 - file: a2019033110-qexhibit312.htm","fileType":"EX-31.2","fileDescription":"EX - 31.2"},
+        {"file":"a2019033110-qexhibit32.htm","title":"Document 8 - file: a2019033110-qexhibit32.htm","fileType":"EX-32","fileDescription":"EX - 32"},
+        {"file":"dov-20190331.xsd","title":"Document 9 - file: dov-20190331.xsd","fileType":"EX-101.SCH","fileDescription":"XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT"},
+        {"file":"dov-20190331_cal.xml","title":"Document 10 - file: dov-20190331_cal.xml","fileType":"EX-101.CAL","fileDescription":"XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT"},
+        {"file":"dov-20190331_def.xml","title":"Document 11 - file: dov-20190331_def.xml","fileType":"EX-101.DEF","fileDescription":"XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT"},
+        {"file":"dov-20190331_lab.xml","title":"Document 12 - file: dov-20190331_lab.xml","fileType":"EX-101.LAB","fileDescription":"XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT"},
+        {"file":"dov-20190331_pre.xml","title":"Document 13 - file: dov-20190331_pre.xml","fileType":"EX-101.PRE","fileDescription":"XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT"},
+        {"file":"dov-20190331_g1.jpg","title":"Document 14 - file: dov-20190331_g1.jpg","fileType":"GRAPHIC"},
+        {"file":"image1.jpg","title":"Document 15 - file: image1.jpg","fileType":"GRAPHIC"},
+        {"file":"image2.jpg","title":"Document 16 - file: image2.jpg","fileType":"GRAPHIC"},
+        {"file":"image3.jpg","title":"Document 17 - file: image3.jpg","fileType":"GRAPHIC"},
+        {"file":"xsl/dov-20190331_htm.xml","title":"Document 18 - file: dov-20190331_htm.html","fileType":"XML","fileDescription":"IDEA: XBRL DOCUMENT"},
+        {"file":"dov-20190331_htm.xml","title":"Document 18 - RAW XML: dov-20190331_htm.xml","fileType":"XML","fileDescription":"IDEA: XBRL DOCUMENT"},
+        {"file":"Financial_Report.xlsx","title":"Document 98 - file: Financial_Report.xlsx","fileType":"EXCEL","fileDescription":"IDEA: XBRL DOCUMENT"},
+        {"file":"Show.js","title":"Document 99 - file: Show.js","fileType":"XML","fileDescription":"IDEA: XBRL DOCUMENT"},
+        {"file":"report.css","title":"Document 100 - file: report.css","fileType":"XML","fileDescription":"IDEA: XBRL DOCUMENT"},
+        {"file":"xsl/FilingSummary.xml","title":"Document 101 - file: FilingSummary.html","fileType":"XML","fileDescription":"IDEA: XBRL DOCUMENT"},
+        {"file":"FilingSummary.xml","title":"Document 101 - RAW XML: FilingSummary.xml","fileType":"XML","fileDescription":"IDEA: XBRL DOCUMENT"},
+        {"file":"MetaLinks.json","title":"Document 104 - file: MetaLinks.json","fileType":"JSON","fileDescription":"IDEA: XBRL DOCUMENT"},
+        {"file":"0000029905-19-000029-xbrl.zip","title":"Document 105 - file: 0000029905-19-000029-xbrl.zip","fileType":"ZIP","fileDescription":"IDEA: XBRL DOCUMENT"}
+    ]
+};
+exports.handler(event);
+////////////////////////////////////////////////////////////////////////////////////////////////

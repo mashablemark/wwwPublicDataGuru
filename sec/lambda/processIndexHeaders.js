@@ -1,5 +1,8 @@
 //Lambda function is triggered by S3 PUT event of EDGAR Archives bucket where file suffix = '-index-headers.html'
 //execution time 400ms to 2s
+//cost = 500,000 filings per * $0.000000208 per 100ms (128MB size) * 2s * 10 (100ms to s) = $2.08 per year
+//todo: consider using DB with a transaction  to S3 read = faster + possibly allow for concurrent lambdas of processIndexHeadrs
+
 var AWS = require('aws-sdk');
 var s3 = new AWS.S3();
 
@@ -71,12 +74,15 @@ exports.handler = async (event, context) => {
         let fileType = headerInfo(linkSection, '&lt;TYPE&gt;');
         let fileDescription = headerInfo(linkSection, '&lt;DESCRIPTION&gt;');
         let skip = fileDescription=='IDEA: XBRL DOCUMENT' && rgxSECTableLinks.test(relativeKey); //dont add the OSD created derived table to the JSON index
-        if(!skip) thisSubmission.files.push({
-            file: relativeKey,
-            title: description,
-            type: fileType,
-            desc: fileDescription
-        });
+        if(!skip) {
+            let thisFile = {
+                file: relativeKey,
+                title: description
+            };
+            if(fileType) thisFile.fileType = fileType;
+            if(fileDescription) thisFile.fileDescription = fileDescription;
+            thisSubmission.files.push(thisFile);
+        }
     }
     //5. read daily archive (create new archive if not found)
     const dailyIndex = await dailyIndexObject;
