@@ -78,6 +78,7 @@ async function readS3(file){
         });
     });
 }
+
 function writeS3(fileKey, text) {
     return new Promise((resolve, reject) => {
         s3.putObject({
@@ -116,20 +117,20 @@ exports.handler = async (event, context) => {
         period: event.period,
         files: event.files
     };
-    let submission = {};
-    for (let i = 0; i < filing.files.length; i++) {
-        console.log(i, filing.files[i].fileType);
-        if(XBRLDocuments.iXBRL[filing.files[i].fileType]) {
-            console.log('found iXBRL document');
-            let fileBody = await readS3(filing.path + filing.primaryDocumentName);
-            await parseIXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
-        }
-       /* if(XBRLDocuments.XBRL[filing.files[i].type]) {
-            let fileBody = await readS3(filing.path + filing.primaryDocumentName);
-            await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
-        }*/
-    }
+    let submission = {filing: filing};
     console.log('parsed document');
+    for (let i = 0; i < filing.files.length; i++) {
+        if(XBRLDocuments.iXBRL[filing.files[i].fileType]) {
+            console.log('iXBRL doc found: '+ filing.path + filing.files[i].file);
+            let fileBody = await readS3(filing.path + filing.files[i].file);
+            console.log('html length: '+ fileBody.length);
+            await parseIXBRL(cheerio.load(fileBody), submission);
+        }
+        /* if(XBRLDocuments.XBRL[filing.files[i].type]) {
+             let fileBody = await readS3(filing.path + filing.primaryDocumentName);
+             await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
+         }*/
+    }
     console.log(submission);
     if(submission.contextTree) {
         console.log('saving submission...');
@@ -137,7 +138,6 @@ exports.handler = async (event, context) => {
     }
     console.log('sub mission saved: end of updateXBRL lambda event handler!');
 };
-
 
 function parseXBRL($, submission){
     //1.get header info
@@ -308,32 +308,51 @@ function parseXBRL($, submission){
     }
     function getElements(namespace, tagName){
         var $tags = $(namespace+'\\:'+tagName);
-        if(!$tags.length) $tags = $(tagName)
+        if(!$tags.length) $tags = $(tagName);
         return $tags;
     }
 }
 
 function parseIXBRL($, parsedFacts){
-    console.log('parseIXBRL');
-    let $reportingPeriod = $('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]');
-    if($reportingPeriod)
-        contextref = $reportingPeriod.attr('contextref'),
-        cdate = new Date($reportingPeriod.text()),
-        fy = parseInt(contextref.substr(2,4)),
-        fq = parseInt(contextref.substr(7,1)),
-        fdate = new Date(fy, fq*3, 0);
-    if(!parsedFacts ) parsedFacts = {};
+    //get DEI attributes:
+    //read all dei namespace tags
+    let $deiTags = $('ix\\:nonnumeric[name^="dei:"]');
+    if($deiTags.length==0) return;  //this html doc does not contain SEC compliant inline XBRL
+    if(!parsedFacts.dei) parsedFacts.dei = {};
+    $deiTags.each((i, elem)=> {
+        parsedFacts.dei[elem.attribs.name.substr(4)] = $(elem).text();
+        if (!elem.attribs.contextref) logEvent("missing DEI contextRef", parsedFacts.filing.adsh);
+        if (!parsedFacts.dei.contextref && elem.attribs.contextref) {
+            parsedFacts.dei.contextref = elem.attribs.contextref;
+        } else {
+            if(parsedFacts.dei.contextref != elem.attribs.contextref) logEvent("ERROR conflicting DEI contextRef", parsedFacts.filing.adsh);
+        }
+        if(elem.attribs.format && elem.attribs.format.indexOf('daymonth')!=-1) logEvent("unhandled data form", elem.attribs.format + ' in iXBRL of ' + parsedFacts.filing.adsh);
+        //problematic date formats all contain the string 'daymonth': http://www.xbrl.org/inlineXBRL/transformation/
+    });
+    if(!parsedFacts.dei.contextref) logEvent('ERROR missing dei contextRef', parsedFacts.filing.adsh);
+    /*  parsedFacts.dei =>  { EntityRegistrantName: 'DOVER Corp',
+            CurrentFiscalYearEndDate: '--12-31',
+            EntityCurrentReportingStatus: 'Yes',
+            EntityFilerCategory: 'Large Accelerated Filer',
+            EntitySmallBusiness: 'FALSE',
+            EntityEmergingGrowthCompany: 'FALSE',
+            DocumentFiscalYearFocus: '2018',
+            DocumentFiscalPeriodFocus: 'Q1',
+            DocumentType: '10-Q',
+            AmendmentFlag: 'FALSE',
+            DocumentPeriodEndDate: '3/31/2019',
+            EntityCentralIndexKey: '0000029905' }*/
+
     if(!parsedFacts.contextTree ) parsedFacts.contextTree = {};
     if(!parsedFacts.standardTagTree ) parsedFacts.standardTagTree = {};
-    parsedFacts.deltaMonth = (fy-ddate.getFullYear())*12 + (fdate.getMonth()-ddate.getMonth());
-    parsedFacts.reportForm = $('ix\\:nonnumeric[name="dei\\:DocumentType"]').text();
-    parsedFacts.reportPeriod = fy + (fq==4?' FY':' Q'+fq);
-    var docPart = window.location.href.split('?doc=')[1].split('/');
-    parsedFacts.cik = docPart[0];
-    parsedFacts.adsh = docPart[1];
+    if(!parsedFacts.unitTree) parsedFacts.unitTree = {};
+    if(!parsedFacts.facts) parsedFacts.facts = {};
+    //parsedFacts.calendarYear = ;
+    //parsedFacts.calendarQuarter
 
     //get iXBRL context tags make lookup tree for contextRef date values and dimensions
-    let $context, $start, start, end, dtStart, dtEnd, $this, $member;
+    let $start, start, end, dtStart, dtEnd, dtApproxCalendar, $this, $member;
     $('xbrli\\:context').each(function(i) {
         $this = $(this);
         $start = $this.find('xbrli\\:startdate');
@@ -342,17 +361,24 @@ function parseIXBRL($, parsedFacts){
             start = $start.html().trim();
             dtStart = new Date(start);
             end = $this.find('xbrli\\:enddate').html().trim();
-            dtEnd = new Date(ddate);
+            dtEnd = new Date(end);
+            dtApproxCalendar = new Date(Date.parse(end)- 24*3600*1000*10);  //first 10 days of next q/y are lump into last q/y for frames/time series comparisons
             parsedFacts.contextTree[$this.attr('id')] = {
                 start: start,
                 end: end,
-                qtrs: Math.round((dtEnd.parse() - dtStart.parse())/(24*3600)/(365/4))  //account for non calendar quarters (e.g. "closest Friday to ...")
+                qtrs: Math.round((dtEnd.valueOf() - dtStart.valueOf())/(24*3600*1000)/(365/4)),  //account for non calendar quarters (e.g. "closest Friday to ...")
+                cy: dtApproxCalendar.getUTCFullYear(),
+                cq: Math.floor(dtApproxCalendar.getUTCMonth()/3)+1
             }
         } else {
             end = $this.find('xbrli\\:instant').html();
+            dtEnd = new Date(end);
+            dtApproxCalendar = new Date(Date.parse(end)- 24*3600*1000*10);  //first 10 days of next q/y are lump into last q/y for frames/time series comparisons
             parsedFacts.contextTree[$this.attr('id')] = {
                 end: end,
-                qtrs: 0
+                qtrs: 0,
+                cy: dtApproxCalendar.getUTCFullYear(),
+                cq: Math.floor(dtApproxCalendar.getUTCMonth()/3)+1
             }
         }
         $member = $this.find('xbrldi\\:explicitmember');
@@ -387,15 +413,17 @@ function parseIXBRL($, parsedFacts){
             }
         }
     });
-
     $('ix\\:nonfraction').each(function(i){
-        var xbrl = extractXbrlInfo(this);
+        let xbrl = extractXbrlInfo(parsedFacts, $(this));
         if(xbrl.isStandard){
             if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
-                if (!parsedFacts.standardTagTree['Q' + xbrl.qtrs]) parsedFacts.standardTagTree['Q' + xbrl.qtrs] = {};
-                if (!parsedFacts.standardTagTree['Q' + xbrl.qtrs][xbrl.uom]) parsedFacts.standardTagTree['Q' + xbrl.qtrs][xbrl.uom] = [];
-                if (parsedFacts.standardTagTree['Q' + xbrl.qtrs][xbrl.uom].indexOf(xbrl.tag) === -1) {
-                    parsedFacts.standardTagTree['Q' + xbrl.qtrs][xbrl.uom].push(xbrl.tag);
+                let factKey = xbrl.tag+xbrl.qtrs+xbrl.uom+xbrl.end;
+                if(!parsedFacts.facts[factKey]){
+                    parsedFacts.facts[factKey] = xbrl;
+                } else {
+                    if(parsedFacts.facts[factKey].value != xbrl.value)
+                        logEvent('ERROR: XBRL value conflict in '+parsedFacts.filing.adsh, '['+JSON.stringify(xbrl)+','
+                            +JSON.stringify(parsedFacts.facts[factKey])+']');
                 }
             }
         }
@@ -403,26 +431,23 @@ function parseIXBRL($, parsedFacts){
     return parsedFacts;
 }
 
-function extractXbrlInfo(ix){
-    let $ix = $(ix),
-    nameParts = $ix.attr('name').split(':'),
+function extractXbrlInfo(objXBRL, $ix){
+    let nameParts = $ix.attr('name').split(':'),
     contextRef = $ix.attr('contextref'),
     unitRef = $ix.attr('unitref'),
     xbrl = {
-        uom: this.unitTree[unitRef],
+        uom: objXBRL.unitTree[unitRef],
         taxonomy: nameParts[0],
         tag: nameParts[1],
-        sign: $(ix).attr('sign'),
+        sign: $ix.attr('sign'),
         isGaap: nameParts[0]=='us-gaap',
         isStandard: standardNumericalTaxonomies.indexOf(nameParts[0])!==-1,
-        value: $(ix).text().trim(),
-        cik: this.cik,
-        num_adsh: this.adsh
+        value: $ix.text().trim()
     };
-    if(this.contextTree[contextRef]){
-        xbrl.qtrs = this.contextTree[contextRef].qtrs;
-        xbrl.end = this.contextTree[contextRef].end;
-        if(xbrl.start) xbrl.start = this.contextTree[contextRef].start;
+    if(objXBRL.contextTree[contextRef]){
+        xbrl.qtrs = objXBRL.contextTree[contextRef].qtrs;
+        xbrl.end = objXBRL.contextTree[contextRef].end;
+        if(xbrl.start) xbrl.start = objXBRL.contextTree[contextRef].start;
         xbrl.member = (xbrl.member?xbrl.member:false);
         xbrl.dim = (xbrl.dim?xbrl.dim:false);
     } else {
@@ -433,31 +458,44 @@ function extractXbrlInfo(ix){
 
 async function saveXBRLSubmission(s){
     //save main submission record into fin_sub
+    /*  EntityRegistrantName: 'DOVER Corp',
+        CurrentFiscalYearEndDate: '--12-31',
+        EntityCurrentReportingStatus: 'Yes',
+        EntityFilerCategory: 'Large Accelerated Filer',
+        EntitySmallBusiness: 'FALSE',
+        EntityEmergingGrowthCompany: 'FALSE',
+        DocumentFiscalYearFocus: '2018',
+        DocumentFiscalPeriodFocus: 'Q1',
+        DocumentType: '10-Q',
+        AmendmentFlag: 'FALSE',
+        DocumentPeriodEndDate: '3/31/2019',
+        EntityCentralIndexKey: '0000029905' }*/
     var sql = 'INSERT INTO fin_sub(adsh, cik, name, sic, fye, form, period, fy, fp, filed'
         + ', countryba, stprba, cityba, zipba, bas1, bas2, '
         + ' baph, countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, afs, wksi, '
         +' accepted, prevrpt, detail, instance, nciks, aciks '
-        + " ) VALUES ('"+s.adsh+"',"+s.cik+","+q(s.coname)+",'"+(s.sic||0)+"','"+s.fye.replace(/-/g,'').substr(-4,4)+"',"+q(s.form)+",'"+s.period+"','"
-        +s.fy+"','"+s.fp+"','"+s.filed+"','cb', 'sb', 'cityba', 'zipba', 'bas1', 'bas2', "
+        + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey+","+q(s.dei.EntityRegistrantName)+(s.dei.sic||0)+','
+        +q(s.dei.CurrentFiscalYearEndDate.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType)+q(s.dei.period)
+        + q(s.dei.DocumentFiscalYearFocus)+q(s.dei.DocumentFiscalPeriodFocus)+q(s.filing.filingDate)+"'cb', 'sb', 'cityba', 'zipba', 'bas1', 'bas2', "
         + "'baph', 'cm', 'sm', 'cityma', 'zipma', 'mas1', 'mas2', 'ci', 'si', 99, 'former', 'changed', "
-        + "'afs', 3, '"+ s.accepted.substr(0,10) +"', 4, 5, "+q(s.instance)+", 12342,"+q(s.aciks)+")";
+        + "'afs', 3, '"+ s.filing.acceptanceDateTime.substr(0,10) +"', 4, 5, "+q(s.dei.instance)+"1,"+q(s.dei.EntityCentralIndexKey, true)+")";
     await runQuery(sql);
 
     //save numerical fact records into fin_num
-    var i, fact, unit, context, numSQL, version, coreg;
-    for(i=0;i<s.num.length;i++){
-        fact = s.num[i]; //fact object properties: tag, ns, unitRef, contextRef, decimals & val
+    let i, fact, unit, context, numSQL, version, coreg;
+    for(let factKey in s.facts){
+        fact = s.facts[factKey]; //fact object properties: tag, ns, unitRef, contextRef, decimals & val
         if(fact.unitRef){
             unit = s.unitTree[fact.unitRef];
             if(unit){
                 if(unit.nomid && unit.denomid) unit = unit.nomid + ' per ' + unit.denomid;
             } else {
                 unit = '';
-                logError('unable to lookup unitRef in unit tree', JSON.stringify(fact));
+                logError('ERROR unable to lookup unitRef in unit tree', JSON.stringify(fact));
                 process.exit();
             }
         } else {
-            logError('unable to find unitRef ', JSON.stringify(fact));
+            logError('ERROR unable to find unitRef ', JSON.stringify(fact));
             unit = '';
         }
         context = s.contextTree[fact.contextRef];
@@ -472,7 +510,7 @@ async function saveXBRLSubmission(s){
                 + q(unit)+ q(fact.val) + "','')";
             await runQuery(numSQL);
         } else {
-            logError('context not found', s.urlIndexFile + ': ' + JSON.stringify(fact));  //must have a context ref to save
+            logError('ERROR context not found', s.urlIndexFile + ': ' + JSON.stringify(fact));  //must have a context ref to save
         }
     }
     console.log('wrote ' + i + ' facts for '+s.coname+' ' + s.form + ' for ' + s.fy + s.fp + ' ('+ s.adsh +')');
@@ -505,7 +543,8 @@ async function logEvent(type, msg, display){
 
 /////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 // TEST Card A: iXBRL 10Q:  https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index.htm
-const event = {"path":"sec/edgar/29905/000002990519000029/",
+const event = {
+    "path":"sec/edgar/29905/000002990519000029/",
     "adsh":"0000029905-19-000029",
     "cik":"0000029905",
     "fileNum":"001-04018",
