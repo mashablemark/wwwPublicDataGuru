@@ -394,14 +394,28 @@ EOL;
         $header_filename = $adsh . "-index-headers.html";
         $header_contents = httpGet($edgar_root . $submission_path  . $header_filename);
         //echo($edgar_root . $submission_path  . $header_filename);
-        $files = preg_match_all('/<a href="\S+ml"/', $header_contents, $matches);
+        $files = preg_match_all('/<a href="\S+\.(xml|html|htm)"/', $header_contents, $matches);
+        $searches = [];
         for($i = 0; $i < count($matches[0]); ++$i) {
-            $filename = substr($matches[0][$i], 9, strlen($matches[0][$i])-9-1);
-            //downloadToS3($edgar_root . $submission_path . $filename, $submission_path . $filename);
-            //downloadToS3 created in case CURL did not work.  Problem was S3 credentials and config files needed in /usr/share/httpd/.aws (from ~/.aws)
-            $cmd = 'curl "'. $edgar_root . $submission_path . $filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/' . $submission_path . $filename;
-            logEvent("getSubmissionFilesToTestS3", $cmd);
-            shell_exec($cmd);
+            $filename_pos = strpos($header_contents, $matches[0][$i]);
+            $desc_pos = strrpos($header_contents, "&lt;DOCUMENT&gt;", -strlen($header_contents)+$filename_pos);
+            $idea_doc = strpos(substr($header_contents, $desc_pos, $filename_pos-$desc_pos),"IDEA: XBRL DOCUMENT" );
+            /*array_push($searches, [
+                "file" =>  $matches[0][$i],
+                "filename_pos" =>  $filename_pos,
+                "desc_pos" =>  $desc_pos,
+                "idea_doc" =>  $idea_doc
+
+            ])*/;
+            if(!$idea_doc) {
+                $filename = substr($matches[0][$i], 9, strlen($matches[0][$i])-9-1);
+                //downloadToS3($edgar_root . $submission_path . $filename, $submission_path . $filename);
+                //downloadToS3 created in case CURL did not work.  Problem was S3 credentials and config files needed in /usr/share/httpd/.aws (from ~/.aws)
+                $cmd = 'curl "'. $edgar_root . $submission_path . $filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/' . $submission_path . $filename;
+                logEvent("getSubmissionFilesToTestS3", $cmd);
+                shell_exec($cmd);
+            }
+
         }
         //downloadToS3($edgar_root . $submission_path . $header_filename, $submission_path . $header_filename);
         $cmd = 'curl "'. $edgar_root . $submission_path . $header_filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/' . $submission_path . $header_filename;
