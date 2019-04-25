@@ -57,7 +57,6 @@ exports.handler = async (event, context) => {
         filingDate: headerInfo(indexHeaderBody, '<FILING-DATE>'),
         period: headerInfo(indexHeaderBody, '<PERIOD>'),
         acceptanceDateTime:  headerInfo(indexHeaderBody, '<ACCEPTANCE-DATETIME>'),
-        bucket: firstS3record.bucket.name,
         indexHeaderFileName: firstS3record.object.key,
         files: []
     };
@@ -73,7 +72,7 @@ exports.handler = async (event, context) => {
         let linkSection = indexHeaderBody.substring(indexHeaderBody.substr(0, linkLocation).lastIndexOf('&lt;DOCUMENT&gt;'), linkLocation);
         let fileType = headerInfo(linkSection, '&lt;TYPE&gt;');
         let fileDescription = headerInfo(linkSection, '&lt;DESCRIPTION&gt;');
-        let skip = fileDescription=='IDEA: XBRL DOCUMENT' && rgxSECTableLinks.test(relativeKey); //dont add the OSD created derived table to the JSON index
+        let skip = fileDescription=='IDEA: XBRL DOCUMENT'; //don't add the OSD created derived table to the JSON index
         if(!skip) {
             let thisFile = {
                 file: relativeKey,
@@ -134,24 +133,42 @@ exports.handler = async (event, context) => {
     console.log(await last10Index);
     console.log(await revisedIndex);
 
-    //10.  if this submission an ownership filing?  If so, launch updateOwnershipAPI Lambda function before dying
-    const ownsershipForms = {
-        '3': 'xml',
-        '3/A': 'xml',
-        '4': 'xml',
-        '4/A': 'xml',
-        '5': 'xml',
-        '5/A': 'xml'
+    //10.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
+    // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
+    const formPostProcesses = {
+        //ownership forms  (https://www.sec.gov/Archives/edgar/data/39911/000003991119000048/0000039911-19-000048-index-headers.html)
+        '3': 'updateOwnershipAPI',
+        '3/A': 'updateOwnershipAPI',
+        '4': 'updateOwnershipAPI',
+        '4/A': 'updateOwnershipAPI',
+        '5': 'updateOwnershipAPI',
+        '5/A': 'updateOwnershipAPI',
+        //financial statement forms  (https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index-headers.html)
+        '10Q': 'updateXBRLAPI',
+        '10Q/A': 'updateXBRLAPI',
+        '10K': 'updateXBRLAPI',
+        '10K/A': 'updateXBRLAPI'
+        //form D processor??
+        //registration statement processor?? (published public registration statement; not draft!)
     };
-    if(ownsershipForms[thisSubmission.form]) {
+
+    if(formPostProcesses[thisSubmission.form]) {
+        let processor = formPostProcesses[thisSubmission.form];
+
+        //get additional meta data from header
+        thisSubmission.bucket= firstS3record.bucket.name;
+        thisSubmission.sic = headerInfo(indexHeaderBody, 'ASSIGNED-SIC');
+        getAddresses(thisSubmission, indexHeaderBody, processor);
+
         let lambda = new AWS.Lambda({
             region: 'us-east-1'
         });
-        console.log('about to invoke updateOwnershipAPI');
+        console.log('about to invoke '+ processor);
+        let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
         let li = lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
             {
-                FunctionName: 'updateOwnershipAPI',
-                Payload: JSON.stringify(thisSubmission, null, 2), // include all props with 2 spaces (not sure if truly required)
+                FunctionName: processor,
+                Payload: payload,
                 InvocationType: 'Event'
             },
             function(error, data) {
@@ -160,34 +177,49 @@ exports.handler = async (event, context) => {
                 }
                 if(data.Payload){
                     context.succeed(data.Payload);
-                    console.log('succeeded in invoking updateOwnershipAPI');
+                    console.log('succeeded in invoking ' + processor);
                 }
             }
         );
         li.send();
-        console.log('after invoke (but not from inside)');
-        //console.log(li);
+        console.log('after ' + processor + ' invoke (but not from inside)');
+        console.log(payload);
     }
-    //11. if isFinancialStatement submission?  If so, launch updateXBRLAPI Lambda function before dying
-    const financialStatementForms = {
-        '10Q': 'html',
-        '10Q/A': 'html',
-        '10K': 'html',
-        '10K/A': 'html',
-    };
-    if(financialStatementForms[thisSubmission.form]) {
-        let lambda = new AWS.Lambda({
-            region: 'us-east-1'
-        });
-        lambda.invokeAsync({  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
-            FunctionName: 'updateXBRLAPI',
-            Payload: JSON.stringify(thisSubmission, null, 2),
-            InvocationType: 'Event'  //for debug, comment out to default to synchronous mode and add err handler
-        });
-    }
+
+    //11. terminate by returning from handler (node Lamda functions end when REPL loop is empty)
     return {status: 'ok'}
 };
 
+function  getAddresses(thisSubmission, indexHeaderBody, processor){
+    const addressesByType = {
+        updateXBRLAPI: {
+            businessAddress: ['FILER', 'BUSINESS-ADDRESS'],
+            mailingAddress: ['FILER', 'MAIL-ADDRESS']
+        },
+        updateOwnershipAPI: { //note:  reporter addresses scaped from the form XML
+            issuerBusinessAddress: ['ISSUER','BUSINESS-ADDRESS'],
+            issuerMailingAddress: ['ISSUER','MAIL-ADDRESS']
+        }
+    };
+    for(let addressType in addressesByType[processor]){
+        let tags = addressesByType[processor][addressType];
+        let rgxOuter = new RegExp('/<'+tags[0]+'>.*</'+tags[0]+'>/');
+        let outerMatches = indexHeaderBody.match(rgxOuter);
+        if(outerMatches && outerMatches.length==1){
+            let rgxAddress = new RegExp('/<'+tags[1]+'>.*</'+tags[1]+'>/');
+            let addressMatches = outerMatches[0].match(rgxAddress);
+            if(addressMatches && addressMatches.length==1){
+                thisSubmission[addressType] = {
+                    street1: headerInfo(addressMatches[0], 'STREET1'),
+                    street2: headerInfo(addressMatches[0], 'STREET1'),
+                    city: headerInfo(addressMatches[0], 'CITY'),
+                    state: headerInfo(addressMatches[0], 'STATE'),
+                    zip: headerInfo(addressMatches[0], 'ZIP'),
+                }
+            }
+        }
+    }
+}
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 function headerInfo(fileBody, tag){
     let tagStart = fileBody.indexOf(tag);
