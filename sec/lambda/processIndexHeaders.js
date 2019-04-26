@@ -130,8 +130,9 @@ exports.handler = async (event, context) => {
         });
     });
     //9.ensure writes are completed before letting this Lambda function terminate
-    console.log(await last10Index);
-    console.log(await revisedIndex);
+    //console.log(await last10Index);
+    //console.log(await revisedIndex);
+    //console.log(thisSubmission.form);
 
     //10.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
     // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
@@ -144,10 +145,10 @@ exports.handler = async (event, context) => {
         '5': 'updateOwnershipAPI',
         '5/A': 'updateOwnershipAPI',
         //financial statement forms  (https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index-headers.html)
-        '10Q': 'updateXBRLAPI',
-        '10Q/A': 'updateXBRLAPI',
-        '10K': 'updateXBRLAPI',
-        '10K/A': 'updateXBRLAPI'
+        '10-Q': 'updateXBRLAPI',
+        '10-Q/A': 'updateXBRLAPI',
+        '10-K': 'updateXBRLAPI',
+        '10-K/A': 'updateXBRLAPI'
         //form D processor??
         //registration statement processor?? (published public registration statement; not draft!)
     };
@@ -158,7 +159,8 @@ exports.handler = async (event, context) => {
         //get additional meta data from header
         thisSubmission.bucket= firstS3record.bucket.name;
         thisSubmission.sic = headerInfo(indexHeaderBody, 'ASSIGNED-SIC');
-        getAddresses(thisSubmission, indexHeaderBody, processor);
+        console.log('really?');
+        await getAddresses(thisSubmission, indexHeaderBody, processor);
 
         let lambda = new AWS.Lambda({
             region: 'us-east-1'
@@ -183,14 +185,16 @@ exports.handler = async (event, context) => {
         );
         li.send();
         console.log('after ' + processor + ' invoke (but not from inside)');
-        console.log(payload);
+        //console.log(payload);
     }
 
     //11. terminate by returning from handler (node Lamda functions end when REPL loop is empty)
     return {status: 'ok'}
 };
 
-function  getAddresses(thisSubmission, indexHeaderBody, processor){
+async function  getAddresses(thisSubmission, indexHeaderBody, processor){
+
+    console.log(processor);
     const addressesByType = {
         updateXBRLAPI: {
             businessAddress: ['FILER', 'BUSINESS-ADDRESS'],
@@ -201,24 +205,31 @@ function  getAddresses(thisSubmission, indexHeaderBody, processor){
             issuerMailingAddress: ['ISSUER','MAIL-ADDRESS']
         }
     };
+    console.log('hi');
     for(let addressType in addressesByType[processor]){
+        console.log(addressType);
         let tags = addressesByType[processor][addressType];
-        let rgxOuter = new RegExp('/<'+tags[0]+'>.*</'+tags[0]+'>/');
+        let rgxOuter = new RegExp('<'+tags[0]+'>(\n|\r|.)*<\/'+tags[0]+'>');
         let outerMatches = indexHeaderBody.match(rgxOuter);
+        console.log(indexHeaderBody.length);
+        console.log(outerMatches);
         if(outerMatches && outerMatches.length==1){
-            let rgxAddress = new RegExp('/<'+tags[1]+'>.*</'+tags[1]+'>/');
+            console.log('outer match');
+            let rgxAddress = new RegExp('<'+tags[1]+'>(\n|\r|.)*<\/'+tags[1]+'>');
             let addressMatches = outerMatches[0].match(rgxAddress);
             if(addressMatches && addressMatches.length==1){
+                console.log('inner match');
                 thisSubmission[addressType] = {
                     street1: headerInfo(addressMatches[0], 'STREET1'),
                     street2: headerInfo(addressMatches[0], 'STREET1'),
                     city: headerInfo(addressMatches[0], 'CITY'),
                     state: headerInfo(addressMatches[0], 'STATE'),
-                    zip: headerInfo(addressMatches[0], 'ZIP'),
-                }
+                    zip: headerInfo(addressMatches[0], 'ZIP')
+                };
             }
         }
     }
+    return true;
 }
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 function headerInfo(fileBody, tag){
