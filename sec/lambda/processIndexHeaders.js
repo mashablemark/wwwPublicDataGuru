@@ -137,7 +137,7 @@ exports.handler = async (event, context) => {
     //10.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
     // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
     const formPostProcesses = {
-        //ownership forms  (https://www.sec.gov/Archives/edgar/data/39911/000003991119000048/0000039911-19-000048-index-headers.html)
+        //ownership forms   (https://www.sec.gov/Archives/edgar/data/39911/000003991119000048/0000039911-19-000048-index-headers.html)
         '3': 'updateOwnershipAPI',
         '3/A': 'updateOwnershipAPI',
         '4': 'updateOwnershipAPI',
@@ -158,8 +158,7 @@ exports.handler = async (event, context) => {
 
         //get additional meta data from header
         thisSubmission.bucket= firstS3record.bucket.name;
-        thisSubmission.sic = headerInfo(indexHeaderBody, 'ASSIGNED-SIC');
-        console.log('really?');
+        thisSubmission.sic = headerInfo(indexHeaderBody, '<ASSIGNED-SIC>');
         await getAddresses(thisSubmission, indexHeaderBody, processor);
 
         let lambda = new AWS.Lambda({
@@ -185,11 +184,11 @@ exports.handler = async (event, context) => {
         );
         li.send();
         console.log('after ' + processor + ' invoke (but not from inside)');
-        //console.log(payload);
+        console.log(payload);
     }
 
     //11. terminate by returning from handler (node Lamda functions end when REPL loop is empty)
-    return {status: 'ok'}
+    return {status: 'ok'};
 };
 
 async function  getAddresses(thisSubmission, indexHeaderBody, processor){
@@ -205,26 +204,22 @@ async function  getAddresses(thisSubmission, indexHeaderBody, processor){
             issuerMailingAddress: ['ISSUER','MAIL-ADDRESS']
         }
     };
-    console.log('hi');
     for(let addressType in addressesByType[processor]){
-        console.log(addressType);
         let tags = addressesByType[processor][addressType];
         let rgxOuter = new RegExp('<'+tags[0]+'>(\n|\r|.)*<\/'+tags[0]+'>');
         let outerMatches = indexHeaderBody.match(rgxOuter);
-        console.log(indexHeaderBody.length);
-        console.log(outerMatches);
-        if(outerMatches && outerMatches.length==1){
+        if(outerMatches){
             console.log('outer match');
             let rgxAddress = new RegExp('<'+tags[1]+'>(\n|\r|.)*<\/'+tags[1]+'>');
             let addressMatches = outerMatches[0].match(rgxAddress);
-            if(addressMatches && addressMatches.length==1){
-                console.log('inner match');
+            if(addressMatches){
+                console.log(addressMatches[0]);
                 thisSubmission[addressType] = {
-                    street1: headerInfo(addressMatches[0], 'STREET1'),
-                    street2: headerInfo(addressMatches[0], 'STREET1'),
-                    city: headerInfo(addressMatches[0], 'CITY'),
-                    state: headerInfo(addressMatches[0], 'STATE'),
-                    zip: headerInfo(addressMatches[0], 'ZIP')
+                    street1: headerInfo(addressMatches[0], '<STREET1>'),
+                    street2: headerInfo(addressMatches[0], '<STREET2>'),
+                    city: headerInfo(addressMatches[0], '<CITY>'),
+                    state: headerInfo(addressMatches[0], '<STATE>'),
+                    zip: headerInfo(addressMatches[0], '<ZIP>')
                 };
             }
         }
