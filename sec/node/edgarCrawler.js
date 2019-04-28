@@ -6,8 +6,8 @@ Problem: sec.gov limits request to 10 per second.  To ingest a quarter, we need 
   a. 60 daily indexes
   b. 60,000 ownership filings * (1 index-headers.html + 1 XML file) = 120,000 GETs
   c.  6,000 financial statement * (1 index-headers.html + 5 HTML + 5 XML files) = 66,000 GETs
-Min time = 186,060 files download / 10/s / 3600s/h = 5.2 hours
-
+Speed on M5.XL instance = 7,100 files / hr
+Full quarter scrape of ownership & XBRL = 186,060 files / 7,500 file/hr = ~25 hours
 On download, indexes and targeted submissions files will be stored in S3 and Lambda functions triggered for parsing.
 
 Note that that the routine can be rerun to:
@@ -15,20 +15,19 @@ Note that that the routine can be rerun to:
   2. retrigger Lambda function and parsing
  */
 
-var AWS = require('aws-sdk'); 
-var request = require('request');
-var mysql = require('mysql');
-var secure = require('./secure');
+const AWS = require('aws-sdk');
+const request = require('request');
+const mysql = require('mysql');
+const secure = require('./secure');
 
 
-var s3 = new AWS.S3();
-var con;  //global database connection
+const s3 = new AWS.S3();
 
 //1000180|SANDISK CORP|4/A|2016-02-24|edgar/data/1000180/0001242648-16-000070.txt
-var targetFormTypes= ['3', '3/A', '4', '4/A', '5', '5/A',  '10-Q', '10-Q/A', '10-K', '10-K/A'];
-var indexLineFields = {CIK: 0, CompanyName: 1, FormType: 2, DateFiled: 3, Filename: 4};
+const targetFormTypes= ['3', '3/A', '4', '4/A', '5', '5/A',  '10-Q', '10-Q/A', '10-K', '10-K/A'];
+const indexLineFields = {CIK: 0, CompanyName: 1, FormType: 2, DateFiled: 3, Filename: 4};
 
-var processControl = {
+const processControl = {
     secDomain: 'https://www.sec.gov/Archives/',
     start: {
         year: 2016,
@@ -38,26 +37,32 @@ var processControl = {
         year: 2016,
         q: 1
     },
-    //offset: 0, //REMOVE OR SET TO 0 TO ENSURE FULL SCRAPE AFTER TESTING
+    offset: 72000, //REMOVE OR SET TO 0 TO ENSURE FULL SCRAPE AFTER TESTING
     stickyFetch: true, // once a fetch to sec.gov is needed (not found in restapi.publicdata.guru bucket), skip all future local read attempts to speed up new batch
     lastDownloadTime: false,
     retrigger: false  //master mode determines whether existing index-headers.htm are rewritten if already exist to retrigger Lambda function
 };
 
-startCrawl(processControl);
+let con;  //global database connection
+createDbConnection(()=>{ingestNextQuarter(processControl)}); //entry point
 
-function startCrawl(processControl){
-    let db_info = secure.publicdataguru_dbinfo();
-    con = mysql.createConnection({ //global db connection
-        host: db_info.host,
-        user: db_info.user,
-        password: db_info.password,
-        database: 'secdata'
+async function createDbConnection(callback) {
+    con = mysql.createConnection(secure.publicdataguru_dbinfo()); // (Re)created global connection
+    con.connect(function(err) {              // The server is either down
+        if(err) {                                     // or restarting (takes a while sometimes).
+            console.log('error when connecting to db:', err);
+            setTimeout(()=>{createDbConnection(callback)}, 100); // We introduce a delay before attempting to reconnect, to avoid a hot loop
+        } else {
+            callback();
+        }
     });
-
-    con.connect(function(err) {
-        if (err) throw err;
-        ingestNextQuarter(processControl);  //process one quarter only!
+    con.on('error', function(err) {
+        console.log('db error', err);
+        if(err.code === 'PROTOCOL_CONNECTION_LOST') { // Connection to the MySQL server is usually
+            createDbConnection();                         // lost due to either server restart, or a
+        } else {                                      // connnection idle timeout (the wait_timeout
+            throw err;                                  // server variable configures this)
+        }
     });
 }
 
@@ -211,8 +216,8 @@ function wait(ms) {
 }
 
 function logEvent(type, msg, display){
-    runQuery("insert into eventlog (event, data) values ("+q(type)+q(msg, true)+")");
     if(display) console.log(type, msg);
+    runQuery("insert into eventlog (event, data) values ("+q(type)+q(msg, true)+")");
 }
 
 function q(value, isLast){
@@ -223,19 +228,24 @@ function q(value, isLast){
     }
 }
 
-function runQuery(sql, callback){
+function runQuery(sql, callback, retryFlag){
     try{
         con.query(sql, function(err, result, fields) {
             if(err){
                 console.log(sql);
                 logEvent('bad query', sql, true);
                 throw err;
+            } else {
+                if(callback) callback(result, fields);
             }
-            if(callback) callback(result, fields);
         });
     } catch(err) {
-        console.log(sql);
-        logEvent("fatal MySQL error", sql, true);
-        throw err;
+        if(!retryFlag){
+            setTimeout(1000, runQuery(sql, callback, true))  //try once giving enough time for a connection reset
+        } else {
+            console.log(sql);
+            logEvent("fatal MySQL error", sql, true);
+            throw err;
+        }
     }
 }
