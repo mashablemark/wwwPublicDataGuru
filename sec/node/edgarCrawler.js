@@ -37,7 +37,7 @@ const processControl = {
         year: 2016,
         q: 1
     },
-    offset: 72000, //REMOVE OR SET TO 0 TO ENSURE FULL SCRAPE AFTER TESTING
+    offset: 126800, //REMOVE OR SET TO 0 TO ENSURE FULL SCRAPE AFTER TESTING
     stickyFetch: true, // once a fetch to sec.gov is needed (not found in restapi.publicdata.guru bucket), skip all future local read attempts to speed up new batch
     lastDownloadTime: false,
     retrigger: false  //master mode determines whether existing index-headers.htm are rewritten if already exist to retrigger Lambda function
