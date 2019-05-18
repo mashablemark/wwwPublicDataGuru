@@ -1,40 +1,23 @@
 //Lambda function is triggered by S3 PUT event of EDGAR Archives bucket where file suffix = '-index-headers.html'
-//execution time 400ms to 2s
-//cost = 500,000 filings per * $0.000000208 per 100ms (128MB size) * 2s * 10 (100ms to s) = $2.08 per year
+//avg execution time 400ms to 2s (peak exec = 4s on db startup and  large index file)
+//cost = 500,000 filings per * $0.000000208 per 100ms (192MB size) * 2s * 10 (100ms to s) = $2.08 per year
+//note: 128MB container has no spare memory when run hard
 //todo: consider using DB with a transaction  to S3 read = faster + possibly allow for concurrent lambdas of processIndexHeadrs
 
+//module variables (persist between handler calls when ctainers are reused = prevalent during high usage periods)
 var AWS = require('aws-sdk');
-var s3 = new AWS.S3();
+var dailyIndex = false;  //daily index as parsed object needs initiation than can be reused as long as day is same
 
 exports.handler = async (event, context) => {
+    var s3 = new AWS.S3();
     //event object description https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html
     const firstS3record = event.Records[0].s3;
     let bucket = firstS3record.bucket.name;
     let key = firstS3record.object.key;
     const size = firstS3record.object.bytes;
     const folder = key.substr(0, key.lastIndexOf('/')+1);
-    const today = new Date();
-    const isoStringToday = today.toISOString().substr(0,10);
 
-    //1. start async reading of daily index file (completed in step 5)
-    const dailyIndexObject = new Promise((resolve, reject) => {
-        s3.getObject({
-            Bucket: "restapi.publicdata.guru",
-            Key: "sec/indexes/EDGARDailyFileIndex_"+ isoStringToday + ".json"
-        }, (err, data) => {
-            if (err) // not found = return new empty archive for today
-                resolve({
-                    "title": "daily EDGAR file index for "+isoStringToday,
-                    "format": "JSON",
-                    "date": isoStringToday,
-                    "submissions": []
-                });
-            else
-                resolve(JSON.parse(data.Body.toString('utf-8')));   // successful response  (alt method = createReadStream)
-        });
-    });
-
-    //2. read the index.hear.html file contents
+    //1. read the index.hear.html file contents
     const params = {
         Bucket: bucket,
         Key: key
@@ -47,7 +30,7 @@ exports.handler = async (event, context) => {
     });
     const indexHeaderBody = await indexHeaderObject;
 
-    //3. parse header info and create submission object
+    //2. parse header info and create submission object
     const thisSubmission = {
         path: folder,
         adsh: headerInfo(indexHeaderBody, '<ACCESSION-NUMBER>'),
@@ -60,8 +43,35 @@ exports.handler = async (event, context) => {
         indexHeaderFileName: firstS3record.object.key,
         files: []
     };
+
+    //3. IF NEEDED start async reading of daily index file (completed in step 5)
+    const acceptanceDate = new Date(thisSubmission.acceptanceDateTime.substr(0,4) + "-" + thisSubmission.acceptanceDateTime.substr(4,2)
+        + "-" + thisSubmission.acceptanceDateTime.substr(6,2) + 'T' + thisSubmission.acceptanceDateTime.substr(8,2)+':'
+        + thisSubmission.acceptanceDateTime.substr(10,2)+':'+ thisSubmission.acceptanceDateTime.substr(12,2)+'Z');
+    acceptanceDate.setUTCHours(acceptanceDate.getUTCHours()+6);  //submission accepted after 5:30P are disseminated the next day
+    acceptanceDate.setUTCMinutes(acceptanceDate.getUTCMinutes()+30);
+    const indexDate = acceptanceDate.toISOString().substr(0,10);
+    let dailyIndexObject = false;
+    if(!dailyIndex || dailyIndex.date != indexDate) {
+        dailyIndexObject = new Promise((resolve, reject) => {
+            s3.getObject({
+                Bucket: "restapi.publicdata.guru",
+                Key: "sec/indexes/EDGARDailyFileIndex_"+ indexDate + ".json"
+            }, (err, data) => {
+                if (err) // not found = return new empty archive for today
+                    resolve({
+                        "title": "daily EDGAR file index for "+indexDate,
+                        "format": "JSON",
+                        "date": indexDate,
+                        "submissions": []
+                    });
+                else
+                    resolve(JSON.parse(data.Body.toString('utf-8')));   // successful response  (alt method = createReadStream)
+            });
+        });
+    }
+
     //4. parse and add hyperlinks to submission object
-    const rgxSECTableLinks = /\bR\d+\.htm\b/;
     const links = indexHeaderBody.match(/<a href="[^<]+<\/a>/g); // '/<a href="\S+"/g');
     for(let i=0; i<links.length;i++){
         let firstQuote = links[i].indexOf('"');
@@ -72,28 +82,32 @@ exports.handler = async (event, context) => {
         let linkSection = indexHeaderBody.substring(indexHeaderBody.substr(0, linkLocation).lastIndexOf('&lt;DOCUMENT&gt;'), linkLocation);
         let fileType = headerInfo(linkSection, '&lt;TYPE&gt;');
         let fileDescription = headerInfo(linkSection, '&lt;DESCRIPTION&gt;');
-        let skip = fileDescription=='IDEA: XBRL DOCUMENT'; //don't add the OSD created derived table to the JSON index
-        if(!skip) {
+        let notIdeaDoc = fileDescription ? fileDescription.indexOf("IDEA: XBRL DOCUMENT")=== -1 : true; //don't add the OSD created derived files to the JSON index
+        let mainDirectoryFile = relativeKey.indexOf('/') === -1;
+        if(notIdeaDoc && mainDirectoryFile) {
             let thisFile = {
-                file: relativeKey,
-                title: description
+                name: relativeKey
             };
-            if(fileType) thisFile.fileType = fileType;
-            if(fileDescription) thisFile.fileDescription = fileDescription;
+            if(fileDescription) thisFile.description = fileDescription;
+            if(fileType) thisFile.type = fileType;
             thisSubmission.files.push(thisFile);
         }
     }
-    //5. read daily archive (create new archive if not found)
-    const dailyIndex = await dailyIndexObject;
+    //5. IF NEEDED: finish reading daily archive (create new archive if not found)
+    if(!dailyIndex || dailyIndex.date != indexDate) {
+        dailyIndex = await dailyIndexObject;
+    }
+
     //6. add new submission
     dailyIndex.submissions.push(thisSubmission);
 
     //7. async write out last10Index.json (complete in step 9
+    const now = new Date();
     const last10IndexBody = {
-        lastUpdated: today.toISOString(),
-        "title": "last 10 EDGAR submissions micro-index (updated prior to full indexes)",
+        "lastUpdated": now.toISOString(),
+        "title": "last 10 EDGAR submissions micro-index of submission date (updated prior to full indexes)",
         "format": "JSON",
-        "date": isoStringToday,
+        "indexDate": indexDate,
         "last10Submissions": dailyIndex.submissions.slice(-10)
     };
     const last10Index = new Promise((resolve, reject) => {
@@ -112,12 +126,13 @@ exports.handler = async (event, context) => {
             }
         });
     });
+
     //8. sync write out full dailyindex.json (complete in step 9)
     const revisedIndex = new Promise((resolve, reject) => {
         s3.putObject({
             Body: JSON.stringify(dailyIndex),
             Bucket: "restapi.publicdata.guru",
-            Key: "sec/indexes/EDGARDailyFileIndex_"+ isoStringToday + ".json"
+            Key: "sec/indexes/EDGARDailyFileIndex_"+ indexDate + ".json"
         }, (err, data) => {
             if (err) {
                 console.log('S3 write error');
@@ -129,10 +144,10 @@ exports.handler = async (event, context) => {
             }
         });
     });
+
     //9.ensure writes are completed before letting this Lambda function terminate
-    //console.log(await last10Index);
-    //console.log(await revisedIndex);
-    //console.log(thisSubmission.form);
+    await last10Index;
+    await revisedIndex;
 
     //10.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
     // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
@@ -148,25 +163,34 @@ exports.handler = async (event, context) => {
         '10-Q': 'updateXBRLAPI',
         '10-Q/A': 'updateXBRLAPI',
         '10-K': 'updateXBRLAPI',
-        '10-K/A': 'updateXBRLAPI'
-        //form D processor??
+        '10-K/A': 'updateXBRLAPI',
+        //form D processor
+        'D': 'updateFormDAPI',
+        'D/A': 'updateFormDAPI'
         //registration statement processor?? (published public registration statement; not draft!)
     };
 
-    if(formPostProcesses[thisSubmission.form]) {
+    if(formPostProcesses[thisSubmission.form]) {  //post processing required!
         let processor = formPostProcesses[thisSubmission.form];
 
         //get additional meta data from header
         thisSubmission.bucket= firstS3record.bucket.name;
         thisSubmission.sic = headerInfo(indexHeaderBody, '<ASSIGNED-SIC>');
+        thisSubmission.ein = headerInfo(indexHeaderBody, '<IRS-NUMBER>');
+        thisSubmission.incorporation = {
+            state: headerInfo(indexHeaderBody, '<STATE-OF-INCORPORATION>'),
+            country: headerInfo(indexHeaderBody, '<COUNTRY-OF-INCORPORATION>')
+        };
         await getAddresses(thisSubmission, indexHeaderBody, processor);
 
-        let lambda = new AWS.Lambda({
+        //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
+        let lambda = await new AWS.Lambda({
             region: 'us-east-1'
         });
-        console.log('about to invoke '+ processor);
+        console.log('invoking '+ processor);
         let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
-        let li = lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+        //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
+        let lambdaResult = await new Promise((resolve, reject)=> { lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
             {
                 FunctionName: processor,
                 Payload: payload,
@@ -175,24 +199,24 @@ exports.handler = async (event, context) => {
             function(error, data) {
                 if (error) {
                     console.log(error);
+                    reject(error);
                 }
                 if(data.Payload){
                     context.succeed(data.Payload);
-                    console.log('succeeded in invoking ' + processor);
                 }
-            }
-        );
-        li.send();
-        console.log('after ' + processor + ' invoke (but not from inside)');
-        console.log(payload);
+                console.log('successfully invoked ' + processor);
+                resolve(data);
+            });
+        });
+        console.log(JSON.stringify(payload));
+        console.log(lambdaResult);
     }
 
     //11. terminate by returning from handler (node Lamda functions end when REPL loop is empty)
     return {status: 'ok'};
 };
 
-async function  getAddresses(thisSubmission, indexHeaderBody, processor){
-
+function  getAddresses(thisSubmission, indexHeaderBody, processor){
     console.log(processor);
     const addressesByType = {
         updateXBRLAPI: {
@@ -209,23 +233,24 @@ async function  getAddresses(thisSubmission, indexHeaderBody, processor){
         let rgxOuter = new RegExp('<'+tags[0]+'>(\n|\r|.)*<\/'+tags[0]+'>');
         let outerMatches = indexHeaderBody.match(rgxOuter);
         if(outerMatches){
-            console.log('outer match');
+            //console.log('outer match');
             let rgxAddress = new RegExp('<'+tags[1]+'>(\n|\r|.)*<\/'+tags[1]+'>');
             let addressMatches = outerMatches[0].match(rgxAddress);
             if(addressMatches){
-                console.log(addressMatches[0]);
+                //console.log(addressMatches[0]);
                 thisSubmission[addressType] = {
                     street1: headerInfo(addressMatches[0], '<STREET1>'),
                     street2: headerInfo(addressMatches[0], '<STREET2>'),
                     city: headerInfo(addressMatches[0], '<CITY>'),
                     state: headerInfo(addressMatches[0], '<STATE>'),
-                    zip: headerInfo(addressMatches[0], '<ZIP>')
+                    zip: headerInfo(addressMatches[0], '<ZIP>'),
+                    phone: headerInfo(addressMatches[0], '<PHONE>')
                 };
             }
         }
     }
-    return true;
 }
+
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 function headerInfo(fileBody, tag){
     let tagStart = fileBody.indexOf(tag);

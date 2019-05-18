@@ -24,7 +24,22 @@ const secure = require('./secure');
 const s3 = new AWS.S3();
 
 //1000180|SANDISK CORP|4/A|2016-02-24|edgar/data/1000180/0001242648-16-000070.txt
-const targetFormTypes= ['3', '3/A', '4', '4/A', '5', '5/A',  '10-Q', '10-Q/A', '10-K', '10-K/A'];
+const targetFormTypes= {
+    //'S-1': 'noProcessing',
+    //'S-1/A': 'noProcessing',
+    'D': 'syncProcessing',
+    'D/A': 'syncProcessing',
+    //'3': 'asyncProcessing',
+    //'3/A': 'asyncProcessing',
+    //'4': 'asyncProcessing',
+    //'4/A': 'asyncProcessing',
+    //'5': 'asyncProcessing',
+    //'5/A': 'asyncProcessing',
+    //'10-Q': 'asyncProcessing',
+    //'10-Q/A': 'asyncProcessing',
+    //'10-K': 'asyncProcessing',
+    //'10-K/A': 'asyncProcessing'
+};
 const indexLineFields = {CIK: 0, CompanyName: 1, FormType: 2, DateFiled: 3, Filename: 4};
 
 const processControl = {
@@ -37,8 +52,9 @@ const processControl = {
         year: 2016,
         q: 1
     },
-    offset: 126800, //REMOVE OR SET TO 0 TO ENSURE FULL SCRAPE AFTER TESTING
-    stickyFetch: true, // once a fetch to sec.gov is needed (not found in restapi.publicdata.guru bucket), skip all future local read attempts to speed up new batch
+    updateAPIs: true,
+    offset: 0, //REMOVE OR SET TO 0 TO ENSURE FULL SCRAPE AFTER TESTING
+    //stickyFetch: true, // once a fetch to sec.gov is needed (not found in restapi.publicdata.guru bucket), skip all future local read attempts to speed up new batch
     lastDownloadTime: false,
     retrigger: false  //master mode determines whether existing index-headers.htm are rewritten if already exist to retrigger Lambda function
 };
@@ -46,14 +62,14 @@ const processControl = {
 let con;  //global database connection
 createDbConnection(()=>{ingestNextQuarter(processControl)}); //entry point
 
-async function createDbConnection(callback) {
+function createDbConnection(callback) {
     con = mysql.createConnection(secure.publicdataguru_dbinfo()); // (Re)created global connection
     con.connect(function(err) {              // The server is either down
-        if(err) {                                     // or restarting (takes a while sometimes).
+        if(err) {                            // or restarting (takes a while sometimes).
             console.log('error when connecting to db:', err);
             setTimeout(()=>{createDbConnection(callback)}, 100); // We introduce a delay before attempting to reconnect, to avoid a hot loop
         } else {
-            callback();
+            if(callback) callback();
         }
     });
     con.on('error', function(err) {
@@ -81,9 +97,12 @@ async function ingestNextQuarter(processControl){
             return processControl.quartersProcessed;
         }
     }
+    //master.idx sorted by CIK
     processControl.indexUrl = 'edgar/full-index/'
         + processControl.current.year + '/QTR' + processControl.current.q + '/master.idx';
-    await processQuarterlyIndex(processControl)
+    await processQuarterlyIndex(processControl);
+    console.log('finished');
+    process.exit();
 }
 
 async function processQuarterlyIndex(processControl, callback) {
@@ -91,26 +110,41 @@ async function processQuarterlyIndex(processControl, callback) {
     logEvent('quarter ingest', 'fetching ' + idxUrl, true);
     let indexBody = await fetch(processControl, processControl.indexUrl, true);
     let lines = indexBody.split('\n');
-
+    lines.splice(0,11); // ditch header rows
+    //ensure that we index files by oldest to latest
+    lines.sort((a,b)=> {return Date.parse(a.split('|')[indexLineFields.DateFiled]) - Date.parse(b.split('|')[indexLineFields.DateFiled])});
     logEvent('quarter ingest', 'index ' + idxUrl + ' ('+(lines.length-10)+' submissions)', true);
-    for (let lineNum = 10+(processControl.offset||0); lineNum < lines.length; lineNum++) {
+    for (let lineNum = (processControl.offset||0); lineNum < lines.length; lineNum++) {
         let lineParts = lines[lineNum].split('|');
         if (lineParts.length == 5) {
-            if (targetFormTypes.indexOf(lineParts[indexLineFields.FormType]) != -1) {
+            if (targetFormTypes[lineParts[indexLineFields.FormType]]) {
+                processControl[lineParts[indexLineFields.FormType]] = (processControl[lineParts[indexLineFields.FormType]] || 0) + 1;
+                processControl.progress = Math.round(lineNum/lines.length*1000)/10+'%';
                 await getSubmission(lineParts, lineNum);
+
+                //run through form D
+                let updateProcess = targetFormTypes[lineParts[indexLineFields.FormType]];
+                if(updateProcess != 'noProcessing'){
+                    if(updateProcess == 'syncProcessing') {
+                        await processIndexHeader(lineParts);
+                        await wait(4000);  //about 3.5 seconds
+                    } else {
+                        processIndexHeader(lineParts);
+                    }
+                }
             }
             if(lineNum%100 == 0) console.log(processControl);  //240 per quarterly ingest (over 5+ hours) = 1 per minute
         }
     }
 
-
+    console.log(processControl);
     async function getSubmission(lineParts, lineNum) {
         let submissionPathParts = lineParts[indexLineFields.Filename].split('/');
         let adsh = submissionPathParts.pop().split('.')[0];
         let submissionPath = submissionPathParts.join('/') + '/' + adsh.replace(/-/g, '') + '/';
         let indexHeaderFilename = submissionPath + adsh + '-index-headers.html';
         let oldFetchCount = processControl.fetchCount;
-        console.log(lineNum + ': ' + lineParts[indexLineFields.DateFiled] + ' ' + indexHeaderFilename);
+        console.log(lineNum + ': ' + lineParts[indexLineFields.FormType] + ' ' + indexHeaderFilename);
         let indexHeaderBody = await fetch(processControl, indexHeaderFilename, false);  //must be saved after other files present
         let fetchedIndexHeader = oldFetchCount != processControl.fetchCount;
         let links = indexHeaderBody.match(/<a href="\S+\.(html|htm|xml)"/g);
@@ -122,8 +156,9 @@ async function processQuarterlyIndex(processControl, callback) {
                     let fileName = links[i].substring(9, links[i].length - 1);
                     let linkPos = indexHeaderBody.indexOf(links[i]);
                     let sectionStart = indexHeaderBody.substring(0, linkPos).lastIndexOf('&lt;DOCUMENT&gt;');
-                    let ideaDoc = indexHeaderBody.substring(sectionStart, linkPos).indexOf("IDEA: XBRL DOCUMENT");
-                    if (ideaDoc === -1) {
+                    let notIdeaDoc = indexHeaderBody.substring(sectionStart, linkPos).indexOf("IDEA: XBRL DOCUMENT")=== -1;
+                    let mainDirectoryFile = fileName.indexOf('/') === -1;
+                    if (notIdeaDoc  && mainDirectoryFile) {
                         //console.log('getting links['+i+']: '+ links[i]);
                         promisesToCollect.push(fetch(processControl, submissionPath + fileName, true));  //allow simultaneously fetches
                     }
@@ -191,6 +226,7 @@ async function fetch(processControl, fileName, autosave){
         }
     });
 }
+
 async function put(processControl, body, fileName) {
     return new Promise((resolve, reject) => {
         s3.putObject({
@@ -248,4 +284,47 @@ function runQuery(sql, callback, retryFlag){
             throw err;
         }
     }
+}
+
+async function processIndexHeader(lineParts){
+    let submissionPathParts = lineParts[indexLineFields.Filename].split('/');
+    let adsh = submissionPathParts.pop().split('.')[0];
+    let submissionPath = submissionPathParts.join('/') + '/' + adsh.replace(/-/g, '') + '/';
+    let indexHeaderFilename = submissionPath + adsh + '-index-headers.html';
+    return new Promise((resolve, reject) => {
+        let lambda = new AWS.Lambda({
+            region: 'us-east-1'
+        });
+        let fakeS3Event = {
+            //event object description https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html
+            Records: [
+                {
+                    s3: {
+                        bucket: {name: "restapi.publicdata.guru"},
+                        object: {key: "sec/"+indexHeaderFilename}
+                    }
+                }
+            ]
+        };
+
+        let payload = JSON.stringify(fakeS3Event, null, 2); // include all props with 2 spaces (not sure if truly required)
+        let li = lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+            {
+                FunctionName: 'processIndexHeaders',
+                Payload: payload,
+                InvocationType: 'RequestResponse'  //synchronous
+            },
+            function (error, data) {
+                if (error) {
+                    console.log(error);
+                    reject(error);
+                }
+                if (data.Payload) {
+                    resolve(data.Payload);
+                } else {
+                    resolve(0);
+                }
+            }
+        );
+    })
 }

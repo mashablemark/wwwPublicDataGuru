@@ -1,109 +1,15 @@
 DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `makeFacts`()
+CREATE DEFINER=`root`@`localhost` PROCEDURE `addExemptOfferingPersons`(IN `ADSH` VARCHAR(20))
     NO SQL
 BEGIN
-#create 700k records in 1h (250k of which were single pnt facts)
-#variable declarations
-DECLARE currentTag varchar(255);
-DECLARE currentTlabel varchar(512);
-DECLARE currentDoc varchar(2048);
-DECLARE terminate INT DEFAULT 0;
-DECLARE i INT DEFAULT 0;
 
-#cursor declarations
-DECLARE cr_standardTags CURSOR FOR 
-  SELECT tag, tlabel, doc 
-  FROM standardtag st
-  ; #WHERE tag = 'NetIncomeLoss';  #testing muzzle = remove to build!
-DECLARE CONTINUE HANDLER FOR NOT FOUND SET terminate = 1;
-
-TRUNCATE TABLE facts;
-
-#double the max size to 2 MB for group_concat and concat
-set @@session.group_concat_max_len = 1048576 * 2;
-set @@global.max_allowed_packet = 1048576 * 2;
-
-Open cr_standardTags;
-st_loop: LOOP
-  FETCH cr_standardTags INTO currentTag, currentTlabel, currentDoc;
-  IF terminate = 1 THEN
-    LEAVE st_loop;
-  END IF;
-
-  ddates: BEGIN
-    DECLARE currentDdate char(10);
-    DECLARE currentQtr tinyint;
-    DECLARE done_inner INT DEFAULT 0;
-    DECLARE cr_ddates CURSOR FOR 
-      SELECT DISTINCT ddate, qtrs 
-      from f_num n 
-      WHERE qtrs in (0,1,4) and coreg='' and tag = currentTag;
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done_inner = 1;
-    
-	Open cr_ddates;
-	ddate_loop: LOOP
-      FETCH cr_ddates INTO currentDdate, currentQtr;
-      IF done_inner = 1 THEN
-        LEAVE ddate_loop;
-      END IF;
-      
-    #create the facts fro this tag, ddate!
-    INSERT INTO facts (tag, ddate, uom, qtrs, tlabel, tdoc, pts, json)
-       SELECT n.tag, n.ddate, n.uom, n.qtrs, currentTlabel, currentDoc,
-         count(*),
-         CONCAT('[', GROUP_CONCAT(CONCAT('["', s.adsh, '",', s.cik, ',', s.sic, ',"', s.name, '","', s.countryba, '",', COALESCE(concat('[', pl.lat, ',', pl.lon, ']'), 'null'), ',', n.value, ',', revisions, ']')), ']')
-       FROM f_num n 
-         INNER JOIN f_sub s ON n.adsh = s.adsh 
-         INNER JOIN 
-         (
-           SELECT max(s.fy+(pr.rank/10)) as maxrank, s.cik, n.tag, n.ddate, n.uom, n.qtrs, count(DISTINCT n.value) as revisions
-           FROM f_num n 
-             INNER JOIN f_sub s on n.adsh = s.adsh
-             INNER JOIN standardtag st on n.tag = st.tag
-             INNER JOIN fp_ranks pr on s.fp=pr.fp
-           WHERE n.tag=currentTag AND n.qtrs=currentQtr 
-             AND n.ddate=currentDdate 
-             AND n.coreg='' AND n.value is not null
-           GROUP BY n.tag, n.ddate, n.uom, n.qtrs, s.cik
-         ) mx 
-          ON n.tag=mx.tag AND n.ddate=mx.ddate AND n.uom=mx.uom AND n.qtrs=mx.qtrs AND mx.cik=s.cik
-         INNER JOIN fp_ranks pr on s.fp=pr.fp
-         LEFT OUTER JOIN postcodeloc pl on s.countryba = pl.cnty and left(s.zipba, 5) = pl.zip  
-       WHERE n.tag=currentTag AND n.qtrs=currentQtr AND n.ddate=currentDdate
-         AND s.fy+(pr.rank/10) = mx.maxrank AND mx.cik=s.cik
-         AND n.coreg='' AND n.value is not null
-       GROUP BY n.uom;
-    END LOOP ddate_loop;
-    CLOSE cr_ddates;
-  END ddates;
-
-
-END LOOP st_loop;
-
-#release resources and cleanup
-CLOSE cr_standardTags;
-
-
+    IF CHAR_LENGTH(ADSH)=20 THEN
+        DELETE FROM edgar_names where edgar_names.adsh = ADSH;
+        insert into edgar_names (adsh, cik, name_ci, lastname_soundex)
+          select adsh, personnum, concat(lastName,' ',firstName,' ', coalesce(MiddleName,'')), soundex(lastName) 
+          from exemptOfferingPersons eop where eop.adsh=ADSH;
+	END IF;
 END$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `dropIndexSafely`(IN `tbl` VARCHAR(255), IN `ix` VARCHAR(255))
-    NO SQL
-BEGIN
-
-IF((SELECT COUNT(*) AS index_exists 
-    FROM information_schema.statistics 
-    WHERE TABLE_SCHEMA = DATABASE() 
-      and table_name =tbl 
-      AND index_name = ix) > 0) 
-THEN
-   SET @s = CONCAT('DROP INDEX ' , ix , ' ON ' , tbl);
-   PREPARE stmt FROM @s;
-   EXECUTE stmt;
- END IF;
- 
- END$$
 DELIMITER ;
 
 DELIMITER $$
@@ -143,16 +49,6 @@ END$$
 DELIMITER ;
 
 DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `makeAnalytics`()
-    NO SQL
-BEGIN
-  CALL makeStandardTags();
-  CALL makeTimeSeries(0);
-  CALL makeFacts();
-END$$
-DELIMITER ;
-
-DELIMITER $$
 CREATE DEFINER=`root`@`localhost` PROCEDURE `addFilingIndexes`()
     NO SQL
 BEGIN
@@ -167,30 +63,6 @@ ALTER TABLE f_pre ADD PRIMARY KEY (adsh, report, line);
 CREATE INDEX ix_subcik ON f_sub (cik); 
 CREATE INDEX ix_adshtag ON f_num (adsh, tag);
 CREATE INDEX ix_tagddateqtrs ON f_num (tag, ddate, qtrs);
-
-END$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `makeStandardTags`()
-    NO SQL
-BEGIN
-  DROP TABLE IF EXISTS standardtag;
-  
-  CREATE TABLE standardtag (
-    tag varchar(255)  PRIMARY KEY,
-    maxversion varchar(50),
-    tlabel  varchar(512) NULL,
-    doc  varchar(2048) NULL,
-    cnt int DEFAULT 0
-  );
-  INSERT INTO standardtag (tag, maxversion) 
-     SELECT tag, version from f_tag 
-     WHERE custom=0
-     ON duplicate key update maxversion = if(maxversion<version, version, maxversion);
-  UPDATE standardtag st, f_tag t
-    SET st.tlabel = t.tlabel, st.doc = t.doc
-    WHERE st.tag = t.tag and st.maxversion = t.version;
 
 END$$
 DELIMITER ;
@@ -216,126 +88,25 @@ END$$
 DELIMITER ;
 
 DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `makeFrames`()
+CREATE DEFINER=`root`@`localhost` PROCEDURE `makeTimeSeries`()
     NO SQL
 BEGIN
-#creates 720k records in 42min (250k of which were single pnt frame)
-#variable declarations
-DECLARE currentTag varchar(255);
-DECLARE currentTlabel varchar(512);
-DECLARE currentDoc varchar(2048);
-DECLARE terminate INT DEFAULT 0;
-DECLARE i INT DEFAULT 0;
-
-#cursor declarations
-DECLARE cr_standardTags CURSOR FOR 
-  SELECT tag, tlabel, doc 
-  FROM standardtag st
-  ; #WHERE tag = 'NetIncomeLoss';  #testing muzzle = remove to build!
-DECLARE CONTINUE HANDLER FOR NOT FOUND SET terminate = 1;
-
-TRUNCATE TABLE frames;
-
-#double the max size to 2 MB for group_concat and concat
-set @@session.group_concat_max_len = 1048576 * 2;
-set @@global.max_allowed_packet = 1048576 * 2;
-
-Open cr_standardTags;
-st_loop: LOOP
-  FETCH cr_standardTags INTO currentTag, currentTlabel, currentDoc;
-  IF terminate = 1 THEN
-    LEAVE st_loop;
-  END IF;
-
-  ddates: BEGIN
-    DECLARE currentDdate char(10);
-    DECLARE currentQtr tinyint;
-    DECLARE currentUom varchar(20);
-    DECLARE done_inner INT DEFAULT 0;
-    DECLARE cr_ddates CURSOR FOR 
-      SELECT DISTINCT ddate, qtrs, uom 
-      from f_num n
-      WHERE qtrs in (0,1,4) and coreg='' AND n.value is not null
-        and adsh <> version and tag = currentTag;
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done_inner = 1;
-    
-	OPEN cr_ddates;
-	ddate_loop: LOOP
-      FETCH cr_ddates INTO currentDdate, currentQtr, currentUom;
-      IF done_inner = 1 THEN
-        LEAVE ddate_loop;
-      END IF;
-     
-    # regular table = not thread safe for multiple simultaneous procedures
-    # note: can't include company info (name, zip) in case of change
-    TRUNCATE TABLE frame_working;
-    INSERT INTO frame_working  (cik, adsh, name, sic, rank, filed, country, zip, value) 
-      SELECT s.cik, s.adsh, s.name, s.sic, s.fy+COALESCE(fr.rank,1)/10,
-        s.filed, s.countryba, LEFT(s.zipba, 5), value
-      FROM f_num n 
-        INNER JOIN f_sub s ON n.adsh = s.adsh
-        LEFT OUTER JOIN fp_ranks fr ON s.fp=fr.fp
-      WHERE n.tag=currentTag AND n.qtrs=currentQtr
-        AND n.ddate=currentDdate AND n.uom=currentUom
-        AND n.coreg='' AND n.value is not null
-        AND n.adsh <> n.version
-      GROUP BY s.cik, s.adsh, value;
-      
-
-    #create the frames for this tag, ddate, uom!
-    INSERT INTO frames (tag, ddate, uom, qtrs, tlabel, tdoc, pts, json)
-       SELECT currentTag, currentDdate, currentUom, currentQtr,
-         currentTlabel, currentDoc, COUNT(*),
-         CONCAT('[', GROUP_CONCAT(CONCAT('["', fw.adsh, '",', fw.cik, ',', fw.sic, ',"', fw.name, '","', fw.country, '",', COALESCE(concat('[', pl.lat, ',', pl.lon, ']'), 'null'), ',', fw.value, ',', revisions, ']')), ']')
-       FROM frame_working fw
-       INNER JOIN  (
-             SELECT cik,
-             MAX(filed) as lastfiled,
-             COUNT(DISTINCT value) AS revisions
-             FROM frame_working 
-             GROUP BY cik
-         ) mxfiled ON fw.cik=mxfiled.cik and lastfiled=fw.filed 
-       INNER JOIN (
-             SELECT cik, filed, MAX(rank) as maxrank
-             FROM frame_working fw 
-             GROUP BY cik, filed
-         ) mxrank ON mxrank.cik=fw.cik AND fw.filed=mxrank.filed
-         	AND fw.rank=mxrank.maxrank
-       LEFT OUTER JOIN postcodeloc pl ON fw.country= pl.cnty 
-           AND fw.zip=pl.zip;
-    END LOOP ddate_loop;
-    CLOSE cr_ddates;
-  END ddates;
-
-
-END LOOP st_loop;
-
-#release resources and cleanup
-CLOSE cr_standardTags;
-
-
-END$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `makeTimeSeries`(IN `start_cik` INT)
-    NO SQL
-BEGIN
-#added index, created 3.8M times series & drop index in 28m
+#OLD: added index, created 3.8M times series & drop index in 28m
+#NEW: create 3.8M times series & drop index in 28m
 DECLARE currentCik INT;
 #DECLARE currentCoName VARCHAR(150);
 DECLARE terminate INTEGER DEFAULT 0;
 DECLARE ciks CURSOR FOR
-  SELECT DISTINCT cik FROM f_sub where cik>= start_cik;
+  SELECT DISTINCT cik FROM f_sub;
 DECLARE CONTINUE HANDLER 
         FOR NOT FOUND SET terminate = 1;
+        
+truncate table timeseries;
+ALTER TABLE timeseries
+  DROP PRIMARY KEY,
+  Drop KEY ixtimeseries_tag;
 
-
-CREATE TEMPORARY TABLE tmp_adsh select adsh, name, sic, fy, fp, form from f_sub limit 0;
- 
-if(start_cik=0) 
-  then truncate table timeseries;
-end if;
+#CREATE TEMPORARY TABLE tmp_adsh select adsh, name, sic, fy, fp, form from f_sub limit 0;
 
 Open ciks;
 cik_loop: LOOP
@@ -346,38 +117,349 @@ cik_loop: LOOP
   END IF;
  
   #create a tmp table of just the adsh for this cik (b/c mysql is incompetent at optimizing this query)
-  TRUNCATE TABLE tmp_adsh;
-  insert into tmp_adsh  select adsh, name, sic, fy, fp, form from f_sub where cik = currentCik;
+  #TRUNCATE TABLE tmp_adsh;
+  #insert into tmp_adsh  select adsh, name, sic, fy, fp, form from f_sub where cik = currentCik;
  
   #insert the cik’s f_num records into temp table
-  CREATE TEMPORARY TABLE standard_pts 
-    SELECT n.adsh, n.tag, n.uom, n.qtrs, n.value, n.ddate, name, sic, fy, fp, form
-    FROM f_num n inner join tmp_adsh ta on n.adsh=ta.adsh
-    WHERE n.version <> n.adsh and coreg="" and qtrs in (0,1,4);
+#  CREATE TEMPORARY TABLE standard_pts 
+#    SELECT n.adsh, n.tag, n.uom, n.qtrs, n.value, n.ddate, name, sic, fy, fp, form
+#    FROM f_num n inner join tmp_adsh ta on n.adsh=ta.adsh
+#    WHERE n.version <> n.adsh and coreg="" and qtrs in (0,1,4);
 
   INSERT INTO timeseries (cik, tag, uom, qtrs, pts, json) 
-    Select currentCik, tag, uom, qtrs, COUNT(distinct ddate), CONCAT("[",  GROUP_CONCAT(CONCAT("[""", ddate, """,", value, ",""", adsh, """,""", fy, " ", fp, """,""", form, """,""", replace(name, "'", "''"), """,", sic, "]") ORDER BY ddate ASC, ADSH DESC SEPARATOR ","), "]") from standard_pts group by tag, uom, qtrs;
+    Select currentCik, 
+       tag, 
+       uom, 
+       qtrs, 
+       count(*),
+       CONCAT("[",  GROUP_CONCAT(CONCAT('{"start":', coalesce(concat('"', startdate,'"'),'null'), ',"end":"', enddate, '","val":', value, ',"accn":"', adsh, '","fy":', fy, ',"fp":"', fp, '","form":"', form, '"}') ORDER BY enddate ASC, adsh DESC SEPARATOR ","), "]") 
+     FROM (
+         SELECT n.adsh, n.tag, n.uom, n.qtrs, n.value, n.startdate, n.enddate, name, sic, fy, fp, form
+         FROM f_num n 
+         INNER JOIN f_sub s on n.adsh=s.adsh
+         WHERE n.ccp is not null AND s.cik = currentCik
+     ) standard_pts 
+     group by tag, uom, qtrs;
 
-  DROP TEMPORARY TABLE IF EXISTS standard_pts;
+#  DROP TEMPORARY TABLE IF EXISTS standard_pts;
 
 END LOOP cik_loop;
 
 #release resources
 CLOSE ciks;
-DROP TEMPORARY TABLE IF EXISTS tmp_adsh;
 
+#DROP TEMPORARY TABLE IF EXISTS tmp_adsh;
+
+ALTER TABLE `timeseries`
+  ADD PRIMARY KEY (`cik`,`tag`,`uom`,`qtrs`),
+  ADD KEY `ixtimeseries_tag` (`tag`);
+  
 #final update of timeseries’ co name, tag name, and tag description from f-tag and f_sub
 
 #get latest definition of all standard tag into temp table
 UPDATE standardtag st, timeseries ts
-set ts.tlabel=st.tlabel, ts.doc=st.doc
+set ts.label=st.label, ts.description=st.description
 where ts.tag=st.tag;
 
 #get latest company name too
 update timeseries ts 
   inner join f_sub s on ts.cik = s.cik 
   inner join (select max(period) as period, cik from f_sub group by cik) mxs on mxs.cik = s.cik and mxs.period = s.period 
-set ts.coname = s.name;
+set ts.entityName = s.name;
+
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `updateFrames`(IN `ADSH` VARCHAR(20))
+    NO SQL
+BEGIN
+#creates 154 records in 7.2s  <- revlaidate!
+
+CREATE TEMPORARY TABLE newFrame 
+  SELECT
+  distinct n.tag, n.ccp, n.qtrs, n.uom, st.label as label, st.description
+  FROM f_num n
+  INNER JOIN standardtag st ON n.tag = st.tag
+ WHERE n.ccp is not null AND n.adsh=ADSH;
+
+#insert into frames (tag, ccp, uom, qtrs, label, description, pts, json, api_written) 
+select fr.tag, fr.ccp, fr.uom, fr.qtrs, fr.label, fr.description,  count(*) as pts, 
+  CONCAT('[', GROUP_CONCAT(CONCAT('{"accn":"', s.adsh, '","cik":', s.cik, ',"entityName":"', s.name,'","sic":', s.sic, 
+     ',"loc":"', COALESCE(s.countryba, s.countryma,''),'-', COALESCE(s.stprba, s.stprma,''),'","start":', 
+     coalesce(concat('"',n.startdate,'"'),'null'),',"end":"', n.enddate,'","val":', n.value, ',"rev":', s.filed, '}') order by s.cik, s.filed), ']') as json,  0
+from newFrame fr
+inner join f_num n force index for join (tagccpuom) ON fr.tag=n.tag and fr.ccp=n.ccp and fr.uom=n.uom
+INNER JOIN f_sub s on n.adsh = s.adsh
+inner join (
+    select nf.tag, nf.ccp, nf.uom, cik, max(filed) as maxfiled, count(distinct value) as versions
+    from newFrame nf
+    inner join f_num n USE INDEX (tagccpuom, ix_adshtag) ON nf.tag=n.tag and nf.ccp=n.ccp AND nf.uom=n.uom 
+    inner join f_sub s on s.adsh=n.adsh
+    group by n.tag, n.ccp, n.uom, s.cik
+) mx on mx.tag=n.tag and mx.ccp=n.ccp and mx.uom=n.uom and mx.cik=s.cik and s.filed=mx.maxfiled
+GROUP BY fr.tag, fr.ccp, fr.uom, fr.label
+#on duplicate key update label=fr.label, description=fr.description, pts=pts, json=json, api_written=0
+;
+
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `makeAnalytics`()
+    NO SQL
+BEGIN
+  CALL makeStandardTags();
+  CALL makeTimeSeries(0);
+  CALL makeFacts();
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `updateTimeSeries`(IN `ADSH` VARCHAR(25))
+    NO SQL
+BEGIN
+#execution time = 70ms for adsh = '0000002178-18-000067' returning 94 timeseries
+DECLARE CIK INT;
+DECLARE SIC INT;
+DECLARE ENTITYNAME varchar(200);
+    
+  #1. get CIK and name of entity for this ADSH 
+  select s.cik, s.name, s.sic into CIK, ENTITYNAME, SIC from f_sub s where s.adsh = ADSH; 
+  
+  #2. create a tmp table of the standard tags updated in this submission
+  CREATE TEMPORARY TABLE IF NOT EXISTS tmp_standard_tags_with_new_facts AS 
+  (  select distinct n.tag, st.label, st.description, n.uom, n.qtrs
+     from f_num n 
+     INNER JOIN standardtag st on st.tag = n.tag   
+     where n.adsh = ADSH and n.ccp is not null
+  );
+  
+  #3. make TS and insert into tmp_timeseries 
+  CREATE TEMPORARY TABLE IF NOT EXISTS tmp_timeseries 
+  (
+    Select @CIK, 
+      nf.tag,
+      nf.label,
+      nf.description,
+      nf.uom, 
+      nf.qtrs, 
+      COUNT(distinct n.enddate) as pts, 
+    CONCAT("[",  GROUP_CONCAT(CONCAT('{"start":', coalesce(concat('"',n.startdate,'"'),'null'), ',"end":"', enddate, '","val":', value, ',"accn":"', s.adsh, '","fy":', s.fy, ',"fp":"', s.fp, '","form":"', s.form, '"}') ORDER BY enddate ASC, s.adsh DESC SEPARATOR ","), "]") as json
+    from tmp_standard_tags_with_new_facts nf
+    inner join f_num n on n.tag=nf.tag and n.uom=nf.uom and n.qtrs=nf.qtrs
+    inner join f_sub s on n.adsh=s.adsh
+    where n.ccp is not null and s.cik = CIK
+    group by nf.tag, nf.uom, nf.qtrs
+  );
+
+
+  #4. insert / update timeseries table 
+  INSERT INTO timeseries (cik, entityName, tag, label, description, uom, qtrs, pts, json) 
+    Select cik, ENTITYNAME, tag, label, description, uom, qtrs, pts, json
+    from tmp_timeseries
+  ON DUPLICATE KEY UPDATE
+    timeseries.entityName = ENTITYNAME,
+    timeseries.label = tmp_timeseries.label,
+    timeseries.description = tmp_timeseries.description,
+  	timeseries.pts = tmp_timeseries.pts,
+  	timeseries.json = tmp_timeseries.json;
+
+  #6. set submission state to intermediate; lambda code will change state to final after succesfully writing REST API files to S3 
+  #update f_sub s SET s.processedState = 2 
+  #  where s.cik=CIK and s.processedState = 1; 
+   
+  #7. return timeseries for @CIK's updated tags (not restricted by uom or qtrs) to write out bundles timeseries to S3
+  select DISTINCTROW CIK as cik, ENTITYNAME as entityname, ts.* 
+  from timeseries ts 
+  inner JOIN tmp_standard_tags_with_new_facts nf on ts.tag=nf.tag
+  where ts.cik=CIK
+  order by ts.cik, ts.tag, ts.uom, ts.qtrs;
+  
+  #8. drop tmp tables
+  DROP TEMPORARY TABLE IF EXISTS tmp_standard_tags_with_new_facts;
+  DROP TEMPORARY TABLE IF EXISTS tmp_timeseries;
+    
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `makeStandardTags`()
+    NO SQL
+BEGIN
+  
+  CREATE TABLE standardtagWrk (
+    tag varchar(255)  PRIMARY KEY,
+    maxversion varchar(50),
+    label  varchar(512) NULL,
+    description  varchar(2048) NULL,
+    cnt int DEFAULT 0
+  );
+  
+  INSERT INTO standardtagWrk (tag, maxversion) 
+     SELECT tag, version from f_tag
+     WHERE custom=0
+     ON duplicate key 
+       update maxversion = if(maxversion<version, version, maxversion);
+     
+  UPDATE standardtagWrk st, f_tag t
+    SET st.label = t.tlabel, st.description = t.doc
+    WHERE st.tag = t.tag and st.maxversion = t.version;
+
+  START TRANSACTION;
+    DROP TABLE IF EXISTS standardtag;
+    RENAME TABLE standardtagWrk TO standardtag;
+  COMMIT;
+
+# remove the follow after switch to new parser that scraped start and end period dates and calculates the ccp (closet calendrical period)
+  update f_num 
+    set enddate=ddate, startdate = date_sub(ddate, interval qtrs quarter), ccp=concat('CY',year(date_sub(ddate, interval 40 day)),'Q',quarter(date_sub(ddate, interval 40 day))) 
+    where qtrs = 1 and adsh<>version and coreg='' and value is not null;
+  update f_num 
+    set enddate=ddate, startdate = null, ccp=concat('CY',year(date_sub(ddate, interval 40 day)),'Q',quarter(date_sub(ddate, interval 40 day)),'I') 
+    where qtrs = 0 and adsh<>version and coreg='' and value is not null;
+  update f_num 
+    set enddate=ddate, startdate = date_sub(ddate, interval qtrs quarter), ccp=concat('CY',year(date_sub(ddate, interval 180 day))) 
+    where qtrs = 4 and adsh<>version and coreg='' and value is not null;
+
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `truncateData`()
+    NO SQL
+BEGIN
+
+truncate table datasets;
+truncate table eventlog;
+truncate table f_sub;
+truncate table f_tag;
+truncate table f_num;
+truncate table f_pre;
+
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `searchNames`(IN `lastname` VARCHAR(255) CHARSET latin1, IN `firstname` VARCHAR(255) CHARSET latin1, IN `middlename` VARCHAR(255) CHARSET latin1)
+    NO SQL
+BEGIN
+
+#names are expected to be words, initals or NULL
+#honorifics, title and suffixes (eg. Dr, PhD, Jr, Sr) should be omitted
+DECLARE hasFirst bit default firstname is not null and firstname <> '';
+DECLARE hasMiddle bit default middlename is not null and middlename <> '';
+
+#search patterns for first and middle names and initials
+declare exactFirst varchar(255) default if(hasFirst, concat(' ', firstname), '');
+declare exactMiddle varchar(255) default if(hasMiddle, concat(' ', middlename), '');
+declare exactFI varchar(10) default if(hasFirst, concat(' ', substring(firstname from 1 for 1)), '');
+declare exactMI varchar(10) default if(hasMiddle, concat(' ', substring(middlename from 1 for 1)), '');
+
+declare likeFI varchar(10) default if(hasFirst, concat(' ', substring(firstname from 1 for 1),'%'), '');
+declare likeMI varchar(10) default if(hasMiddle, concat(' ', substring(middlename from 1 for 1),'%'), '');
+
+SET NAMES 'latin1' COLLATE 'latin1_general_ci';
+
+Create temporary table matches 
+  (cik varchar(20) UNIQUE KEY, name varchar(512), rank tinyint);
+
+#exact match of last name + match of first & middle names/initials WITHOUT contradictions
+insert into matches select ownercik, GROUP_CONCAT(ownername_ci SEPARATOR ' <br><i>also filed as</i> '), 1 from ownership_names
+    where ownername_ci like concat(lastname,' %') COLLATE latin1_general_ci and (
+        ownername_ci rlike concat('^', lastname, exactFirst, '[a-zA-Z]*', exactMiddle) COLLATE latin1_general_ci	
+    	or ownername_ci rlike concat('^', lastname, exactFirst, exactMI,'[[:>:]]') COLLATE latin1_general_ci	
+    	or ownername_ci rlike concat('^', lastname, exactFI, exactMiddle,'[[:>:]]') COLLATE latin1_general_ci	
+    	or ownername_ci rlike concat('^', lastname, exactFI, exactMI,'[[:>:]]') COLLATE latin1_general_ci)
+        GROUP BY ownercik;
+        
+#exact match of last name + match of first & middle initial WITH possible contradictions
+insert into matches select ownercik, ownername_ci, 2 as rank from ownership_names
+    where ownername_ci like concat(lastname, likeFI, likeMI) COLLATE latin1_general_ci	
+    or ownername_ci like concat(lastname, likeMI, likeFI) COLLATE latin1_general_ci
+    on duplicate key update matches.cik=ownercik;  
+    
+   
+/*#either first or middle initials match full names 
+insert into matches select ownercik, ownername_ci, 3 from ownership_names
+    where (ownername_ci LIKE concat(lastname, likeFI) COLLATE latin1_general_ci and hasFirst) 
+    or (ownername_ci LIKE concat(lastname, likeMi) COLLATE latin1_general_ci and hasMiddle) 	
+    on duplicate key update cik=ownercik; */
+#soundex lastname + 
+
+insert into matches select * from (select ownercik, GROUP_CONCAT(ownername_ci SEPARATOR ' <br><i>also files as</i> ') as ownernames, 4 from ownership_names
+    where ownerlastname_soundex = soundex(lastname) COLLATE latin1_general_ci
+    and ((not hasFirst) or ownername_ci RLIKE exactFI COLLATE latin1_general_ci)
+   AND ((not hasMiddle) or ownername_ci RLIKE exactMI COLLATE latin1_general_ci) 
+   GROUP  BY ownercik) sm
+    on duplicate key update cik=ownercik; 
+
+select * from matches;
+
+drop temporary table matches;
+  
+END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `makeFrames`()
+    NO SQL
+BEGIN
+#creates 408K records in 28min on a M5.XL (note: 138K are sinlge pt frames)
+#variable declarations
+DECLARE currentTag varchar(255);
+DECLARE currentLabel varchar(512);
+DECLARE currentDescription varchar(2048);
+DECLARE terminate INT DEFAULT 0;
+DECLARE i INT DEFAULT 0;
+
+#cursor declarations
+DECLARE cr_standardTags CURSOR FOR 
+  SELECT tag, label, description FROM standardtag st;
+  #WHERE tag = 'NetIncomeLoss';  #testing muzzle = comment out to build!
+DECLARE CONTINUE HANDLER FOR NOT FOUND SET terminate = 1;
+
+TRUNCATE TABLE frames;
+
+#double the max size to 2 MB for group_concat and concat
+set @@session.group_concat_max_len = 1048576 * 2;
+set @@global.max_allowed_packet = 1048576 * 2;
+
+Open cr_standardTags;
+st_loop: LOOP #OUTTER LOOP = TAG -> crunch all frames for a given tag at the same time
+  	FETCH cr_standardTags INTO currentTag, currentLabel, currentDescription; 
+  	IF terminate = 1 THEN
+    	LEAVE st_loop;
+  	END IF;
+
+    # regular table = not thread safe for multiple simultaneous procedures
+    # note: can't include company (name) in case of change
+    TRUNCATE TABLE frame_working;
+    #frames contains the row of the last filed value + versions fields to indicate revisions
+    INSERT INTO frame_working  (tag, ccp, uom, cik, maxfiled, versions) 
+    	select currentTag, n.ccp, n.uom, cik, max(filed) as maxfiled, COUNT(DISTINCT n.value) AS rev 
+        from f_num n inner join f_sub s on n.adsh=s.adsh
+        where n.tag = currentTag AND n.ccp is not null
+        group by n.ccp, n.uom, s.cik;
+        
+    #create frames for this (tag, cdate, qtrs, uom)
+    INSERT INTO frames (tag, ccp, uom, qtrs, label, description, pts, json)
+SELECT fw.tag, fw.ccp, fw.uom, n.qtrs, currentLabel, currentDescription, count(*) as pts, 
+         CONCAT('[', GROUP_CONCAT(CONCAT('{"accn":"', s.adsh, '","cik":', fw.cik, ',"entityName":"', s.name,'","sic":', s.sic, ',"loc":"', 
+         	COALESCE(s.countryba, s.countryma,''),'-', COALESCE(s.stprba, s.stprma,''),'","start":',coalesce(concat('"',n.startdate,'"'),
+            'null'),',"end":"', n.enddate, '","val":', n.value, ',"rev":', fw.versions, '}')), ']')
+       FROM frame_working fw
+       inner join f_sub s on fw.cik = s.cik and fw.maxfiled=s.filed
+       inner join f_num n USE INDEX (tagccpuom, ix_adshtag) on  fw.tag=n.tag and fw.ccp=n.ccp and fw.uom=n.uom and s.adsh=n.adsh
+       group by fw.tag, fw.ccp, fw.uom;
+    #note: can skip qtrs in group by and more becuase ccp uniquely combines enddate and qtrs
+
+
+END LOOP st_loop;
+
+#release resources and cleanup
+CLOSE cr_standardTags;
+
 
 END$$
 DELIMITER ;
@@ -484,6 +566,49 @@ END$$
 DELIMITER ;
 
 DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `updateEdgarNames`()
+    NO SQL
+BEGIN
+
+DROP TABLE IF EXISTS names_tmp ;
+CREATE TABLE names_tmp (
+  adsh varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
+  cik varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
+  name_ci varchar(512) COLLATE latin1_general_ci DEFAULT NULL COMMENT 'case insensitive for search index',
+  lastname_soundex varchar(512) COLLATE latin1_general_ci NOT NULL COMMENT 'soundex of last name (= first word of name)'
+) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci;
+
+ALTER TABLE names_tmp 
+  ADD PRIMARY KEY (adsh,cik,name_ci);  -- need before inserts to avoid case insensitive dups
+
+#warning: escaped regex on save: \\. becomes \. becomes .
+INSERT into names_tmp 
+  SELECT 
+    '',
+    ownercik, 
+    TRIM(REGEXP_REPLACE(concat(' ', ownername, ' '), '.|,| phd| md','')),
+    soundex(SUBSTRING(trim(ownername),1,instr(trim(ownername), ' ')-1))
+  from ownership_reporter
+  ON DUPLICATE KEY UPDATE names_tmp.cik=ownership_reporter.ownercik;
+
+INSERT into names_tmp 
+  select adsh, 0, concat(lastName,' ',firstName,' ', coalesce(MiddleName,'')), soundex(lastName) 
+  from exemptOfferingPersons
+  ON DUPLICATE KEY UPDATE names_tmp.adsh=exemptOfferingPersons.adsh;
+
+-- add Full text indexes 
+ALTER TABLE names_tmp ADD FULLTEXT KEY name_ci (name_ci);
+ALTER TABLE names_tmp ADD FULLTEXT KEY lastname_soundex (lastname_soundex);
+
+START TRANSACTION;
+  DROP TABLE IF EXISTS edgar_names;
+  RENAME TABLE names_tmp to edgar_names;
+COMMIT;
+
+END$$
+DELIMITER ;
+
+DELIMITER $$
 CREATE DEFINER=`root`@`localhost` PROCEDURE `truncOwner`()
     NO SQL
 BEGIN
@@ -512,77 +637,104 @@ END$$
 DELIMITER ;
 
 DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `searchNames`(IN `lastname` VARCHAR(255) CHARSET latin1, IN `firstname` VARCHAR(255) CHARSET latin1, IN `middlename` VARCHAR(255) CHARSET latin1)
+CREATE DEFINER=`root`@`localhost` PROCEDURE `updateOwnershipAPI`(IN `ADSH` VARCHAR(25))
     NO SQL
 BEGIN
+#executes in 5 minutes (Python writer to S3 another 30 minutes for 175K objects)
+DECLARE ISSUERCIK varchar(25);
+SET SESSION group_concat_max_len = 8000000; # 8MB
 
-#names are expected to be words, initals or NULL
-#honorifics, title and suffixes (eg. Dr, PhD, Jr, Sr) should be omitted
-DECLARE hasFirst bit default firstname is not null and firstname <> '';
-DECLARE hasMiddle bit default middlename is not null and middlename <> '';
+#ISSUERS
+select s.issuercik into ISSUERCIK from ownership_submission s where s.adsh=ADSH; 
+delete from ownership_api_issuer where cik=ISSUERCIK;
 
-#search patterns for first and middle names and initials
-declare exactFirst varchar(255) default if(hasFirst, concat(' ', firstname), '');
-declare exactMiddle varchar(255) default if(hasMiddle, concat(' ', middlename), '');
-declare exactFI varchar(10) default if(hasFirst, concat(' ', substring(firstname from 1 for 1)), '');
-declare exactMI varchar(10) default if(hasMiddle, concat(' ', substring(middlename from 1 for 1)), '');
+INSERT into ownership_api_issuer (cik, transactions, lastfiledt)
+select STRAIGHT_JOIN s.issuercik, #select executes in 32 ms with FORCE PRIMARY
+	concat(
+      '[["',
+      GROUP_CONCAT(
+         concat_ws(
+           '","',s.form, s.adsh, t.transnum,
+           coalesce(t.transcode, ''),
+           coalesce(t.acquiredisposed, ''),
+           coalesce(t.directindirect, ''),
+           coalesce(t.transdt,''),
+           concat(substring(filedt,1,4),'-',substring(filedt,5,2),'-',substring(filedt,7,2)),
+           replace(replace(r.ownername,'\\','\\\\'),'"','\\"'), 
+           r.ownercik, 
+           coalesce(t.shares,''),
+           coalesce(t.sharesownedafter, ''),
+           replace(replace(REPLACE(REPLACE(t.security, '\r', ' '), '\n', ' '),'\\','\\\\'),'"','\\"')
+         ) ORDER BY coalesce(t.transdt, s.filedt) desc SEPARATOR '"],["'
+      ),
+      '"]]'
+    ) as transactjson,
+    max(s.filedt) as maxfiledt
+from ownership_submission s FORCE INDEX (adsh, issuercik)
+  INNER JOIN ownership_reporter r FORCE INDEX for JOIN (PRIMARY) on s.adsh = r.adsh
+  INNER JOIN ownership_transaction t FORCE INDEX for JOIN (PRIMARY) on s.adsh = t.adsh
+where r.ownernum = 1 and t.transtype='T' and s.issuercik=ISSUERCIK
+group by s.issuercik;
 
-declare likeFI varchar(10) default if(hasFirst, concat(' ', substring(firstname from 1 for 1),'%'), '');
-declare likeMI varchar(10) default if(hasMiddle, concat(' ', substring(middlename from 1 for 1),'%'), '');
-
-SET NAMES 'latin1' COLLATE 'latin1_general_ci';
-
-Create temporary table matches 
-  (cik varchar(20) UNIQUE KEY, name varchar(512), rank tinyint);
-
-#exact match of last name + match of first & middle names/initials WITHOUT contradictions
-insert into matches select ownercik, GROUP_CONCAT(ownername_ci SEPARATOR ' <br><i>also filed as</i> '), 1 from ownership_names
-    where ownername_ci like concat(lastname,' %') COLLATE latin1_general_ci and (
-        ownername_ci rlike concat('^', lastname, exactFirst, '[a-zA-Z]*', exactMiddle) COLLATE latin1_general_ci	
-    	or ownername_ci rlike concat('^', lastname, exactFirst, exactMI,'[[:>:]]') COLLATE latin1_general_ci	
-    	or ownername_ci rlike concat('^', lastname, exactFI, exactMiddle,'[[:>:]]') COLLATE latin1_general_ci	
-    	or ownername_ci rlike concat('^', lastname, exactFI, exactMI,'[[:>:]]') COLLATE latin1_general_ci)
-        GROUP BY ownercik;
-        
-#exact match of last name + match of first & middle initial WITH possible contradictions
-insert into matches select ownercik, ownername_ci, 2 as rank from ownership_names
-    where ownername_ci like concat(lastname, likeFI, likeMI) COLLATE latin1_general_ci	
-    or ownername_ci like concat(lastname, likeMI, likeFI) COLLATE latin1_general_ci
-    on duplicate key update matches.cik=ownercik;  
-    
-   
-/*#either first or middle initials match full names 
-insert into matches select ownercik, ownername_ci, 3 from ownership_names
-    where (ownername_ci LIKE concat(lastname, likeFI) COLLATE latin1_general_ci and hasFirst) 
-    or (ownername_ci LIKE concat(lastname, likeMi) COLLATE latin1_general_ci and hasMiddle) 	
-    on duplicate key update cik=ownercik; */
-#soundex lastname + 
-
-insert into matches select * from (select ownercik, GROUP_CONCAT(ownername_ci SEPARATOR ' <br><i>also files as</i> ') as ownernames, 4 from ownership_names
-    where ownerlastname_soundex = soundex(lastname) COLLATE latin1_general_ci
-    and ((not hasFirst) or ownername_ci RLIKE exactFI COLLATE latin1_general_ci)
-   AND ((not hasMiddle) or ownername_ci RLIKE exactMI COLLATE latin1_general_ci) 
-   GROUP  BY ownercik) sm
-    on duplicate key update cik=ownercik; 
-
-select * from matches;
-
-drop temporary table matches;
+Update ownership_api_issuer a,  #executes in 300ms
+  (select max(filed) as lastfiledt, cik from f_sub group by cik having cik=ISSUERCIK) s
+  set a.lastfiledt = s.lastfiledt
+  WHERE a.cik=s.cik and a.cik=ISSUERCIK;
   
-END$$
-DELIMITER ;
+Update ownership_api_issuer a, f_sub s  #executes in 12 ms
+  set a.name = s.name,
+    a.mastreet1 =  s.mas1,
+    a.mastreet2 =  s.mas2,
+    a.macity = s.cityma,
+    a.mastate = s.stprma,
+    a.mazip =  s.zipma,                           
+    a.bastreet1 = s.bas1,
+    a.bastreet2 = s.bas2,
+    a.bacity = s.cityba,
+    a.bastate = s.stprba, 
+    a.bazip = s.zipba
+  WHERE a.cik=s.cik and a.lastfiledt = s.filed and s.cik=ISSUERCIK;  
 
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `truncateData`()
-    NO SQL
-BEGIN
 
-truncate table datasets;
-truncate table eventlog;
-truncate table f_sub;
-truncate table f_tag;
-truncate table f_num;
-truncate table f_pre;
+#REPORTERS
+delete from ownership_api_reporter where cik in (select r.ownercik from ownership_reporter r where r.adsh = adsh); # 7ms
+INSERT into ownership_api_reporter (cik, transactions, lastfiledt) #executes in 100 ms
+select r.ownercik,
+	concat('[["',
+       GROUP_CONCAT(
+         concat_ws(
+           '","',s.form, s.adsh, t.transnum,
+           coalesce(t.transcode, ''),
+           coalesce(t.acquiredisposed, ''),
+           coalesce(t.directindirect, ''),
+           coalesce(t.transdt,''),
+           concat(substring(filedt,1,4),'-',substring(filedt,5,2),'-',substring(filedt,7,2)),
+           replace(replace(s.issuername,'\\','\\\\'),'"','\\"'), 
+           s.issuercik, 
+           coalesce(t.shares,''),
+           coalesce(t.sharesownedafter, ''),
+           replace(replace(REPLACE(REPLACE(t.security, '\r', ' '), '\n', ' '),'\\','\\\\'),'"','\\"')
+         ) ORDER BY coalesce(t.transdt, s.filedt) desc SEPARATOR '"],["'
+       ),
+       '"]]'
+    ),
+    max(s.filedt)
+from ownership_submission s
+  INNER JOIN ownership_reporter r on r.adsh = s.adsh
+  INNER JOIN ownership_transaction t on t.adsh = s.adsh
+  INNER JOIN ownership_reporter r2 on r.ownercik=r2.ownercik
+where r2.adsh=ADSH
+group by r.ownercik;
+
+Update ownership_api_reporter a, #executes in 9ms
+ ownership_reporter r
+set a.name = r.ownername,
+  a.mastreet1=r.ownerstreet1,
+  a.mastreet2=r.ownerstreet2,
+  a.macity=r.ownercity,
+  a.mastate=r.ownerstate,
+  a.mazip=r.ownerzip                       
+  WHERE a.cik=r.ownercik and r.adsh=ADSH;
 
 END$$
 DELIMITER ;
@@ -601,6 +753,38 @@ END$$
 DELIMITER ;
 
 DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `dropIndexSafely`(IN `tbl` VARCHAR(255), IN `ix` VARCHAR(255))
+    NO SQL
+BEGIN
+
+IF((SELECT COUNT(*) AS index_exists 
+    FROM information_schema.statistics 
+    WHERE TABLE_SCHEMA = DATABASE() 
+      and table_name =tbl 
+      AND index_name = ix) > 0) 
+THEN
+   SET @s = CONCAT('DROP INDEX ' , ix , ' ON ' , tbl);
+   PREPARE stmt FROM @s;
+   EXECUTE stmt;
+ END IF;
+ 
+ END$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE DEFINER=`root`@`localhost` PROCEDURE `listFinancialStatements`(IN `CIK` INT)
+    NO SQL
+BEGIN
+
+SELECT cik, concat('[', GROUP_CONCAT(concat('{"accn":"', adsh, '","form":"', form, '","fp":"', fp, '","fy":"', fy, '","filed":"',filed,'"}') order by fy desc, fp desc, filed, form), ']') as jsonList
+FROM f_sub s 
+where s.cik=CIK
+group by s.cik;
+
+END$$
+DELIMITER ;
+
+DELIMITER $$
 CREATE DEFINER=`root`@`localhost` PROCEDURE `truncateAnalytics`()
     NO SQL
 BEGIN
@@ -608,229 +792,6 @@ BEGIN
   truncate table standardtag;
   truncate table facts;
   truncate table timeseries;
-
-END$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `updateFrames`()
-    NO SQL
-BEGIN
-#creates 700k records in 5h (250k of which were single pnt facts)
-
-#variable declarations
-DECLARE newTag varchar(255);
-DECLARE standardTlabel varchar(512);
-DECLARE standardDoc varchar(2048);
-DECLARE newDdate char(10);
-DECLARE newUom varchar(256);
-DECLARE newQtrs tinyint;
-DECLARE json text;
-DECLARE pts int;
-DECLARE terminate INT DEFAULT 0;
-
-#cursor and handler declarations
-DECLARE cr_newtagdates CURSOR FOR 
-  SELECT distinct n.tag, ddate, qtrs, uom, st.tlabel, st.doc
-  FROM f_sub s 
-    inner join f_num n on s.adsh = n.adsh
-    INNER JOIN standardtag st ON n.tag = st.tag
-  WHERE s.api_state=3 
-    AND n.version<>n.adsh 
-    AND n.coreg=''
-    AND n.qtrs in (0,1,4);
-DECLARE CONTINUE HANDLER FOR NOT FOUND SET terminate = 1;
-
-#double the max size to 2 MB for group_concat and concat
-set @@session.group_concat_max_len = 1048576 * 2;
-set @@global.max_allowed_packet = 1048576 * 2;
-
-CREATE TEMPORARY TABLE tmp_frame_num 
-  select s.adsh, s.cik, s.filed as lastfiled, n.value from f_sub s inner join f_num n on n.adsh=s.adsh limit 0;
-
-Open cr_newtagdates;
-fact_loop: LOOP
-  FETCH cr_newtagdates INTO newTag, newDdate, newQtrs, newUom, 
-    standardTlabel, standardDoc;
-  IF terminate = 1 THEN
-    LEAVE fact_loop;
-  END IF;
-
-  # regular table = not thread safe to allow multiple procedures to run
-  truncate table tmp_frame_num;
-  insert into frame_working  (adsh, cik, lastfiled, value) 
-     SELECT s.adsh, s.cik, max(s.filed) as lastfiled, value
-       FROM f_num n 
-         INNER JOIN f_sub s on n.adsh = s.adsh
-       WHERE n.tag=newTag AND n.qtrs=newQtrs
-         AND n.ddate=newDdate AND n.uom=newUom
-         AND n.coreg='' AND n.value is not null
-         AND n.adsh <> n.version
-       GROUP BY s.cik, s.adsh, value;
-  
-  #make the fact's JSON
-  SELECT 
-     count(*) as pts,
-     CONCAT('[', GROUP_CONCAT(CONCAT('["', s.adsh, '",', s.cik, ',', s.sic, ',"', s.name, '","', s.countryba, '",', COALESCE(concat('[', pl.lat, ',', pl.lon, ']'), 'null'), ',', n.value, ',', revisions, ']')), ']') as json
-  INTO json, pts
-  FROM f_sub s
-    INNER JOIN (
-      select cik, max(adsh) as adsh, lastfiled, revisions 
-      from frame_working fw
-      inner join (select cik, max(filed) as mxfiled, count(distinct value) as revisions from frame_working group by cik) mx 
-        on mx.cik=fw.cik and mx.mxfiled=fw.filed
-    ) mxfw on s.adsh=mxfw.adsh
-    INNER JOIN frame_working fw on mxfw.adsh=fs.adsh
-    LEFT OUTER JOIN postcodeloc pl on s.countryba = pl.cnty and left(s.zipba, 5) = pl.zip;
-  
-  INSERT INTO frames 
-    (tag, ddate, uom, qtrs, tlabel, tdoc, pts, json, api_written)
-    VALUES (newTag, newDdate, newUom, newQtrs, currentTlabel, currentDoc, pts, json, 0)
-  ON DUPLICATE KEY UPDATE
-    json=json, pts=pts, tlabel=currentTlabel, doc=currentDoc, api_written=0;
-  
-  truncate table tmp_frame_num;
-  
-END LOOP fact_loop;
-
-#update submission's state (Note: not thread safe)
-UPDATE f_sub set api_state=0 WHERE api_state=3; 
-#cleanup and exit
-CLOSE cr_newtagdates;
-END$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `updateOwnershipNames`()
-    NO SQL
-BEGIN
-
-DROP TABLE IF EXISTS ownership_names_tmp ;
-CREATE TABLE ownership_names_tmp (
-  ownercik varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
-  ownername_ci varchar(512) COLLATE latin1_general_ci DEFAULT NULL COMMENT 'case insensitive for search index',
-  ownerlastname_soundex varchar(512) COLLATE latin1_general_ci NOT NULL COMMENT 'soundex of last name = first word of name'
-) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci;
-
-ALTER TABLE ownership_names_tmp 
-  ADD PRIMARY KEY (ownercik,ownername_ci);  -- need before inserts to avoid case insensitive dups
-
-#warning: escaped regex on save: \\. becomes \. becomes .
-INSERT into ownership_names_tmp 
-  SELECT 
-    ownercik, 
-    TRIM(REGEXP_REPLACE(concat(' ', ownername, ' '), '\\.|,| phd| md','')),
-    soundex(SUBSTRING(trim(ownername),1,instr(trim(ownername), ' ')-1))
-  from ownership_reporter
-  ON DUPLICATE KEY UPDATE ownership_names_tmp.ownercik=ownership_reporter.ownercik;
-
--- add Full text indexes 
-ALTER TABLE ownership_names_tmp ADD FULLTEXT KEY ownername_ci (ownername_ci);
-ALTER TABLE ownership_names_tmp ADD FULLTEXT KEY ownerlastname_soundex (ownerlastname_soundex);
-
-START TRANSACTION;
-  DROP TABLE IF EXISTS ownership_names;
-  RENAME TABLE ownership_names_tmp to ownership_names;
-COMMIT;
-
-END$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `updateTimeSeries`(IN `updatesOnly` BIT)
-    NO SQL
-BEGIN
-#added analytical index (moved to addFilingIndexes), created 3.8M times series & drop index (moved to addFilingIndexes) in 28m
-DECLARE currentCik INT;
-#DECLARE currentCoName VARCHAR(150);
-DECLARE terminate INTEGER DEFAULT 0;
-DECLARE ciks CURSOR FOR
-  SELECT DISTINCT cik FROM f_sub 
-  where api_state=1 or not updatesOnly;  #unprocessed has multiple state
-DECLARE CONTINUE HANDLER 
-        FOR NOT FOUND SET terminate = 1;
-
-CREATE TEMPORARY TABLE tmp_adsh 
-  select adsh, name, sic, fy, fp, form, api_state 
-  from f_sub limit 0;
- 
-CREATE TEMPORARY TABLE tmp_timeseries
-    Select cik, tag, uom, qtrs, pts, json, newpoints
-    from timeseries limit 0;
-    
-if(NOT updatesOnly) 
-  then truncate table timeseries;
-end if;
-
-Open ciks;
-cik_loop: LOOP
-
-  FETCH ciks INTO currentCik;
-  IF terminate = 1 THEN
-    LEAVE cik_loop;
-  END IF;
-  
-  #set submission state = TS step 1 processing 
-  update f_sub s SET s.processedState = 2 
-    where s.cik=currentcik and s.processedState = 1; 
-  
-  #create a tmp table of just the adsh for this cik (b/c mysql is incompetent at optimizing this query)
-  TRUNCATE TABLE tmp_adsh;
-  insert into tmp_adsh  
-    select adsh, name, sic, fy, fp, form, api_state 
-    from f_sub where cik = currentCik;
- 
-  #insert the current cik’s f_num records into temp table
-  CREATE TEMPORARY TABLE standard_pts 
-    SELECT n.adsh, n.tag, n.uom, n.qtrs, n.value, n.ddate, name, sic, fy, fp, form
-    FROM f_num n inner join tmp_adsh ta on n.adsh=ta.adsh
-    WHERE n.version <> n.adsh and coreg="" and qtrs in (0,1,4);
-
-  #insert the cik’s timeseries records into temp table
-  truncate tmp_timeseries;
-  INSERT INTO tmp_timeseries
-    Select currentCik, 
-      tag, 
-      uom, 
-      qtrs, 
-      COUNT(distinct ddate) as pts, 
-    CONCAT("[",  GROUP_CONCAT(CONCAT("[""", ddate, """,", value, ",""", adsh, """,""", fy, " ", fp, """,""", form, """,""", replace(name, "'", "''"), """,", sic, "]") ORDER BY ddate ASC, ADSH DESC SEPARATOR ","), "]") as json, 
-      sum(if(api_state=2, 1, 0)) as newpoints
-    from standard_pts 
-    group by tag, uom, qtrs;
-
-  #inpute/update 
-  INSERT INTO timeseries (cik, tag, uom, qtrs, pts, json, newpoints) 
-    Select cik, tag, uom, qtrs, pts, json, newpoints
-    from tmp_timeseries
-    where newpoints>0 or not updatesOnly
-  ON DUPLICATE KEY UPDATE
-  	timeseries.pts = tmp_timeseries.pts,
-  	timeseries.json = tmp_timeseries.json,
-  	timeseries.newpoints = tmp_timeseries.newpoints;
-    
-  DROP TEMPORARY TABLE IF EXISTS standard_pts;
-
-END LOOP cik_loop;
-
-#release resources
-CLOSE ciks;
-DROP TEMPORARY TABLE IF EXISTS tmp_adsh;
-DROP TEMPORARY TABLE IF EXISTS tmp_timeseries;
-CALL dropIndexSafely('f_num', 'ix_adshtag');
-
-#final update of timeseries’ co name, tag name, and tag description from f-tag and f_sub
-
-#get latest definition of all standard tag into temp table
-UPDATE standardtag st, timeseries ts
-set ts.tlabel=st.tlabel, ts.doc=st.doc
-where ts.tag=st.tag;
-
-#get latest company name too
-update timeseries ts 
-  inner join f_sub s on ts.cik = s.cik 
-  inner join (select max(period) as period, cik from f_sub group by cik) mxs on mxs.cik = s.cik and mxs.period = s.period 
-set ts.coname = s.name;
 
 END$$
 DELIMITER ;

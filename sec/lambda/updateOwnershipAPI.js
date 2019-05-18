@@ -323,9 +323,11 @@ async function process345Submission(filing, remainsChecking){
         await s3WritePromises[i];  //collect the S3 writer promises
     }
     console.log('promises collected');
-    let cloudFront = new AWS.CloudFront(); //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#createInvalidation-property
-    invalidationParams.InvalidationBatch.Paths.Quantity = invalidationParams.InvalidationBatch.Paths.Items.length;
-    await cloudFront.createInvalidation(invalidationParams);
+
+    /*invalidation takes 5 - 15 minutes.  No SLA.  Better to set TTL for APIs to 60s
+    //let cloudFront = new AWS.CloudFront(); //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#createInvalidation-property
+    //invalidationParams.InvalidationBatch.Paths.Quantity = invalidationParams.InvalidationBatch.Paths.Items.length;
+    //await cloudFront.createInvalidation(invalidationParams); */
 
     //close connection and terminate lambda function by ending handler function
     await con.end();
