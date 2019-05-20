@@ -79,9 +79,9 @@ exports.handler = async (event, context) => {
         namespaces: {},
         contextTree: {},
         unitTree: {},
+        numericalFacts: []
     };  //event = processIndexHeaders parsing of index-headers.html file
-    //loop through submission files for main HTML discussion and Exhibit 101 XBRL XML documents
-    let iXBRLFound = false;
+    //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
     for (let i = 0; i < event.files.length; i++) {
         if(XBRLDocuments.iXBRL[event.files[i].type]) {
             console.log('primary '+event.files[i].type + ' HTML doc found: '+ event.path + event.files[i].name);
@@ -98,20 +98,23 @@ exports.handler = async (event, context) => {
         }
     }
     console.log(JSON.stringify(submission.dei));
+
+    //save parsed submission object into DB and update APIs
     if(submission.counts.standardFacts) {
         console.log('saving submission...');
         await saveXBRLSubmission(submission);
         console.log('sub mission saved: end of updateXBRL lambda event handler!');
 
         const updateTSPromise = common.runQuery("call updateTimeSeries('"+submission.filing.adsh+"');");  //52ms runtime
-        const updateFramePromise = common.runQuery("call updateFrames('"+submission.filing.adsh+"');");   //8,000 ms runtime
+        //todo: have updateTSPromise  return all TS for cik/tag (not just UOM & QTRS updated)
 
+        let updateAPIPromises = [];
         const financialStatementsList = await common.runQuery("call getFinancialStatementsList('"+submission.dei.cik+"');");
-        let listWritePromise = common.writeS3('sec/financialStatementsByCompany/cik'+parseInt(submission.dei.cik), JSON.stringify(financialStatementsList.data));
+        //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
+        updateAPIPromises.push(common.writeS3('sec/financialStatementsByCompany/cik'+parseInt(submission.dei.cik), JSON.stringify(financialStatementsList.data)));
 
         //write to time series REST API in S3
         let updatedTimeSeriesAPIDataset = await updateTSPromise;  //updates and returns all TS for the tags in submission (note: more returned than updated)
-        let s3WritePromises = [], body;
         let lastCik = false,
             lastTag = false,
             oTimeSeries = {},
@@ -119,13 +122,13 @@ exports.handler = async (event, context) => {
         for(let i=0; i<updatedTimeSeriesAPIDataset.data.length;i++) {
             let ts = updatedTimeSeriesAPIDataset.data[i];
             if (lastCik && lastTag && (lastCik != ts.cik || lastTag != ts.tag)) {
-                s3WritePromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));
+                updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));
                 oTimeSeries = {};
             }
             lastCik = ts.cik;
             lastTag = ts.tag;
             let cikKey = 'cik' + parseInt(ts.cik).toString();
-            s3Key = 'sec/timeseries/' + tag + '/' + cikKey + '.json';
+            s3Key = 'sec/timeseries/' + ts.tag + '/' + cikKey + '.json';
             let qtrs = "DQ" + ts.qtrs;  //DQ prefix = duration in quarters
             if (!oTimeSeries.tag) {
                 oTimeSeries.tag = {
@@ -142,24 +145,76 @@ exports.handler = async (event, context) => {
             }
             oTimeSeries[lastTag][cikKey]["units"][ts.uom]['DQ'+ts.qtrs] = JSON.parse(ts.json);  //DQ = duration in quarters
         }
-        s3WritePromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
+        updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
 
-        //write to time series REST API in S3
-        let updatedFrameAPIDataset = await updateFramePromise;
-        for(let i=0; i<updatedFrameAPIDataset.data.length;i++) {
-            let frame = updatedFrameAPIDataset.data[i];
-            frame.data = JSON.parse(frame.json);
-            delete frame.json;
-            let s3Key = 'sec/frames/' + frame.tag + '/' + frame.uom + '/' + frame.closestCalendarPeriod + '.json';
-            s3WritePromises.push(common.writeS3(s3Key, JSON.stringify(frame)));
+        //write to frame REST API in S3 by looping through list of parsed facts and updating the DB's JSON object rather than recreating = too DB intensive
+        for(let tag in submission.facts){
+            let fact = submission.facts[tag];
+            if(fact.isStandard && fact.ccp){
+                updateAPIPromises.push(updateFrame(fact));
+            }
         }
+
         //promise collection
-        for(let i=0;i<s3WritePromises.length;i++){
-            await s3WritePromises[i];
+        for(let i=0;i<updateAPIPromises.length;i++){
+            await updateAPIPromises[i];
         }
-        await listWritePromise;
     } else {
         console.log('no iXBRL/XBRL found: end of updateXBRL lambda event handler!');
+    }
+
+    function updateFrame(fact, submissionObject, depth=1){
+        // 1. read JSON and timestamp from DB
+        // 2. update JSON if needed
+        // 3. if updated write to DB via stored procedure (updateFrame) that checks for timestamp constancy:
+        //     returns (A) confirmation -> next fact) or (B) new timestamp and json for retry (step 2)
+        return new Promise(async (resolve, reject) => {
+            let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.ccp)+common.q(fact.uom)+"'', '')";  //no json = get request
+            let S3key = 'sec/frames/'+fact.tag+'/'+tag.uom+'/DQ'+tag.qtrs;
+            let needsUpdate = false;
+            let frameRecord = await common.runQuery(getCommand);
+            let frame = JSON.parse(frameRecord.data[0].json);
+            let newPoint = {"accn": submission.filing.adsh,
+                "cik": submission.dei.EntityCentralIndexKey || submission.filing.cik,
+                "entityName": submission.dei.EntityRegistrantName||submission.filing,
+                "sic": submission.filing.sic,
+                "loc": (submission.filing.businessAddress.country || submission.filing.businessAddress.country || 'US') + '-' + (submission.filing.businessAddress.state || submission.filing.businessAddress.state),
+                "start": fact.start,
+                "end": fact.end,
+                "val": fact.value,
+                "rev": 1};
+            let i;
+            for(i=0;i<frame.data.length;i++){
+                let point = frame.data[i];
+                if(point.cik==submission.dei.cik){
+                    if((point.start!=newPoint.start && (point.start || newPoint.start)) || point.end!=newPoint.end)
+                        throw("parsed tag "+fact.tag+" has different dates that frame for "+ S3key);
+                    if(point.value!=newPoint.value) newPoint.rev = point.rev+1;
+                    if(point.value!=newPoint.value  || point.sic!=newPoint.sic  || point.entityName!=newPoint.entityName  || point.loc!=newPoint.loc){
+                        frame.data.splice(i,1,newPoint);
+                        needsUpdate = true;
+                        break;
+                    }
+                }
+            }
+            if(i==frame.data.length){
+                needsUpdate = true;
+                frame.data.push(newPoint);
+            }
+            if(needsUpdate){
+                getCommand  = "call updateFrame("+common.q(fact.tag)+common.q(fact.ccp)+common.q(fact.uom)+common.q(JSON.stringify(frame))+common.q(frameRecord.data[0].timestamp, true)+")";  //no json = get request
+                let response = await await common.runQuery(getCommand);
+                if(response.date[0].processed){
+                    await common.writeS3(s3Key, JSON.stringify(frame));
+                    resolve(s3Key);
+                } else {
+                    if(depth<3)
+                        resolve(await updateFrame(fact, submissionObject, depth+1));  //retry up to 3 times
+                    else
+                        reject(S3key);
+                }
+            }
+        });
     }
 };
 
@@ -169,100 +224,27 @@ function parseXBRL($, submission){
     getElements('xbrli', 'xbrl').each(function() {
         for(var attr in this.attribs){ //'xmlns:us-gaap': 'http://fasb.org/us-gaap/2018-01-31',
             var attrParts = attr.split(':');
-            if(attrParts[0]=='xmlns'){
-                submission.namespaces[attrParts[1]] =  this.attribs[attr];
-            }
+            if(attrParts[0]=='xmlns') submission.namespaces[attrParts[1]] =  this.attribs[attr];
         }
     });
 
     //1b. make context reference tree
-    var start, end, ddate, $start, $end, $member;
-    getElements('xbrli', 'context').each(function(i, elem) {
-        $this = $(elem);
-        var id = $this.attr('id');
-        $start = $this.find('xbrli\\:startDate');
-        if(!$start.length) $start = $this.find('startDate');
-        if($start.length==1) {
-            start = new Date($start.html().trim());
-            $end = $(this).find('xbrli\\:endDate');
-            if(!$end.length) $end = $(this).find('endDate');
-            ddate = $end.html().trim();
-            end = new Date(ddate);
-            submission.contextTree[id] = {
-                ddate: ddate,
-                qtrs: ((end.getFullYear() - start.getFullYear())*12 + (end.getMonth() - start.getMonth())) / 3
-            };
-        } else {
-            var $instant = $this.find('xbrli\\:instant');
-            if(!$instant.length) $instant = $this.find('instant');
-            if($instant.length){
-                ddate = $instant.html().trim();
-                submission.contextTree[id] = {
-                    ddate: ddate,
-                    qtrs: 0
-                };
-            } else console.log('not sure what this is '+id);
-        }
-        $member = $this.find('xbrldi\\:explicitMember');
-        if(!$member.length) $member = $this.find('explicitMember');
-        if($member.length && $member.attr('dimension')){
-            submission.contextTree[id].member = $member.html().trim();
-            submission.contextTree[id].dim = $member.attr('dimension');
-        }
-        submission.counts.contexts++;
-    });
+    getElements('xbrli', 'context').each((i, elem)=>{ parseContextElement($, elem, submission)});
 
     //1c. unit reference tree
-    var $measure, $num, $denom;
-    getElements('xbrli', 'unit').each(function(i) {
-        $this = $(this);
-        $num = $this.find('xbrli\\:unitNumerator xbrli\\:measure');
-        if(!$num.length) $num = $this.find('unitNumerator measure');
-        $denom = $this.find('xbrli\\:unitDenominator xbrli\\:measure');
-        if(!$denom.length) $denom = $this.find('unitDenominator measure');
-
-        if($num.length==1 && $denom.length==1){
-            submission.unitTree[this.attribs.id] = {
-                nomid: $num.text().split(':').pop(),
-                denomid: $denom.text().split(':').pop()
-            };
-        } else {
-            $measure = $this.find('xbrli\\:measure');
-            if(!$measure.length) $measure = $this.find('measure');
-            if($measure.length==1){
-                submission.unitTree[this.attribs.id] = $measure.html().split(':').pop();
-            } else {
-                console.log('error parsing XBRL unit tag:', this.attribs.id);
-                process.exit();
-            }
-        }
-        submission.counts.units++;
-
-    });
-
+    getElements('xbrli', 'unit').each((i, elem)=>{ parseUnitElement($, elem, submission)});
 
     //1d & e. scrap dei and numerical tag values (by looping through all tags)
     var nameParts, val, $this, tag, tax;
-    submission.num = [];
     $('*').each(function(i, elem) { //gave up on trying to select tags in a namespace (e.g. 'us-gaap\\:*' does not work)
         if(this.type == 'tag' ){
-            $this = $(this);
+            $this = $(elem);
             val = $this.text().trim();
-            nameParts = this.name.split(':');
+            nameParts = elem.name.split(':');
             if(nameParts.length==2){
                 tax = nameParts[0];
                 tag = nameParts[1];
                 if((skipNameSpaces.indexOf(tax)==-1) && val.length){
-                    if(submission.namespaces[tax]){
-                        submission.num.push({
-                            tag: tag,
-                            ns:  tax,
-                            unitRef: this.attribs.unitRef,
-                            contextRef: this.attribs.contextRef,
-                            decimals: this.attribs.decimals || 'null',
-                            val: val});
-                        submission.counts.standardFacts++;
-                    }
                     if(tax=='dei'){
                         submission.dei[tag] = val;
                         if (!this.attribs.contextref) common.logEvent("missing DEI contextRef for "+tag, submission.filing.adsh);
@@ -271,7 +253,25 @@ function parseXBRL($, submission){
                         } else {
                             if(submission.dei.contextref != this.attribs.contextref) common.logEvent("conflicting DEI contextRef", submission.filing.adsh);
                         }
+                    } else {
+                        let xbrl = extractFactInfo(submission, $, elem);
+                        if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
+                            if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
+                                let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom+':'+xbrl.end;
+                                if(!submission.facts[factKey]){
+                                    submission.facts[factKey] = xbrl;
+                                    submission.hasXBRL = true;
+                                } else {
+                                    if(submission.facts[factKey].value != xbrl.value)
+                                        common.logEvent('ERROR: XBRL value conflict in '+submission.filing.adsh, '['+JSON.stringify(xbrl)+','
+                                            +JSON.stringify(submission.facts[factKey])+']');
+                                }
+                                submission.counts.standardFacts++;
+                            }
+                        }
                     }
+
+
                 }
             }
         }
@@ -317,132 +317,152 @@ function parseIXBRL($, parsedFacts){
             EntityCentralIndexKey: '0000029905' }*/
 
     //get iXBRL context tags make lookup tree for contextRef date values and dimensions
-    let $start, start, end, dtStart, dtEnd, dtApproxCalendar, $this, $member;
-    $('xbrli\\:context').each(function(i) {
-        $this = $(this);
-        $start = $this.find('xbrli\\:startdate');
-        //todo:  check that if a date format is given, it is either ISO or d/m/y
-        if($start.length==1) {
-            start = $start.html().trim();
-            dtStart = new Date(start);
-            end = $this.find('xbrli\\:enddate').html().trim();
-            dtEnd = new Date(end);
-            dtApproxCalendar = new Date(Date.parse(end)- 24*3600*1000*10);  //first 10 days of next q/y are lump into last q/y for frames/time series comparisons
-            parsedFacts.contextTree[$this.attr('id')] = {
-                start: start,
-                end: end,
-                qtrs: Math.round((dtEnd.valueOf() - dtStart.valueOf())/(24*3600*1000)/(365/4)),  //account for non calendar quarters (e.g. "closest Friday to ...")
-                cy: dtApproxCalendar.getUTCFullYear(),
-                cq: Math.floor(dtApproxCalendar.getUTCMonth()/3)+1
-            };
-        } else {
-            end = $this.find('xbrli\\:instant').html();
-            dtEnd = new Date(end);
-            dtApproxCalendar = new Date(Date.parse(end)- 24*3600*1000*10);  //first 10 days of next q/y are lump into last q/y for frames/time series comparisons
-            parsedFacts.contextTree[$this.attr('id')] = {
-                end: end,
-                qtrs: 0,
-                cy: dtApproxCalendar.getUTCFullYear(),
-                cq: Math.floor(dtApproxCalendar.getUTCMonth()/3)+1
-            };
-        }
-        $member = $this.find('xbrldi\\:explicitmember');
-        if($member.length && $member.attr('dimension')){
-            parsedFacts.contextTree[$this.attr('id')].member = $member.html().trim();
-            parsedFacts.contextTree[$this.attr('id')].dim = $member.attr('dimension');
-        }
-        parsedFacts.counts.contexts++;
+    $('xbrli\\:context').each(function(i, elem) {
+        parseContextElement($, elem, submission);
     });
 
     //get iXBRL unit tags and make lookup tree for unitRef values
-    var $measure, $num, $denom, unitParts;
     $('xbrli\\:unit').each(function(i) {
-        $this = $(this);
-        $num = $this.find('xbrli\\:unitNumerator xbrli\\:measure');
-        if (!$num.length) $num = $this.find('unitNumerator measure');
-        $denom = $this.find('xbrli\\:unitDenominator xbrli\\:measure');
-        if (!$denom.length) $denom = $this.find('unitDenominator measure');
-
-        if ($num.length == 1 && $denom.length == 1) {
-            parsedFacts.unitTree[this.attribs.id] = {
-                nomid: $num.text().split(':').pop(),
-                denomid: $denom.text().split(':').pop()
-            };
-        } else {
-            $measure = $this.find('xbrli\\:measure');
-            if (!$measure.length) $measure = $this.find('measure');
-            if ($measure.length == 1) {
-                parsedFacts.unitTree[this.attribs.id] = $measure.html().split(':').pop();
-            } else {
-                common.logEvent('ERROR updateXBRLAPI parsing unit tag:', this.attribs.id, true);
-                process.exit();
-            }
-        }
-        parsedFacts.counts.units++
+        parseUnitElement($, this, parsedFacts);
     });
-    $('ix\\:nonfraction').each(function(i){
-        let xbrl = extractXbrlInfo(parsedFacts, $(this), parsedFacts.filing.adsh);
-        if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
-            if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
-                let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom+':'+xbrl.end;
-                if(!parsedFacts.facts[factKey]){
-                    parsedFacts.facts[factKey] = xbrl;
-                } else {
-                    if(parsedFacts.facts[factKey].value != xbrl.value)
-                        common.logEvent('ERROR: XBRL value conflict in '+parsedFacts.filing.adsh, '['+JSON.stringify(xbrl)+','
-                            +JSON.stringify(parsedFacts.facts[factKey])+']');
-                }
 
-                parsedFacts.counts.standardFacts++;
+    $('ix\\:nonfraction').each(function(i, elem){
+        try{
+            let xbrl = extractFactInfo(parsedFacts, $, elem);
+            if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
+                if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
+                    let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom+':'+xbrl.end;
+                    if(!parsedFacts.facts[factKey]){
+                        parsedFacts.facts[factKey] = xbrl;
+                        parsedFacts.hasIXBRL = true;
+                    } else {
+                        if(parsedFacts.facts[factKey].value != xbrl.value)
+                            common.logEvent('ERROR: XBRL value conflict in '+parsedFacts.filing.adsh, '['+JSON.stringify(xbrl)+','
+                                +JSON.stringify(parsedFacts.facts[factKey])+']');
+                    }
+                    parsedFacts.counts.standardFacts++;
+                }
             }
+            parsedFacts.counts.facts++;
+        } catch (e) {
+            common.logEvent('ERROR updateXBRLAPI extracting nonfraction from iXBRL in '+ parsedFacts.filing.adsh, e.message, true); //log error and continue parsing
         }
-        parsedFacts.counts.facts++;
     });
     return parsedFacts;
 }
 
-function extractXbrlInfo(objXBRL, $ix, adsh){
-    let nameParts = $ix.attr('name').split(':'),
-        contextRef = $ix.attr('contextref'),
-        unitRef = $ix.attr('unitref'),
+function parseContextElement($, element, submissionObject){
+    var contextID, $element, newContext, start, end, dtEnd, dtStart = null, $start, $end, $member;
+    $element = $(element);
+    contextID = $element.attr('id');
+    $start = $element.find('xbrli\\:startDate');
+    if(!$start.length) $start = $element.find('startDate');
+    if($start.length==1) {
+        start = $start.text().trim();
+        dtStart = new Date(start);
+        $end = $(this).find('xbrli\\:endDate');
+        if(!$end.length) $end = $(this).find('endDate');
+        end = $end.text().trim();
+        dtEnd = new Date(dtEnd);
+        newContext = {
+            start: start,
+            end: end,
+            qtrs: Math.round((dtEnd - dtStart)/(365/4*24*3600*1000)),
+        };
+    } else {
+        var $instant = $element.find('xbrli\\:instant');
+        if(!$instant.length) $instant = $element.find('instant');
+        if($instant.length){
+            end = $instant.text().trim();
+            newContext = {
+                start: null,
+                end: end,
+                qtrs: 0,
+            };
+        } else {
+            console.log('ERROR parsing context '+contextID+' in XBRL doc of ' + submissionObject.filing.adsh);
+        }
+    }
+    if(standardQuarters.indexOf(newContext.qtrs)) newContext.ccp = common.closestCalendricalPeriod(dtStart, dtEnd);
+    $member = $element.find('xbrldi\\:explicitMember');
+    if(!$member.length) $member = $element.find('explicitMember');
+    if($member.length && $member.attr('dimension')){
+        newContext.member = $member.text().trim();
+        newContext.dim = $member.attr('dimension');
+    }
+    submissionObject.contextTree[contextID] = newContext;
+    submissionObject.counts.contexts++;
+}
+function parseUnitElement($, element, submissionObject){
+    let $measure, $member, $num, $denom, $element = $(element);
+    $num = $element.find('xbrli\\:unitNumerator xbrli\\:measure');
+    if (!$num.length) $num = $element.find('unitNumerator measure');
+    $denom = $element.find('xbrli\\:unitDenominator xbrli\\:measure');
+    if (!$denom.length) $denom = $element.find('unitDenominator measure');
+
+    if ($num.length == 1 && $denom.length == 1) {
+        let numerator = $num.text().split(':').pop(),
+            denominator = $denom.text().split(':').pop();
+        submissionObject.unitTree[element.attribs.id] = {
+            numid: numerator,
+            denomid: denominator,
+            label: numerator + (denominator?' per ' + denominator:'')
+        };
+    } else {
+        $measure = $element.find('xbrli\\:measure');
+        if (!$measure.length) $measure = $element.find('measure');
+        if ($measure.length == 1) {
+            submissionObject.unitTree[element.attribs.id] = {label: $measure.text().split(':').pop()};
+        } else {
+            common.logEvent('ERROR updateXBRLAPI parsing unit tag in iXBRL doc :', element.attribs.id, true);
+            throw('ERROR updateXBRLAPI for parsing unit tag ' + element.attribs.id);
+        }
+    }
+    submissionObject.counts.units++
+}
+function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
+    let $ix = $(ix),
+        name = $ix.attr('name') || ix.name,
+        nameParts = name.split(':'),
+        contextRef = $ix.attr('contextref') || $ix.attr('contextRef'),
+        unitRef = $ix.attr('unitref') || $ix.attr('unitRef'),
         xbrl = {
-            uom: objXBRL.unitTree[unitRef],
+            uom: objParsedSubmission.unitTree[unitRef],
             taxonomy: nameParts[0],
             tag: nameParts[1],
             scale: $ix.attr('scale'),
             format: $ix.attr('format'),
             sign: $ix.attr('sign'),
-            isGaap: nameParts[0]=='us-gaap',
             isStandard: standardNumericalTaxonomies.indexOf(nameParts[0])!==-1,
             text: $ix.text().trim()
         };
-        xbrl.value = xbrlToNumber(xbrl.text, xbrl.format, xbrl.scale, adsh);
-    if(objXBRL.contextTree[contextRef]){
-        let context = objXBRL.contextTree[contextRef];
+    console.log(JSON.stringify(xbrl));
+    xbrl.value = xbrlToNumber(xbrl.text, xbrl.format, xbrl.scale);
+    if(objParsedSubmission.contextTree[contextRef]){
+        let context = objParsedSubmission.contextTree[contextRef];
         xbrl.qtrs = context.qtrs;
         xbrl.end = context.end;
         if(context.start) xbrl.start = context.start;
         if(context.member) xbrl.member = context.member;
         if(context.dim) xbrl.dim = context.dim;
+        if(context.ccp) xbrl.ccp = context.ccp;
     } else {
-        common.logEvent('WARNING updateXBRLAPI no contextRef for ' + JSON.stringify(xbrl)+ ' in '+adsh);
+        throw('missing contextRef for ' + xbrl.tag);
     }
     return xbrl;
 }
-function xbrlToNumber(text, format, scale, adsh){
+function xbrlToNumber(text, format, scale){
     switch(format){
         case "ixt:zerodash":
-            if(text=='—') return 0;
+            if(text=='—') return 0;  //falls through to numdotdecimal
         case "ixt:numdotdecimal":
             return parseFloat(text.replace(/,/g, ''))*10**(scale||0);
         case "ixt:numcommadecimal":
             return parseFloat(text.replace(/\./g, '').replace(/,/,'.'))*10**(scale||0);
         case "ixt-sec:numtexten":
-            return parseFloat(text.replace(/\./g, '').replace(/,/,'.'))*10**(scale||0);
+            //todo:  adapt regex to convert english to numbers
         default:
-            if(format) common.logEvent('WARNING updateXBRLAPI found unrecognized format', format + ' found in '+adsh+ ' (ixt:numcommadecimal assumed)');
-            return parseFloat(text.replace(/,/g, ''))*10**(scale||0);  //assuming north american number
-
+            throw('unrecognized numerical format '+ format+ ' for '+text);
     }
 }
 async function saveXBRLSubmission(s){
@@ -459,8 +479,9 @@ async function saveXBRLSubmission(s){
         AmendmentFlag: 'FALSE',
         DocumentPeriodEndDate: '3/31/2019',
         EntityCentralIndexKey: '0000029905' } */
-    let q = common.q;
-    let sql = 'INSERT INTO fin_sub(adsh, cik, name, sic, fye, form, period, fy, fp, filed'
+    let q = common.q,
+        start = new Date(),
+        sql = 'INSERT INTO fin_sub(adsh, cik, name, sic, fye, form, period, fy, fp, filed'
         + ', countryba, stprba, cityba, zipba, bas1, bas2, baph, '
         + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, afs, wksi, '
         +' accepted, prevrpt, detail, instance, nciks, aciks '
@@ -477,38 +498,32 @@ async function saveXBRLSubmission(s){
     await common.runQuery(sql);
 
     //save numerical fact records into fin_num
-    let i, fact, unit, context, numSQL, version, coreg;
+    let i=0, fact, numSQL, version, coreg;
+    const numInsertHeader = 'insert into fin_num (adsh, tag, version, coreg, start, end, qtrs, uom, value, footnote) values ';
+    numSQL = numInsertHeader;
     for(let factKey in s.facts){
         fact = s.facts[factKey]; //fact object properties: tag, ns, unitRef, contextRef, decimals & val
-        if(fact.unitRef){
-            unit = s.unitTree[fact.unitRef];
-            if(unit){
-                if(unit.nomid && unit.denomid) unit = unit.nomid + ' per ' + unit.denomid;
-            } else {
-                unit = '';
-                common.logEvent('ERROR updateXBRLAPIunable to lookup unitRef in unit tree', JSON.stringify(fact),true);
-                process.exit();
-            }
-        } else {
-            common.logEvent('ERROR updateXBRLAPI unable to find unitRef ', JSON.stringify(fact), true);
-            unit = '';
-        }
-        context = s.contextTree[fact.contextRef];
-        if(context) {
-            if (context.member) {
-                coreg = context.member.split(':').pop();
-                if (coreg.length > 5 && coreg.substr(-5, 5) == 'Member') coreg = coreg.substr(0, coreg.length - 5);  //hack to match DERA dataset
-            } else coreg = '';
-            version = (standardNumericalTaxonomies.indexOf(fact.ns) == -1) ? s.adsh : fact.ns;
-            numSQL = 'insert into fin_num (adsh, tag, version, coreg, start, end, qtrs, uom, value, footnote) values '
-                + "(" + q(s.adsh) + q(fact.tag) + q(version) + q(coreg) + q(context.start)  + q(context.end)  + q(context.qtrs)
-                + q(unit)+ q(fact.val) + "','')";
+        if(fact.unit.nomid && s.unitTree[fact.unit.nomid]) fact.unit.label = s.unitTree[fact.unit.nomid].label || fact.unit.label;
+        if(fact.unit.denomid) fact.label += ' per ' + (s.unitTree[fact.unit.denomid].label || fact.unit.denomid);
+
+        if (fact.member) {
+            coreg = fact.member.split(':').pop();
+            if (coreg.length > 5 && coreg.substr(-5, 5) == 'Member') coreg = coreg.substr(0, coreg.length - 5);  //hack to match DERA dataset
+        } else coreg = '';
+        version = (standardNumericalTaxonomies.indexOf(fact.ns) == -1) ? s.adsh : fact.ns;
+        if(version!=s.adsh && coreg=='' && fact.unit) fact.isStandard = true;
+        //multi-row inserts are faster
+        numSQL += (i%1000==0?'':', ') + "(" + q(s.adsh) + q(fact.tag) + q(version) + q(coreg) + q(fact.start)  + q(fact.end)  + q(fact.qtrs)
+            + q(fact.unit)+ q(fact.val) + "','')";
+        i++;
+        if(i%1000==0){ //but don't let the query get too long.... max packet size 2MB
             await common.runQuery(numSQL);
-        } else {
-            common.logEvent('ERROR updateXBRLAPI context not found', s.urlIndexFile + ': ' + JSON.stringify(fact), true);  //must have a context ref to save
+            numSQL = numInsertHeader;
         }
     }
-    console.log('wrote ' + i + ' facts for '+s.coname+' ' + s.form + ' for ' + s.fy + s.fp + ' ('+ s.adsh +')');
+    if(i%1000!=0) await common.runQuery(numSQL);  // execute multi-row insert
+    let end = new Date();
+    console.log('wrote ' + i + ' facts for '+s.coname+' ' + s.form + ' for ' + s.fy + s.fp + ' ('+ s.adsh +') in ' + (end-start) + ' ms');
 }
 
 /*////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////

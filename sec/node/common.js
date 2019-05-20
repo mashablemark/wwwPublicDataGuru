@@ -48,6 +48,17 @@ let me = {
         acceptanceDate.setMinutes(acceptanceDate.getMinutes()+30);
         return acceptanceDate;
     },
+    closestCalendricalPeriod: (start, end) => {
+        let workingEnd = new Date(end);
+        if(start){
+            let qtrs = Math.round((end - start)/(365/4*24*3600*1000));
+            if(qtrs==1) return 'CY' + workingEnd.setDate(end.getDate()-180).getFullYear() + 'Q' + qtrs;
+            if(qtrs==4) return 'CY' + workingEnd.setDate(end.getDate()-180).getFullYear();
+            return null;  //if qtrs not 0, 1 or 4;
+        } else {
+            if(qtrs==1) return 'CY' + workingEnd.setDate(end.getDate()-180).getFullYear() + 'Q' + qtrs + 'I';
+        }
+    },
     wait: (ms) => {
         return new Promise(resolve => {
             setTimeout(resolve, ms);

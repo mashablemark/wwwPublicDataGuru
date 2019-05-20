@@ -3,9 +3,9 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: localhost
--- Generation Time: Mar 26, 2019 at 08:53 PM
+-- Generation Time: May 20, 2019 at 01:02 AM
 -- Server version: 10.2.10-MariaDB
--- PHP Version: 7.2.14
+-- PHP Version: 7.2.16
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 SET AUTOCOMMIT = 0;
@@ -30,6 +30,7 @@ USE `secdata`;
 -- Table structure for table `countries`
 --
 
+DROP TABLE IF EXISTS `countries`;
 CREATE TABLE `countries` (
   `iso-a2` char(2) COLLATE latin1_general_cs NOT NULL,
   `iso-a3` char(3) COLLATE latin1_general_cs NOT NULL,
@@ -298,6 +299,7 @@ INSERT INTO `countries` (`iso-a2`, `iso-a3`, `iso-num`, `name`) VALUES
 -- Table structure for table `datasets`
 --
 
+DROP TABLE IF EXISTS `datasets`;
 CREATE TABLE `datasets` (
   `name` varchar(50) COLLATE latin1_general_cs NOT NULL,
   `path` varchar(255) COLLATE latin1_general_cs NOT NULL,
@@ -311,9 +313,24 @@ CREATE TABLE `datasets` (
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `edgar_names`
+--
+
+DROP TABLE IF EXISTS `edgar_names`;
+CREATE TABLE `edgar_names` (
+  `adsh` varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
+  `cik` varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
+  `name_ci` varchar(512) COLLATE latin1_general_ci NOT NULL COMMENT 'case insensitive for search index',
+  `lastname_soundex` varchar(512) COLLATE latin1_general_ci NOT NULL COMMENT 'soundex of last name (= first word of name)'
+) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `eventlog`
 --
 
+DROP TABLE IF EXISTS `eventlog`;
 CREATE TABLE `eventlog` (
   `id` int(11) NOT NULL,
   `event` varchar(2000) COLLATE latin1_general_cs NOT NULL,
@@ -324,20 +341,92 @@ CREATE TABLE `eventlog` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `facts`
+-- Table structure for table `exemptOffering`
 --
 
-CREATE TABLE `facts` (
-  `tag` varchar(255) COLLATE latin1_general_cs NOT NULL,
-  `ddate` date NOT NULL,
-  `uom` varchar(20) COLLATE latin1_general_cs NOT NULL,
-  `qtrs` tinyint(4) NOT NULL,
-  `tlabel` varchar(512) COLLATE latin1_general_cs NOT NULL,
-  `tdoc` varchar(2048) COLLATE latin1_general_cs NOT NULL,
-  `pts` int(11) NOT NULL,
-  `json` mediumtext COLLATE latin1_general_cs NOT NULL COMMENT 'JSON array or arrays',
-  `api_written` tinyint(4) NOT NULL DEFAULT 0
-) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
+DROP TABLE IF EXISTS `exemptOffering`;
+CREATE TABLE `exemptOffering` (
+  `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL,
+  `schemaVersion` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `submissionType` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `industryGroupType` varchar(100) COLLATE latin1_general_cs DEFAULT NULL,
+  `investmentFundType` varchar(100) COLLATE latin1_general_cs DEFAULT NULL,
+  `is40Act` tinyint(1) DEFAULT NULL,
+  `revenueRange` varchar(100) COLLATE latin1_general_cs DEFAULT NULL,
+  `aggregateNetAssetValueRange` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `federalExemptionsExclusions` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `isAmendment` tinyint(4) DEFAULT NULL,
+  `previousAccessionNumber` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `dateOfFirstSale` date DEFAULT NULL,
+  `durationMoreThenOneYear` tinyint(4) DEFAULT NULL,
+  `typesOfSecuritiesOffered` varchar(1000) COLLATE latin1_general_cs NOT NULL COMMENT 'join of all Type(s) of Securities Offered (select all that apply)',
+  `isBusinessCombinationTransaction` tinyint(4) DEFAULT NULL,
+  `businessCombinationTransactionClarification` varchar(1000) COLLATE latin1_general_cs DEFAULT NULL,
+  `minimumInvestmentAccepted` double DEFAULT NULL,
+  `salesCompensationList` varchar(4000) COLLATE latin1_general_cs DEFAULT NULL,
+  `totalOfferingAmount` double DEFAULT NULL COMMENT 'null means "Indefinite"',
+  `totalAmountSold` double DEFAULT NULL,
+  `totalRemaining` double DEFAULT NULL COMMENT 'null means "Indefinite"',
+  `salesAmountsClarification` varchar(1000) COLLATE latin1_general_cs DEFAULT NULL,
+  `hasNonAccreditedInvestors` tinyint(4) DEFAULT NULL,
+  `numberAlreadyInvested` int(11) DEFAULT NULL,
+  `salesCommissions` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `findersFees` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `commissionsAndFeesClarification` varchar(1000) COLLATE latin1_general_cs DEFAULT NULL,
+  `grossProceedsUsed` double DEFAULT NULL,
+  `grossProceedsUsedClarification` varchar(1000) COLLATE latin1_general_cs DEFAULT NULL,
+  `authorizedRepresentativeSignature` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `signature` varchar(1024) COLLATE latin1_general_cs DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `exemptOfferingIssuers`
+--
+
+DROP TABLE IF EXISTS `exemptOfferingIssuers`;
+CREATE TABLE `exemptOfferingIssuers` (
+  `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL,
+  `issuernum` tinyint(4) NOT NULL COMMENT '1 = primaryIssuer;  other from issuerList',
+  `cik` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `entityName` varchar(400) COLLATE latin1_general_cs DEFAULT NULL,
+  `street1` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `street2` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `city` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `stateOrCountry` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `stateOrCountryDescription` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `zip` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `phone` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `jurisdictionOfInc` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `previousIssuerNames` varchar(500) COLLATE latin1_general_cs DEFAULT NULL,
+  `previousEdgarNames` varchar(500) COLLATE latin1_general_cs DEFAULT NULL,
+  `entityType` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `yearOfInc` varchar(20) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'year or ''not formed yet'''
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `exemptOfferingPersons`
+--
+
+DROP TABLE IF EXISTS `exemptOfferingPersons`;
+CREATE TABLE `exemptOfferingPersons` (
+  `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL,
+  `personnum` int(11) NOT NULL,
+  `firstName` varchar(100) COLLATE latin1_general_cs DEFAULT NULL,
+  `lastName` varchar(100) COLLATE latin1_general_cs DEFAULT NULL,
+  `middleName` varchar(100) COLLATE latin1_general_cs DEFAULT NULL,
+  `street1` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `street2` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `city` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `stateOrCountry` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `stateOrCountryDescription` varchar(200) COLLATE latin1_general_cs DEFAULT NULL,
+  `zip` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `phone` varchar(20) COLLATE latin1_general_cs DEFAULT NULL,
+  `relationships` varchar(200) COLLATE latin1_general_cs DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
 
 -- --------------------------------------------------------
 
@@ -345,12 +434,14 @@ CREATE TABLE `facts` (
 -- Table structure for table `fin_num`
 --
 
+DROP TABLE IF EXISTS `fin_num`;
 CREATE TABLE `fin_num` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the SEC to each EDGAR submission.',
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL COMMENT 'The unique identifier (name) for a tag in a specific taxonomy release.',
   `version` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'For a standard tag, an identifier for the taxonomy; otherwise the accession number where the tag was defined.',
   `coreg` varchar(256) COLLATE latin1_general_cs NOT NULL DEFAULT '''0''' COMMENT 'If specified, indicates a specific co-registrant, the parent company, or other entity (e.g., guarantor). ''NULL indicates the consolidated entity.',
-  `ddate` date NOT NULL COMMENT 'The end date for the data value, rounded to the nearest month end.',
+  `start` date DEFAULT NULL COMMENT 'The end date for the data value, rounded to the nearest month end.',
+  `end` date DEFAULT NULL,
   `qtrs` int(11) NOT NULL COMMENT 'The count of the number of quarters represented by the data value, rounded to the nearest whole number. ''0'' indicates it is a point-in-time value.',
   `uom` varchar(60) COLLATE latin1_general_cs NOT NULL COMMENT 'The unit of measure for the value.',
   `value` decimal(28,4) DEFAULT NULL COMMENT 'The value. This is not scaled, it is as found in the Interactive Data file, but is limited to four digits to the right of the decimal point.',
@@ -364,6 +455,7 @@ CREATE TABLE `fin_num` (
 -- Table structure for table `fin_pre`
 --
 
+DROP TABLE IF EXISTS `fin_pre`;
 CREATE TABLE `fin_pre` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the SEC to each EDGAR submission.',
   `report` int(11) NOT NULL COMMENT 'Represents the report grouping. This field corresponds to the statement (stmt) field, which indicates the type of statement. The numeric value refers to the ''R file'' as posted on the EDGAR Web site.',
@@ -383,12 +475,13 @@ CREATE TABLE `fin_pre` (
 -- Table structure for table `fin_sub`
 --
 
+DROP TABLE IF EXISTS `fin_sub`;
 CREATE TABLE `fin_sub` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the SEC to each EDGAR submission.',
   `cik` int(11) NOT NULL COMMENT 'Central Index Key (CIK). Ten digit number assigned by the SEC to each registrant that submits filings.',
   `name` varchar(150) COLLATE latin1_general_cs NOT NULL COMMENT 'Name of registrant. This corresponds to the name of the legal entity as recorded in EDGAR as of the filing date.',
   `sic` int(11) DEFAULT NULL COMMENT 'Standard Industrial Classification (SIC). Four digit code assigned by the SEC as of the filing date, indicating the registrant''s type of business.',
-  `countryba` varchar(2) COLLATE latin1_general_cs NOT NULL COMMENT 'The ISO 3166-1 country of the registrant''s business address.',
+  `countryba` varchar(2) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The ISO 3166-1 country of the registrant''s business address.',
   `stprba` varchar(2) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The state or province of the registrant''s business address, if field countryba is US or CA.',
   `cityba` varchar(30) COLLATE latin1_general_cs NOT NULL COMMENT 'The city of the registrant''s business address.',
   `zipba` varchar(10) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The zip code of the registrant''s business address.',
@@ -401,7 +494,7 @@ CREATE TABLE `fin_sub` (
   `zipma` varchar(10) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The zip code of the registrant''s mailing address.',
   `mas1` varchar(40) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The first line of the street of the registrant''s mailing address.',
   `mas2` varchar(40) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The second line of the street of the registrant''s mailing address.',
-  `countryinc` varchar(3) COLLATE latin1_general_cs NOT NULL COMMENT 'The country of incorporation for the registrant.',
+  `countryinc` varchar(3) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The country of incorporation for the registrant.',
   `stprinc` varchar(2) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The state or province of incorporation for the registrant, if countryinc is US or CA.',
   `ein` int(11) DEFAULT NULL COMMENT 'Employee Identification Number, 9 digit identification number assigned by the Internal Revenue Service to business entities operating in the United States.',
   `former` varchar(150) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'Most recent former name of the registrant, if any.',
@@ -410,11 +503,11 @@ CREATE TABLE `fin_sub` (
   `wksi` tinyint(1) NOT NULL COMMENT 'Well Known Seasoned Issuer (WKSI). An issuer that meets specific SEC requirements at some point during a 60-day period preceding the date the issuer satisfies its obligation to update its shelf registration statement.',
   `fye` varchar(4) COLLATE latin1_general_cs NOT NULL COMMENT 'Fiscal Year End Date.',
   `form` varchar(10) COLLATE latin1_general_cs NOT NULL COMMENT 'The submission type of the registrant''s filing.',
-  `period` date NOT NULL COMMENT 'Balance Sheet Date.',
+  `period` date NOT NULL COMMENT 'Balance Sheet Date.  (Actual end date; not DERA''s nearest month end date)',
   `fy` int(11) NOT NULL COMMENT 'Fiscal Year Focus (as defined in EFM Ch. 6).',
   `fp` varchar(2) COLLATE latin1_general_cs NOT NULL COMMENT 'Fiscal Period Focus (as defined in EFM Ch. 6) within Fiscal Year. The 10-Q for the 1st, 2nd and 3rd quarters would have a fiscal period focus of Q1, Q2 (or H1), and Q3 (or M9) respectively, and a 10-K would have a fiscal period focus of FY.',
   `filed` date NOT NULL COMMENT 'The date of the registrant''s filing with the Commission.',
-  `accepted` date NOT NULL COMMENT 'The acceptance date and time of the registrant''s filing with the Commission. Filings accepted after 5:30pm EST are considered filed on the following business day.',
+  `accepted` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'The acceptance date and time of the registrant''s filing with the Commission. Filings accepted after 5:30pm EST are considered filed on the following business day.',
   `prevrpt` tinyint(1) NOT NULL COMMENT 'Previous Report ''TRUE indicates that the submission information was subsequently amended.',
   `detail` tinyint(1) NOT NULL COMMENT 'TRUE indicates that the XBRL submission contains quantitative disclosures within the footnotes and schedules at the required detail level (e.g., each amount).',
   `instance` varchar(32) COLLATE latin1_general_cs NOT NULL COMMENT 'The name of the submitted XBRL Instance Document (EX-101.INS) type data file. The name often begins with the company ticker symbol.',
@@ -429,6 +522,7 @@ CREATE TABLE `fin_sub` (
 -- Table structure for table `fin_tag`
 --
 
+DROP TABLE IF EXISTS `fin_tag`;
 CREATE TABLE `fin_tag` (
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL COMMENT 'The unique identifier (name) for a tag in a specific taxonomy release.',
   `version` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'For a standard tag, an identifier for the taxonomy; otherwise the accession number where the tag was defined.',
@@ -447,6 +541,7 @@ CREATE TABLE `fin_tag` (
 -- Table structure for table `fn_cal`
 --
 
+DROP TABLE IF EXISTS `fn_cal`;
 CREATE TABLE `fn_cal` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the Commission to each EDGAR submission.',
   `grp` int(11) NOT NULL COMMENT 'Sequential number for grouping arcs in a submission.',
@@ -464,6 +559,7 @@ CREATE TABLE `fn_cal` (
 -- Table structure for table `fn_dim`
 --
 
+DROP TABLE IF EXISTS `fn_dim`;
 CREATE TABLE `fn_dim` (
   `dimh` varchar(32) COLLATE latin1_general_cs NOT NULL COMMENT 'MD5 hash of the segments field text.'' Although MD5 is unsuitable for cryptographic use, it is used here merely to limit the size of the primary key.',
   `segments` varchar(1024) COLLATE latin1_general_cs NOT NULL COMMENT 'Concatenation of tag names representing the axis and members appearing in the XBRL segments.'' Tag names have their first characters "Statement", last 4 characters "Axis", and last 6 characters "Member" or "Domain" truncated where they appear.'' Namespaces and prefixes are ignored because EDGAR validation guarantees that the local-names are unique with a submission.'' Each dimension is represented as the pair "{axis}={member};" and the axes concatenated in lexical order.'' Example: "LegalEntity=Xyz;Scenario=Restated;" represents the XBRL segment with dimension LegalEntityAxis and member XyzMember, dimension StatementScenarioAxis and member RestatedMember.',
@@ -476,6 +572,7 @@ CREATE TABLE `fn_dim` (
 -- Table structure for table `fn_num`
 --
 
+DROP TABLE IF EXISTS `fn_num`;
 CREATE TABLE `fn_num` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the Commission to each EDGAR submission.',
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL COMMENT 'The unique identifier (name) for a tag in a specific taxonomy release.',
@@ -501,6 +598,7 @@ CREATE TABLE `fn_num` (
 -- Table structure for table `fn_pre`
 --
 
+DROP TABLE IF EXISTS `fn_pre`;
 CREATE TABLE `fn_pre` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the Commission to each EDGAR submission.',
   `report` int(11) NOT NULL COMMENT 'Represents the report grouping. The numeric value refers to the "R file" as computed by the renderer and posted on the EDGAR website.'' Note that in some situations the numbers skip.',
@@ -520,6 +618,7 @@ CREATE TABLE `fn_pre` (
 -- Table structure for table `fn_ren`
 --
 
+DROP TABLE IF EXISTS `fn_ren`;
 CREATE TABLE `fn_ren` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the Commission to each EDGAR submission.',
   `report` int(11) NOT NULL COMMENT 'Represents the report grouping. The numeric value refers to the "R file" as computed by the renderer and posted on the EDGAR website.'' Note that in some situations the numbers skip.',
@@ -539,6 +638,7 @@ CREATE TABLE `fn_ren` (
 -- Table structure for table `fn_sub`
 --
 
+DROP TABLE IF EXISTS `fn_sub`;
 CREATE TABLE `fn_sub` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the Commission to each EDGAR submission.',
   `cik` int(11) NOT NULL COMMENT 'Central Index Key (CIK). Ten digit number assigned by the Commission to each registrant that submits filings.',
@@ -588,6 +688,7 @@ CREATE TABLE `fn_sub` (
 -- Table structure for table `fn_tag`
 --
 
+DROP TABLE IF EXISTS `fn_tag`;
 CREATE TABLE `fn_tag` (
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL COMMENT 'The unique identifier (name) for a tag in a specific taxonomy release.',
   `version` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'For a standard tag, an identifier for the taxonomy; otherwise the accession number where the tag was defined.',
@@ -606,6 +707,7 @@ CREATE TABLE `fn_tag` (
 -- Table structure for table `form_ranks`
 --
 
+DROP TABLE IF EXISTS `form_ranks`;
 CREATE TABLE `form_ranks` (
   `form` varchar(10) COLLATE latin1_general_cs NOT NULL COMMENT 'The submission type of the registrant''s filing.',
   `rank` tinyint(1) NOT NULL
@@ -617,6 +719,7 @@ CREATE TABLE `form_ranks` (
 -- Table structure for table `fp_ranks`
 --
 
+DROP TABLE IF EXISTS `fp_ranks`;
 CREATE TABLE `fp_ranks` (
   `fp` char(2) COLLATE latin1_general_cs NOT NULL COMMENT 'form reporting period ',
   `rank` tinyint(4) NOT NULL
@@ -628,16 +731,18 @@ CREATE TABLE `fp_ranks` (
 -- Table structure for table `frames`
 --
 
+DROP TABLE IF EXISTS `frames`;
 CREATE TABLE `frames` (
   `tag` varchar(255) COLLATE latin1_general_cs NOT NULL,
-  `ddate` date NOT NULL,
+  `ccp` varchar(11) COLLATE latin1_general_cs NOT NULL COMMENT 'closest calendar period: CYyyyy, CyyyyQq or CYyyyQqI for annual, quarterly or instantaneous facts',
   `uom` varchar(20) COLLATE latin1_general_cs NOT NULL,
   `qtrs` tinyint(4) NOT NULL,
-  `tlabel` varchar(512) COLLATE latin1_general_cs NOT NULL,
-  `tdoc` varchar(2048) COLLATE latin1_general_cs NOT NULL,
+  `label` varchar(512) COLLATE latin1_general_cs DEFAULT NULL,
+  `description` varchar(2048) COLLATE latin1_general_cs NOT NULL,
   `pts` int(11) NOT NULL,
   `json` mediumtext COLLATE latin1_general_cs NOT NULL COMMENT 'JSON array or arrays',
-  `api_written` tinyint(4) NOT NULL DEFAULT 0
+  `api_written` tinyint(4) NOT NULL DEFAULT 0,
+  `tstamp` varchar(20) COLLATE latin1_general_cs NOT NULL DEFAULT current_timestamp()
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
 
 -- --------------------------------------------------------
@@ -646,17 +751,15 @@ CREATE TABLE `frames` (
 -- Table structure for table `frame_working`
 --
 
+DROP TABLE IF EXISTS `frame_working`;
 CREATE TABLE `frame_working` (
-  `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the SEC to each EDGAR submission.',
+  `tag` varchar(256) COLLATE latin1_general_cs NOT NULL,
+  `ccp` varchar(9) COLLATE latin1_general_cs NOT NULL COMMENT 'closest calendar period:  CYyyyy, CyyyyQq or CYyyyQqI for annual, quarterly or instantaneous facts',
+  `uom` varchar(20) COLLATE latin1_general_cs NOT NULL,
   `cik` int(11) NOT NULL COMMENT 'Central Index Key (CIK). Ten digit number assigned by the SEC to each registrant that submits filings.',
-  `rank` decimal(10,2) NOT NULL COMMENT 'fiscal period',
-  `name` varchar(150) COLLATE latin1_general_cs NOT NULL COMMENT 'company name per submission',
-  `sic` int(11) DEFAULT NULL COMMENT 'standard industrial code per sucmisson',
-  `country` varchar(2) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'business address per submission',
-  `zip` varchar(10) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'business address per submission',
-  `filed` date NOT NULL COMMENT 'The date of the registrant''s filing with the Commission.',
-  `value` decimal(28,4) DEFAULT NULL COMMENT 'The value. This is not scaled, it is as found in the Interactive Data file, but is limited to four digits to the right of the decimal point.'
-) ENGINE=MEMORY DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
+  `maxfiled` date NOT NULL COMMENT 'The date of the registrant''s filing with the Commission.',
+  `versions` smallint(6) NOT NULL COMMENT 'versions (>1 means a revision took place)'
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
 
 -- --------------------------------------------------------
 
@@ -664,6 +767,7 @@ CREATE TABLE `frame_working` (
 -- Table structure for table `f_num`
 --
 
+DROP TABLE IF EXISTS `f_num`;
 CREATE TABLE `f_num` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the SEC to each EDGAR submission.',
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL COMMENT 'The unique identifier (name) for a tag in a specific taxonomy release.',
@@ -674,7 +778,10 @@ CREATE TABLE `f_num` (
   `uom` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'The unit of measure for the value.',
   `value` decimal(28,4) DEFAULT NULL COMMENT 'The value. This is not scaled, it is as found in the Interactive Data file, but is limited to four digits to the right of the decimal point.',
   `footnote` varchar(512) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'The text of any superscripted footnotes on the value, as shown on the statement page, truncated to 512 characters, or if there is no footnote, then this field will be blank.',
-  `id` int(9) UNSIGNED NOT NULL
+  `id` int(9) UNSIGNED NOT NULL,
+  `startdate` date DEFAULT NULL COMMENT 'as disclosed (null for instantaneous facts)',
+  `enddate` date NOT NULL COMMENT 'as disclosed',
+  `ccp` varchar(11) COLLATE latin1_general_cs DEFAULT NULL COMMENT 'closest calendar period: CYyyyy, CyyyyQq or CYyyyyQqI for annual, quarterly or instantaneous facts'
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
 
 -- --------------------------------------------------------
@@ -683,6 +790,7 @@ CREATE TABLE `f_num` (
 -- Table structure for table `f_pre`
 --
 
+DROP TABLE IF EXISTS `f_pre`;
 CREATE TABLE `f_pre` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the SEC to each EDGAR submission.',
   `report` int(11) NOT NULL COMMENT 'Represents the report grouping. This field corresponds to the statement (stmt) field, which indicates the type of statement. The numeric value refers to the ''R file'' as posted on the EDGAR Web site.',
@@ -702,6 +810,7 @@ CREATE TABLE `f_pre` (
 -- Table structure for table `f_sub`
 --
 
+DROP TABLE IF EXISTS `f_sub`;
 CREATE TABLE `f_sub` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'Accession Number. The 20-character string formed from the 18-digit number assigned by the SEC to each EDGAR submission.',
   `cik` int(11) NOT NULL COMMENT 'Central Index Key (CIK). Ten digit number assigned by the SEC to each registrant that submits filings.',
@@ -745,20 +854,10 @@ CREATE TABLE `f_sub` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `f_sub_raw`
---
-
-CREATE TABLE `f_sub_raw` (
-  `raw` longtext COLLATE latin1_general_cs NOT NULL,
-  `id` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
-
--- --------------------------------------------------------
-
---
 -- Table structure for table `f_tag`
 --
 
+DROP TABLE IF EXISTS `f_tag`;
 CREATE TABLE `f_tag` (
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL COMMENT 'The unique identifier (name) for a tag in a specific taxonomy release.',
   `version` varchar(20) COLLATE latin1_general_cs NOT NULL COMMENT 'For a standard tag, an identifier for the taxonomy; otherwise the accession number where the tag was defined.',
@@ -777,6 +876,7 @@ CREATE TABLE `f_tag` (
 -- Table structure for table `ownership_api_issuer`
 --
 
+DROP TABLE IF EXISTS `ownership_api_issuer`;
 CREATE TABLE `ownership_api_issuer` (
   `cik` int(11) NOT NULL,
   `transactions` mediumtext COLLATE latin1_general_cs NOT NULL COMMENT 'json',
@@ -800,6 +900,7 @@ CREATE TABLE `ownership_api_issuer` (
 -- Table structure for table `ownership_api_reporter`
 --
 
+DROP TABLE IF EXISTS `ownership_api_reporter`;
 CREATE TABLE `ownership_api_reporter` (
   `cik` int(11) NOT NULL,
   `transactions` mediumtext COLLATE latin1_general_cs NOT NULL COMMENT 'json',
@@ -818,6 +919,7 @@ CREATE TABLE `ownership_api_reporter` (
 -- Table structure for table `ownership_footnote`
 --
 
+DROP TABLE IF EXISTS `ownership_footnote`;
 CREATE TABLE `ownership_footnote` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL,
   `fnum` tinyint(2) UNSIGNED NOT NULL,
@@ -827,13 +929,15 @@ CREATE TABLE `ownership_footnote` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `ownership_names`
+-- Table structure for table `ownership_names_tmp`
 --
 
-CREATE TABLE `ownership_names` (
-  `ownercik` varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
-  `ownername_ci` varchar(512) COLLATE latin1_general_ci NOT NULL COMMENT 'case insensitive for search index',
-  `ownerlastname_soundex` varchar(512) COLLATE latin1_general_ci NOT NULL COMMENT 'soundex of last name = first word of name'
+DROP TABLE IF EXISTS `ownership_names_tmp`;
+CREATE TABLE `ownership_names_tmp` (
+  `adsh` varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
+  `cik` varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
+  `name_ci` varchar(512) COLLATE latin1_general_ci NOT NULL COMMENT 'case insensitive for search index',
+  `lastname_soundex` varchar(512) COLLATE latin1_general_ci NOT NULL COMMENT 'soundex of last name (= first word of name)'
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci;
 
 -- --------------------------------------------------------
@@ -842,6 +946,7 @@ CREATE TABLE `ownership_names` (
 -- Table structure for table `ownership_reporter`
 --
 
+DROP TABLE IF EXISTS `ownership_reporter`;
 CREATE TABLE `ownership_reporter` (
   `adsh` varchar(20) CHARACTER SET latin1 COLLATE latin1_general_cs NOT NULL,
   `ownernum` tinyint(3) UNSIGNED NOT NULL COMMENT 'list order of reportingOwner',
@@ -868,6 +973,7 @@ CREATE TABLE `ownership_reporter` (
 -- Table structure for table `ownership_submission`
 --
 
+DROP TABLE IF EXISTS `ownership_submission`;
 CREATE TABLE `ownership_submission` (
   `id` int(11) NOT NULL,
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL,
@@ -892,6 +998,7 @@ CREATE TABLE `ownership_submission` (
 -- Table structure for table `ownership_transaction`
 --
 
+DROP TABLE IF EXISTS `ownership_transaction`;
 CREATE TABLE `ownership_transaction` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL,
   `transnum` tinyint(4) NOT NULL,
@@ -926,6 +1033,7 @@ CREATE TABLE `ownership_transaction` (
 -- Table structure for table `ownership_transaction_footnote`
 --
 
+DROP TABLE IF EXISTS `ownership_transaction_footnote`;
 CREATE TABLE `ownership_transaction_footnote` (
   `adsh` varchar(20) COLLATE latin1_general_cs NOT NULL,
   `tnum` tinyint(2) UNSIGNED NOT NULL,
@@ -938,6 +1046,7 @@ CREATE TABLE `ownership_transaction_footnote` (
 -- Table structure for table `postcodeloc`
 --
 
+DROP TABLE IF EXISTS `postcodeloc`;
 CREATE TABLE `postcodeloc` (
   `cnty` varchar(2) COLLATE latin1_general_cs NOT NULL DEFAULT '',
   `stateprov` varchar(10) COLLATE latin1_general_cs DEFAULT NULL,
@@ -42874,6 +42983,7 @@ INSERT INTO `postcodeloc` (`cnty`, `stateprov`, `zip`, `lat`, `lon`, `start_year
 -- Table structure for table `scattersets`
 --
 
+DROP TABLE IF EXISTS `scattersets`;
 CREATE TABLE `scattersets` (
   `scatterset` mediumtext COLLATE latin1_general_cs DEFAULT NULL COMMENT 'JSON scatter plot for single interval/sic/tag combo',
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL DEFAULT '',
@@ -42888,6 +42998,7 @@ CREATE TABLE `scattersets` (
 -- Table structure for table `sectors`
 --
 
+DROP TABLE IF EXISTS `sectors`;
 CREATE TABLE `sectors` (
   `sector_id` int(11) NOT NULL,
   `sector` varchar(100) COLLATE latin1_general_cs DEFAULT NULL,
@@ -42918,460 +43029,11 @@ INSERT INTO `sectors` (`sector_id`, `sector`, `start_sic`, `end_sic`) VALUES
 -- Table structure for table `siccodes`
 --
 
+DROP TABLE IF EXISTS `siccodes`;
 CREATE TABLE `siccodes` (
   `sic` int(11) NOT NULL,
   `name` varchar(1000) COLLATE latin1_general_cs NOT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
-
---
--- Dumping data for table `siccodes`
---
-
-INSERT INTO `siccodes` (`sic`, `name`) VALUES
-(100, 'AGRICULTURAL PRODUCTION-CROPS'),
-(200, 'AGRICULTURAL PROD-LIVESTOCK & ANIMAL SPECIALTIES'),
-(700, 'AGRICULTURAL SERVICES'),
-(800, 'FORESTRY'),
-(900, 'FISHING, HUNTING AND TRAPPING'),
-(1000, 'METAL MINING'),
-(1040, 'GOLD AND SILVER ORES'),
-(1090, 'MISCELLANEOUS METAL ORES'),
-(1220, 'BITUMINOUS COAL & LIGNITE MINING'),
-(1221, 'BITUMINOUS COAL & LIGNITE SURFACE MINING'),
-(1311, 'CRUDE PETROLEUM & NATURAL GAS'),
-(1381, 'DRILLING OIL & GAS WELLS'),
-(1382, 'OIL & GAS FIELD EXPLORATION SERVICES'),
-(1389, 'OIL & GAS FIELD SERVICES, NEC'),
-(1400, 'MINING & QUARRYING OF NONMETALLIC MINERALS (NO FUELS)'),
-(1520, 'GENERAL BLDG CONTRACTORS - RESIDENTIAL BLDGS'),
-(1531, 'OPERATIVE BUILDERS'),
-(1540, 'GENERAL BLDG CONTRACTORS - NONRESIDENTIAL BLDGS'),
-(1600, 'HEAVY CONSTRUCTION OTHER THAN BLDG CONST - CONTRACTORS'),
-(1623, 'WATER, SEWER, PIPELINE, COMM & POWER LINE CONSTRUCTION'),
-(1700, 'CONSTRUCTION - SPECIAL TRADE CONTRACTORS'),
-(1731, 'ELECTRICAL WORK'),
-(2000, 'FOOD AND KINDRED PRODUCTS'),
-(2011, 'MEAT PACKING PLANTS'),
-(2013, 'SAUSAGES & OTHER PREPARED MEAT PRODUCTS'),
-(2015, 'POULTRY SLAUGHTERING AND PROCESSING'),
-(2020, 'DAIRY PRODUCTS'),
-(2024, 'ICE CREAM & FROZEN DESSERTS'),
-(2030, 'CANNED, FROZEN & PRESERVD FRUIT, VEG & FOOD SPECIALTIES'),
-(2033, 'CANNED, FRUITS, VEG, PRESERVES, JAMS & JELLIES'),
-(2040, 'GRAIN MILL PRODUCTS'),
-(2050, 'BAKERY PRODUCTS'),
-(2052, 'COOKIES & CRACKERS'),
-(2060, 'SUGAR & CONFECTIONERY PRODUCTS'),
-(2070, 'FATS & OILS'),
-(2080, 'BEVERAGES'),
-(2082, 'MALT BEVERAGES'),
-(2086, 'BOTTLED & CANNED SOFT DRINKS & CARBONATED WATERS'),
-(2090, 'MISCELLANEOUS FOOD PREPARATIONS & KINDRED PRODUCTS'),
-(2092, 'PREPARED FRESH OR FROZEN FISH & SEAFOODS'),
-(2100, 'TOBACCO PRODUCTS'),
-(2111, 'CIGARETTES'),
-(2200, 'TEXTILE MILL PRODUCTS'),
-(2211, 'BROADWOVEN FABRIC MILLS, COTTON'),
-(2221, 'BROADWOVEN FABRIC MILLS, MAN MADE FIBER & SILK'),
-(2250, 'KNITTING MILLS'),
-(2253, 'KNIT OUTERWEAR MILLS'),
-(2273, 'CARPETS & RUGS'),
-(2300, 'APPAREL & OTHER FINISHD PRODS OF FABRICS & SIMILAR MATL'),
-(2320, 'MEN\'S & BOYS\' FURNISHGS, WORK CLOTHG, & ALLIED GARMENTS'),
-(2330, 'WOMEN\'S, MISSES\', AND JUNIORS OUTERWEAR'),
-(2340, 'WOMEN\'S, MISSES\', CHILDREN\'S & INFANTS\' UNDERGARMENTS'),
-(2390, 'MISCELLANEOUS FABRICATED TEXTILE PRODUCTS'),
-(2400, 'LUMBER & WOOD PRODUCTS (NO FURNITURE)'),
-(2421, 'SAWMILLS & PLANTING MILLS, GENERAL'),
-(2430, 'MILLWOOD, VENEER, PLYWOOD, & STRUCTURAL WOOD MEMBERS'),
-(2451, 'MOBILE HOMES'),
-(2452, 'PREFABRICATED WOOD BLDGS & COMPONENTS'),
-(2510, 'HOUSEHOLD FURNITURE'),
-(2511, 'WOOD HOUSEHOLD FURNITURE, (NO UPHOLSTERED)'),
-(2520, 'OFFICE FURNITURE'),
-(2522, 'OFFICE FURNITURE (NO WOOD)'),
-(2531, 'PUBLIC BLDG & RELATED FURNITURE'),
-(2540, 'PARTITIONS, SHELVG, LOCKERS, & OFFICE & STORE FIXTURES'),
-(2590, 'MISCELLANEOUS FURNITURE & FIXTURES'),
-(2600, 'PAPERS & ALLIED PRODUCTS'),
-(2611, 'PULP MILLS'),
-(2621, 'PAPER MILLS'),
-(2631, 'PAPERBOARD MILLS'),
-(2650, 'PAPERBOARD CONTAINERS & BOXES'),
-(2670, 'CONVERTED PAPER & PAPERBOARD PRODS (NO CONTANERS/BOXES)'),
-(2673, 'PLASTICS, FOIL & COATED PAPER BAGS'),
-(2711, 'NEWSPAPERS: PUBLISHING OR PUBLISHING & PRINTING'),
-(2721, 'PERIODICALS: PUBLISHING OR PUBLISHING & PRINTING'),
-(2731, 'BOOKS: PUBLISHING OR PUBLISHING & PRINTING'),
-(2732, 'BOOK PRINTING'),
-(2741, 'MISCELLANEOUS PUBLISHING'),
-(2750, 'COMMERCIAL PRINTING'),
-(2761, 'MANIFOLD BUSINESS FORMS'),
-(2771, 'GREETING CARDS'),
-(2780, 'BLANKBOOKS, LOOSELEAF BINDERS & BOOKBINDG & RELATD WORK'),
-(2790, 'SERVICE INDUSTRIES FOR THE PRINTING TRADE'),
-(2800, 'CHEMICALS & ALLIED PRODUCTS'),
-(2810, 'INDUSTRIAL INORGANIC CHEMICALS'),
-(2820, 'PLASTIC MATERIAL, SYNTH RESIN/RUBBER, CELLULOS (NO GLASS)'),
-(2821, 'PLASTIC MATERIALS, SYNTH RESINS & NONVULCAN ELASTOMERS'),
-(2833, 'MEDICINAL CHEMICALS & BOTANICAL PRODUCTS'),
-(2834, 'PHARMACEUTICAL PREPARATIONS'),
-(2835, 'IN VITRO & IN VIVO DIAGNOSTIC SUBSTANCES'),
-(2836, 'BIOLOGICAL PRODUCTS, (NO DISGNOSTIC SUBSTANCES)'),
-(2840, 'SOAP, DETERGENTS, CLEANG PREPARATIONS, PERFUMES, COSMETICS'),
-(2842, 'SPECIALTY CLEANING, POLISHING AND SANITATION PREPARATIONS'),
-(2844, 'PERFUMES, COSMETICS & OTHER TOILET PREPARATIONS'),
-(2851, 'PAINTS, VARNISHES, LACQUERS, ENAMELS & ALLIED PRODS'),
-(2860, 'INDUSTRIAL ORGANIC CHEMICALS'),
-(2870, 'AGRICULTURAL CHEMICALS'),
-(2890, 'MISCELLANEOUS CHEMICAL PRODUCTS'),
-(2891, 'ADHESIVES & SEALANTS'),
-(2911, 'PETROLEUM REFINING'),
-(2950, 'ASPHALT PAVING & ROOFING MATERIALS'),
-(2990, 'MISCELLANEOUS PRODUCTS OF PETROLEUM & COAL'),
-(3011, 'TIRES & INNER TUBES'),
-(3021, 'RUBBER & PLASTICS FOOTWEAR'),
-(3050, 'GASKETS, PACKG & SEALG DEVICES & RUBBER & PLASTICS HOSE'),
-(3060, 'FABRICATED RUBBER PRODUCTS, NEC'),
-(3080, 'MISCELLANEOUS PLASTICS PRODUCTS'),
-(3081, 'UNSUPPORTED PLASTICS FILM & SHEET'),
-(3086, 'PLASTICS FOAM PRODUCTS'),
-(3089, 'PLASTICS PRODUCTS, NEC'),
-(3100, 'LEATHER & LEATHER PRODUCTS'),
-(3140, 'FOOTWEAR, (NO RUBBER)'),
-(3211, 'FLAT GLASS'),
-(3220, 'GLASS & GLASSWARE, PRESSED OR BLOWN'),
-(3221, 'GLASS CONTAINERS'),
-(3231, 'GLASS PRODUCTS, MADE OF PURCHASED GLASS'),
-(3241, 'CEMENT, HYDRAULIC'),
-(3250, 'STRUCTURAL CLAY PRODUCTS'),
-(3260, 'POTTERY & RELATED PRODUCTS'),
-(3270, 'CONCRETE, GYPSUM & PLASTER PRODUCTS'),
-(3272, 'CONCRETE PRODUCTS, EXCEPT BLOCK & BRICK'),
-(3281, 'CUT STONE & STONE PRODUCTS'),
-(3290, 'ABRASIVE, ASBESTOS & MISC NONMETALLIC MINERAL PRODS'),
-(3310, 'STEEL WORKS, BLAST FURNACES & ROLLING & FINISHING MILLS'),
-(3312, 'STEEL WORKS, BLAST FURNACES & ROLLING MILLS (COKE OVENS)'),
-(3317, 'STEEL PIPE & TUBES'),
-(3320, 'IRON & STEEL FOUNDRIES'),
-(3330, 'PRIMARY SMELTING & REFINING OF NONFERROUS METALS'),
-(3334, 'PRIMARY PRODUCTION OF ALUMINUM'),
-(3341, 'SECONDARY SMELTING & REFINING OF NONFERROUS METALS'),
-(3350, 'ROLLING DRAWING & EXTRUDING OF NONFERROUS METALS'),
-(3357, 'DRAWING & INSULATING OF NONFERROUS WIRE'),
-(3360, 'NONFERROUS FOUNDRIES (CASTINGS)'),
-(3390, 'MISCELLANEOUS PRIMARY METAL PRODUCTS'),
-(3411, 'METAL CANS'),
-(3412, 'METAL SHIPPING BARRELS, DRUMS, KEGS & PAILS'),
-(3420, 'CUTLERY, HANDTOOLS & GENERAL HARDWARE'),
-(3430, 'HEATING EQUIP, EXCEPT ELEC & WARM AIR; & PLUMBING FIXTURES'),
-(3433, 'HEATING EQUIPMENT, EXCEPT ELECTRIC & WARM AIR FURNACES'),
-(3440, 'FABRICATED STRUCTURAL METAL PRODUCTS'),
-(3442, 'METAL DOORS, SASH, FRAMES, MOLDINGS & TRIM'),
-(3443, 'FABRICATED PLATE WORK (BOILER SHOPS)'),
-(3444, 'SHEET METAL WORK'),
-(3448, 'PREFABRICATED METAL BUILDINGS & COMPONENTS'),
-(3451, 'SCREW MACHINE PRODUCTS'),
-(3452, 'BOLTS, NUTS, SCREWS, RIVETS & WASHERS'),
-(3460, 'METAL FORGINGS & STAMPINGS'),
-(3470, 'COATING, ENGRAVING & ALLIED SERVICES'),
-(3480, 'ORDNANCE & ACCESSORIES, (NO VEHICLES/GUIDED MISSILES)'),
-(3490, 'MISCELLANEOUS FABRICATED METAL PRODUCTS'),
-(3510, 'ENGINES & TURBINES'),
-(3523, 'FARM MACHINERY & EQUIPMENT'),
-(3524, 'LAWN & GARDEN TRACTORS & HOME LAWN & GARDENS EQUIP'),
-(3530, 'CONSTRUCTION, MINING & MATERIALS HANDLING MACHINERY & EQUIP'),
-(3531, 'CONSTRUCTION MACHINERY & EQUIP'),
-(3532, 'MINING MACHINERY & EQUIP (NO OIL & GAS FIELD MACH & EQUIP)'),
-(3533, 'OIL & GAS FIELD MACHINERY & EQUIPMENT'),
-(3537, 'INDUSTRIAL TRUCKS, TRACTORS, TRAILORS & STACKERS'),
-(3540, 'METALWORKG MACHINERY & EQUIPMENT'),
-(3541, 'MACHINE TOOLS, METAL CUTTING TYPES'),
-(3550, 'SPECIAL INDUSTRY MACHINERY (NO METALWORKING MACHINERY)'),
-(3555, 'PRINTING TRADES MACHINERY & EQUIPMENT'),
-(3559, 'SPECIAL INDUSTRY MACHINERY, NEC'),
-(3560, 'GENERAL INDUSTRIAL MACHINERY & EQUIPMENT'),
-(3561, 'PUMPS & PUMPING EQUIPMENT'),
-(3562, 'BALL & ROLLER BEARINGS'),
-(3564, 'INDUSTRIAL & COMMERCIAL FANS & BLOWERS & AIR PURIFING EQUIP'),
-(3567, 'INDUSTRIAL PROCESS FURNACES & OVENS'),
-(3569, 'GENERAL INDUSTRIAL MACHINERY & EQUIPMENT, NEC'),
-(3570, 'COMPUTER & OFFICE EQUIPMENT'),
-(3571, 'ELECTRONIC COMPUTERS'),
-(3572, 'COMPUTER STORAGE DEVICES'),
-(3575, 'COMPUTER TERMINALS'),
-(3576, 'COMPUTER COMMUNICATIONS EQUIPMENT'),
-(3577, 'COMPUTER PERIPHERAL EQUIPMENT, NEC'),
-(3578, 'CALCULATING & ACCOUNTING MACHINES (NO ELECTRONIC COMPUTERS)'),
-(3579, 'OFFICE MACHINES, NEC'),
-(3580, 'REFRIGERATION & SERVICE INDUSTRY MACHINERY'),
-(3585, 'AIR-COND & WARM AIR HEATG EQUIP & COMM & INDL REFRIG EQUIP'),
-(3590, 'MISC INDUSTRIAL & COMMERCIAL MACHINERY & EQUIPMENT'),
-(3600, 'ELECTRONIC & OTHER ELECTRICAL EQUIPMENT (NO COMPUTER EQUIP)'),
-(3612, 'POWER, DISTRIBUTION & SPECIALTY TRANSFORMERS'),
-(3613, 'SWITCHGEAR & SWITCHBOARD APPARATUS'),
-(3620, 'ELECTRICAL INDUSTRIAL APPARATUS'),
-(3621, 'MOTORS & GENERATORS'),
-(3630, 'HOUSEHOLD APPLIANCES'),
-(3634, 'ELECTRIC HOUSEWARES & FANS'),
-(3640, 'ELECTRIC LIGHTING & WIRING EQUIPMENT'),
-(3651, 'HOUSEHOLD AUDIO & VIDEO EQUIPMENT'),
-(3652, 'PHONOGRAPH RECORDS & PRERECORDED AUDIO TAPES & DISKS'),
-(3661, 'TELEPHONE & TELEGRAPH APPARATUS'),
-(3663, 'RADIO & TV BROADCASTING & COMMUNICATIONS EQUIPMENT'),
-(3669, 'COMMUNICATIONS EQUIPMENT, NEC'),
-(3670, 'ELECTRONIC COMPONENTS & ACCESSORIES'),
-(3672, 'PRINTED CIRCUIT BOARDS'),
-(3674, 'SEMICONDUCTORS & RELATED DEVICES'),
-(3677, 'ELECTRONIC COILS, TRANSFORMERS & OTHER INDUCTORS'),
-(3678, 'ELECTRONIC CONNECTORS'),
-(3679, 'ELECTRONIC COMPONENTS, NEC'),
-(3690, 'MISCELLANEOUS ELECTRICAL MACHINERY, EQUIPMENT & SUPPLIES'),
-(3695, 'MAGNETIC & OPTICAL RECORDING MEDIA'),
-(3711, 'MOTOR VEHICLES & PASSENGER CAR BODIES'),
-(3713, 'TRUCK & BUS BODIES'),
-(3714, 'MOTOR VEHICLE PARTS & ACCESSORIES'),
-(3715, 'TRUCK TRAILERS'),
-(3716, 'MOTOR HOMES'),
-(3720, 'AIRCRAFT & PARTS'),
-(3721, 'AIRCRAFT'),
-(3724, 'AIRCRAFT ENGINES & ENGINE PARTS'),
-(3728, 'AIRCRAFT PARTS & AUXILIARY EQUIPMENT, NEC'),
-(3730, 'SHIP & BOAT BUILDING & REPAIRING'),
-(3743, 'RAILROAD EQUIPMENT'),
-(3751, 'MOTORCYCLES, BICYCLES & PARTS'),
-(3760, 'GUIDED MISSILES & SPACE VEHICLES & PARTS'),
-(3790, 'MISCELLANEOUS TRANSPORTATION EQUIPMENT'),
-(3812, 'SEARCH, DETECTION, NAVAGATION, GUIDANCE, AERONAUTICAL SYS'),
-(3821, 'LABORATORY APPARATUS & FURNITURE'),
-(3822, 'AUTO CONTROLS FOR REGULATING RESIDENTIAL & COMML ENVIRONMENTS'),
-(3823, 'INDUSTRIAL INSTRUMENTS FOR MEASUREMENT, DISPLAY, AND CONTROL'),
-(3824, 'TOTALIZING FLUID METERS & COUNTING DEVICES'),
-(3825, 'INSTRUMENTS FOR MEAS & TESTING OF ELECTRICITY & ELEC SIGNALS'),
-(3826, 'LABORATORY ANALYTICAL INSTRUMENTS'),
-(3827, 'OPTICAL INSTRUMENTS & LENSES'),
-(3829, 'MEASURING & CONTROLLING DEVICES, NEC'),
-(3841, 'SURGICAL & MEDICAL INSTRUMENTS & APPARATUS'),
-(3842, 'ORTHOPEDIC, PROSTHETIC & SURGICAL APPLIANCES & SUPPLIES'),
-(3843, 'DENTAL EQUIPMENT & SUPPLIES'),
-(3844, 'X-RAY APPARATUS & TUBES & RELATED IRRADIATION APPARATUS'),
-(3845, 'ELECTROMEDICAL & ELECTROTHERAPEUTIC APPARATUS'),
-(3851, 'OPHTHALMIC GOODS'),
-(3861, 'PHOTOGRAPHIC EQUIPMENT & SUPPLIES'),
-(3873, 'WATCHES, CLOCKS, CLOCKWORK OPERATED DEVICES/PARTS'),
-(3910, 'JEWELRY, SILVERWARE & PLATED WARE'),
-(3911, 'JEWELRY, PRECIOUS METAL'),
-(3931, 'MUSICAL INSTRUMENTS'),
-(3942, 'DOLLS & STUFFED TOYS'),
-(3944, 'GAMES, TOYS & CHILDREN\'S VEHICLES (NO DOLLS & BICYCLES)'),
-(3949, 'SPORTING & ATHLETIC GOODS, NEC'),
-(3950, 'PENS, PENCILS & OTHER ARTISTS\' MATERIALS'),
-(3960, 'COSTUME JEWELRY & NOVELTIES'),
-(3990, 'MISCELLANEOUS MANUFACTURING INDUSTRIES'),
-(4011, 'RAILROADS, LINE-HAUL OPERATING'),
-(4013, 'RAILROAD SWITCHING & TERMINAL ESTABLISHMENTS'),
-(4100, 'LOCAL & SUBURBAN TRANSIT & INTERURBAN HWY PASSENGER TRANS'),
-(4210, 'TRUCKING & COURIER SERVICES (NO AIR)'),
-(4213, 'TRUCKING (NO LOCAL)'),
-(4220, 'PUBLIC WAREHOUSING & STORAGE'),
-(4231, 'TERMINAL MAINTENANCE FACILITIES FOR MOTOR FREIGHT TRANSPORT'),
-(4400, 'WATER TRANSPORTATION'),
-(4412, 'DEEP SEA FOREIGN TRANSPORTATION OF FREIGHT'),
-(4512, 'AIR TRANSPORTATION, SCHEDULED'),
-(4513, 'AIR COURIER SERVICES'),
-(4522, 'AIR TRANSPORTATION, NONSCHEDULED'),
-(4581, 'AIRPORTS, FLYING FIELDS & AIRPORT TERMINAL SERVICES'),
-(4610, 'PIPE LINES (NO NATURAL GAS)'),
-(4700, 'TRANSPORTATION SERVICES'),
-(4731, 'ARRANGEMENT OF TRANSPORTATION OF FREIGHT & CARGO'),
-(4812, 'RADIOTELEPHONE COMMUNICATIONS'),
-(4813, 'TELEPHONE COMMUNICATIONS (NO RADIOTELEPHONE)'),
-(4822, 'TELEGRAPH & OTHER MESSAGE COMMUNICATIONS'),
-(4832, 'RADIO BROADCASTING STATIONS'),
-(4833, 'TELEVISION BROADCASTING STATIONS'),
-(4841, 'CABLE & OTHER PAY TELEVISION SERVICES'),
-(4899, 'COMMUNICATIONS SERVICES, NEC'),
-(4900, 'ELECTRIC, GAS & SANITARY SERVICES'),
-(4911, 'ELECTRIC SERVICES'),
-(4922, 'NATURAL GAS TRANSMISSION'),
-(4923, 'NATURAL GAS TRANSMISISON & DISTRIBUTION'),
-(4924, 'NATURAL GAS DISTRIBUTION'),
-(4931, 'ELECTRIC & OTHER SERVICES COMBINED'),
-(4932, 'GAS & OTHER SERVICES COMBINED'),
-(4941, 'WATER SUPPLY'),
-(4950, 'SANITARY SERVICES'),
-(4953, 'REFUSE SYSTEMS'),
-(4955, 'HAZARDOUS WASTE MANAGEMENT'),
-(4961, 'STEAM & AIR-CONDITIONING SUPPLY'),
-(4991, 'COGENERATION SERVICES & SMALL POWER PRODUCERS'),
-(5000, 'WHOLESALE-DURABLE GOODS'),
-(5010, 'WHOLESALE-MOTOR VEHICLES & MOTOR VEHICLE PARTS & SUPPLIES'),
-(5013, 'WHOLESALE-MOTOR VEHICLE SUPPLIES & NEW PARTS'),
-(5020, 'WHOLESALE-FURNITURE & HOME FURNISHINGS'),
-(5030, 'WHOLESALE-LUMBER & OTHER CONSTRUCTION MATERIALS'),
-(5031, 'WHOLESALE-LUMBER, PLYWOOD, MILLWORK & WOOD PANELS'),
-(5040, 'WHOLESALE-PROFESSIONAL & COMMERCIAL EQUIPMENT & SUPPLIES'),
-(5045, 'WHOLESALE-COMPUTERS & PERIPHERAL EQUIPMENT & SOFTWARE'),
-(5047, 'WHOLESALE-MEDICAL, DENTAL & HOSPITAL EQUIPMENT & SUPPLIES'),
-(5050, 'WHOLESALE-METALS & MINERALS (NO PETROLEUM)'),
-(5051, 'WHOLESALE-METALS SERVICE CENTERS & OFFICES'),
-(5063, 'WHOLESALE-ELECTRICAL APPARATUS & EQUIPMENT, WIRING SUPPLIES'),
-(5064, 'WHOLESALE-ELECTRICAL APPLIANCES, TV & RADIO SETS'),
-(5065, 'WHOLESALE-ELECTRONIC PARTS & EQUIPMENT, NEC'),
-(5070, 'WHOLESALE-HARDWARE & PLUMBING & HEATING EQUIPMENT & SUPPLIES'),
-(5072, 'WHOLESALE-HARDWARE'),
-(5080, 'WHOLESALE-MACHINERY, EQUIPMENT & SUPPLIES'),
-(5082, 'WHOLESALE-CONSTRUCTION & MINING (NO PETRO) MACHINERY & EQUIP'),
-(5084, 'WHOLESALE-INDUSTRIAL MACHINERY & EQUIPMENT'),
-(5090, 'WHOLESALE-MISC DURABLE GOODS'),
-(5094, 'WHOLESALE-JEWELRY, WATCHES, PRECIOUS STONES & METALS'),
-(5099, 'WHOLESALE-DURABLE GOODS, NEC'),
-(5110, 'WHOLESALE-PAPER & PAPER PRODUCTS'),
-(5122, 'WHOLESALE-DRUGS, PROPRIETARIES & DRUGGISTS\' SUNDRIES'),
-(5130, 'WHOLESALE-APPAREL, PIECE GOODS & NOTIONS'),
-(5140, 'WHOLESALE-GROCERIES & RELATED PRODUCTS'),
-(5141, 'WHOLESALE-GROCERIES, GENERAL LINE'),
-(5150, 'WHOLESALE-FARM PRODUCT RAW MATERIALS'),
-(5160, 'WHOLESALE-CHEMICALS & ALLIED PRODUCTS'),
-(5171, 'WHOLESALE-PETROLEUM BULK STATIONS & TERMINALS'),
-(5172, 'WHOLESALE-PETROLEUM & PETROLEUM PRODUCTS (NO BULK STATIONS)'),
-(5180, 'WHOLESALE-BEER, WINE & DISTILLED ALCOHOLIC BEVERAGES'),
-(5190, 'WHOLESALE-MISCELLANEOUS NONDURABLE GOODS'),
-(5200, 'RETAIL-BUILDING MATERIALS, HARDWARE, GARDEN SUPPLY'),
-(5211, 'RETAIL-LUMBER & OTHER BUILDING MATERIALS DEALERS'),
-(5271, 'RETAIL-MOBILE HOME DEALERS'),
-(5311, 'RETAIL-DEPARTMENT STORES'),
-(5331, 'RETAIL-VARIETY STORES'),
-(5399, 'RETAIL-MISC GENERAL MERCHANDISE STORES'),
-(5400, 'RETAIL-FOOD STORES'),
-(5411, 'RETAIL-GROCERY STORES'),
-(5412, 'RETAIL-CONVENIENCE STORES'),
-(5500, 'RETAIL-AUTO DEALERS & GASOLINE STATIONS'),
-(5531, 'RETAIL-AUTO & HOME SUPPLY STORES'),
-(5600, 'RETAIL-APPAREL & ACCESSORY STORES'),
-(5621, 'RETAIL-WOMEN\'S CLOTHING STORES'),
-(5651, 'RETAIL-FAMILY CLOTHING STORES'),
-(5661, 'RETAIL-SHOE STORES'),
-(5700, 'RETAIL-HOME FURNITURE, FURNISHINGS & EQUIPMENT STORES'),
-(5712, 'RETAIL-FURNITURE STORES'),
-(5731, 'RETAIL-RADIO, TV & CONSUMER ELECTRONICS STORES'),
-(5734, 'RETAIL-COMPUTER & COMPUTER SOFTWARE STORES'),
-(5735, 'RETAIL-RECORD & PRERECORDED TAPE STORES'),
-(5810, 'RETAIL-EATING & DRINKING PLACES'),
-(5812, 'RETAIL-EATING PLACES'),
-(5900, 'RETAIL-MISCELLANEOUS RETAIL'),
-(5912, 'RETAIL-DRUG STORES AND PROPRIETARY STORES'),
-(5940, 'RETAIL-MISCELLANEOUS SHOPPING GOODS STORES'),
-(5944, 'RETAIL-JEWELRY STORES'),
-(5945, 'RETAIL-HOBBY, TOY & GAME SHOPS'),
-(5960, 'RETAIL-NONSTORE RETAILERS'),
-(5961, 'RETAIL-CATALOG & MAIL-ORDER HOUSES'),
-(5990, 'RETAIL-RETAIL STORES, NEC'),
-(6021, 'NATIONAL COMMERCIAL BANKS'),
-(6022, 'STATE COMMERCIAL BANKS'),
-(6029, 'COMMERCIAL BANKS, NEC'),
-(6035, 'SAVINGS INSTITUTION, FEDERALLY CHARTERED'),
-(6036, 'SAVINGS INSTITUTIONS, NOT FEDERALLY CHARTERED'),
-(6099, 'FUNCTIONS RELATED TO DEPOSITORY BANKING, NEC'),
-(6111, 'FEDERAL & FEDERALLY-SPONSORED CREDIT AGENCIES'),
-(6141, 'PERSONAL CREDIT INSTITUTIONS'),
-(6153, 'SHORT-TERM BUSINESS CREDIT INSTITUTIONS'),
-(6159, 'MISCELLANEOUS BUSINESS CREDIT INSTITUTION'),
-(6162, 'MORTGAGE BANKERS & LOAN CORRESPONDENTS'),
-(6163, 'LOAN BROKERS'),
-(6172, 'FINANCE LESSORS'),
-(6189, 'ASSET-BACKED SECURITIES'),
-(6199, 'FINANCE SERVICES'),
-(6200, 'SECURITY & COMMODITY BROKERS, DEALERS, EXCHANGES & SERVICES'),
-(6211, 'SECURITY BROKERS, DEALERS & FLOTATION COMPANIES'),
-(6221, 'COMMODITY CONTRACTS BROKERS & DEALERS'),
-(6282, 'INVESTMENT ADVICE'),
-(6311, 'LIFE INSURANCE'),
-(6321, 'ACCIDENT & HEALTH INSURANCE'),
-(6324, 'HOSPITAL & MEDICAL SERVICE PLANS'),
-(6331, 'FIRE, MARINE & CASUALTY INSURANCE'),
-(6351, 'SURETY INSURANCE'),
-(6361, 'TITLE INSURANCE'),
-(6399, 'INSURANCE CARRIERS, NEC'),
-(6411, 'INSURANCE AGENTS, BROKERS & SERVICE'),
-(6500, 'REAL ESTATE'),
-(6510, 'REAL ESTATE OPERATORS (NO DEVELOPERS) & LESSORS'),
-(6512, 'OPERATORS OF NONRESIDENTIAL BUILDINGS'),
-(6513, 'OPERATORS OF APARTMENT BUILDINGS'),
-(6519, 'LESSORS OF REAL PROPERTY, NEC'),
-(6531, 'REAL ESTATE AGENTS & MANAGERS (FOR OTHERS)'),
-(6532, 'REAL ESTATE DEALERS (FOR THEIR OWN ACCOUNT)'),
-(6552, 'LAND SUBDIVIDERS & DEVELOPERS (NO CEMETERIES)'),
-(6770, 'BLANK CHECKS'),
-(6792, 'OIL ROYALTY TRADERS'),
-(6794, 'PATENT OWNERS & LESSORS'),
-(6795, 'MINERAL ROYALTY TRADERS'),
-(6798, 'REAL ESTATE INVESTMENT TRUSTS'),
-(6799, 'INVESTORS, NEC'),
-(7000, 'HOTELS, ROOMING HOUSES, CAMPS & OTHER LODGING PLACES'),
-(7011, 'HOTELS & MOTELS'),
-(7200, 'SERVICES-PERSONAL SERVICES'),
-(7310, 'SERVICES-ADVERTISING'),
-(7311, 'SERVICES-ADVERTISING AGENCIES'),
-(7320, 'SERVICES-CONSUMER CREDIT REPORTING, COLLECTION AGENCIES'),
-(7330, 'SERVICES-MAILING, REPRODUCTION, COMMERCIAL ART & PHOTOGRAPHY'),
-(7331, 'SERVICES-DIRECT MAIL ADVERTISING SERVICES'),
-(7340, 'SERVICES-TO DWELLINGS & OTHER BUILDINGS'),
-(7350, 'SERVICES-MISCELLANEOUS EQUIPMENT RENTAL & LEASING'),
-(7359, 'SERVICES-EQUIPMENT RENTAL & LEASING, NEC'),
-(7361, 'SERVICES-EMPLOYMENT AGENCIES'),
-(7363, 'SERVICES-HELP SUPPLY SERVICES'),
-(7370, 'SERVICES-COMPUTER PROGRAMMING, DATA PROCESSING, ETC.'),
-(7371, 'SERVICES-COMPUTER PROGRAMMING SERVICES'),
-(7372, 'SERVICES-PREPACKAGED SOFTWARE'),
-(7373, 'SERVICES-COMPUTER INTEGRATED SYSTEMS DESIGN'),
-(7374, 'SERVICES-COMPUTER PROCESSING & DATA PREPARATION'),
-(7377, 'SERVICES-COMPUTER RENTAL & LEASING'),
-(7380, 'SERVICES-MISCELLANEOUS BUSINESS SERVICES'),
-(7381, 'SERVICES-DETECTIVE, GUARD & ARMORED CAR SERVICES'),
-(7384, 'SERVICES-PHOTOFINISHING LABORATORIES'),
-(7385, 'SERVICES-TELEPHONE INTERCONNECT SYSTEMS'),
-(7389, 'SERVICES-BUSINESS SERVICES, NEC'),
-(7500, 'SERVICES-AUTOMOTIVE REPAIR, SERVICES & PARKING'),
-(7510, 'SERVICES-AUTO RENTAL & LEASING (NO DRIVERS)'),
-(7600, 'SERVICES-MISCELLANEOUS REPAIR SERVICES'),
-(7812, 'SERVICES-MOTION PICTURE & VIDEO TAPE PRODUCTION'),
-(7819, 'SERVICES-ALLIED TO MOTION PICTURE PRODUCTION'),
-(7822, 'SERVICES-MOTION PICTURE & VIDEO TAPE DISTRIBUTION'),
-(7829, 'SERVICES-ALLIED TO MOTION PICTURE DISTRIBUTION'),
-(7830, 'SERVICES-MOTION PICTURE THEATERS'),
-(7841, 'SERVICES-VIDEO TAPE RENTAL'),
-(7900, 'SERVICES-AMUSEMENT & RECREATION SERVICES'),
-(7948, 'SERVICES-RACING, INCLUDING TRACK OPERATION'),
-(7990, 'SERVICES-MISCELLANEOUS AMUSEMENT & RECREATION'),
-(7997, 'SERVICES-MEMBERSHIP SPORTS & RECREATION CLUBS'),
-(8000, 'SERVICES-HEALTH SERVICES'),
-(8011, 'SERVICES-OFFICES & CLINICS OF DOCTORS OF MEDICINE'),
-(8050, 'SERVICES-NURSING & PERSONAL CARE FACILITIES'),
-(8051, 'SERVICES-SKILLED NURSING CARE FACILITIES'),
-(8060, 'SERVICES-HOSPITALS'),
-(8062, 'SERVICES-GENERAL MEDICAL & SURGICAL HOSPITALS, NEC'),
-(8071, 'SERVICES-MEDICAL LABORATORIES'),
-(8082, 'SERVICES-HOME HEALTH CARE SERVICES'),
-(8090, 'SERVICES-MISC HEALTH & ALLIED SERVICES, NEC'),
-(8093, 'SERVICES-SPECIALTY OUTPATIENT FACILITIES, NEC'),
-(8111, 'SERVICES-LEGAL SERVICES'),
-(8200, 'SERVICES-EDUCATIONAL SERVICES'),
-(8300, 'SERVICES-SOCIAL SERVICES'),
-(8351, 'SERVICES-CHILD DAY CARE SERVICES'),
-(8600, 'SERVICES-MEMBERSHIP ORGANIZATIONS'),
-(8700, 'SERVICES-ENGINEERING, ACCOUNTING, RESEARCH, MANAGEMENT'),
-(8711, 'SERVICES-ENGINEERING SERVICES'),
-(8731, 'SERVICES-COMMERCIAL PHYSICAL & BIOLOGICAL RESEARCH'),
-(8734, 'SERVICES-TESTING LABORATORIES'),
-(8741, 'SERVICES-MANAGEMENT SERVICES'),
-(8742, 'SERVICES-MANAGEMENT CONSULTING SERVICES'),
-(8744, 'SERVICES-FACILITIES SUPPORT MANAGEMENT SERVICES'),
-(8880, 'AMERICAN DEPOSITARY RECEIPTS'),
-(8888, 'FOREIGN GOVERNMENTS'),
-(8900, 'SERVICES-SERVICES, NEC'),
-(9721, 'INTERNATIONAL AFFAIRS'),
-(9995, 'NON-OPERATING ESTABLISHMENTS');
 
 -- --------------------------------------------------------
 
@@ -43379,11 +43041,12 @@ INSERT INTO `siccodes` (`sic`, `name`) VALUES
 -- Table structure for table `standardtag`
 --
 
+DROP TABLE IF EXISTS `standardtag`;
 CREATE TABLE `standardtag` (
   `tag` varchar(255) COLLATE latin1_general_cs NOT NULL,
   `maxversion` varchar(50) COLLATE latin1_general_cs DEFAULT NULL,
-  `tlabel` varchar(512) COLLATE latin1_general_cs DEFAULT NULL,
-  `doc` varchar(2048) COLLATE latin1_general_cs DEFAULT NULL,
+  `label` varchar(512) COLLATE latin1_general_cs DEFAULT NULL,
+  `description` varchar(2048) COLLATE latin1_general_cs DEFAULT NULL,
   `cnt` int(11) DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
 
@@ -43393,6 +43056,7 @@ CREATE TABLE `standardtag` (
 -- Table structure for table `statdefs`
 --
 
+DROP TABLE IF EXISTS `statdefs`;
 CREATE TABLE `statdefs` (
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL,
   `avg` tinyint(1) NOT NULL,
@@ -43406,6 +43070,7 @@ CREATE TABLE `statdefs` (
 -- Table structure for table `stats`
 --
 
+DROP TABLE IF EXISTS `stats`;
 CREATE TABLE `stats` (
   `sic` int(11) NOT NULL,
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL,
@@ -43419,6 +43084,7 @@ CREATE TABLE `stats` (
 -- Table structure for table `tickers`
 --
 
+DROP TABLE IF EXISTS `tickers`;
 CREATE TABLE `tickers` (
   `cik` int(7) NOT NULL,
   `ticker` varchar(10) DEFAULT NULL,
@@ -57201,6 +56867,7 @@ INSERT INTO `tickers` (`cik`, `ticker`, `name`, `exchange`, `sic`, `business`, `
 -- Table structure for table `timeseries`
 --
 
+DROP TABLE IF EXISTS `timeseries`;
 CREATE TABLE `timeseries` (
   `cik` int(11) NOT NULL,
   `tag` varchar(256) COLLATE latin1_general_cs NOT NULL,
@@ -57208,18 +56875,31 @@ CREATE TABLE `timeseries` (
   `qtrs` tinyint(11) NOT NULL,
   `pts` smallint(6) NOT NULL DEFAULT 0 COMMENT 'count of points in time series ',
   `json` mediumtext COLLATE latin1_general_cs NOT NULL COMMENT 'JSON of time series for cik/tag/uom combo',
-  `tlabel` varchar(512) COLLATE latin1_general_cs DEFAULT NULL,
-  `doc` varchar(2048) COLLATE latin1_general_cs DEFAULT NULL,
-  `coname` varchar(150) COLLATE latin1_general_cs NOT NULL COMMENT 'company name'
+  `label` varchar(512) COLLATE latin1_general_cs DEFAULT NULL,
+  `description` varchar(2048) COLLATE latin1_general_cs DEFAULT NULL,
+  `entityName` varchar(150) COLLATE latin1_general_cs NOT NULL DEFAULT 'unknown' COMMENT 'company name'
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
 
 -- --------------------------------------------------------
 
 --
--- Table structure for table `tmp_factvalues`
+-- Table structure for table `Xf_sub_raw`
 --
 
-CREATE TABLE `tmp_factvalues` (
+DROP TABLE IF EXISTS `Xf_sub_raw`;
+CREATE TABLE `Xf_sub_raw` (
+  `raw` longtext COLLATE latin1_general_cs NOT NULL,
+  `id` int(11) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_cs;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `Xtmp_factvalues`
+--
+
+DROP TABLE IF EXISTS `Xtmp_factvalues`;
+CREATE TABLE `Xtmp_factvalues` (
   `adsh` char(20) COLLATE latin1_general_cs DEFAULT NULL,
   `uom` varchar(50) COLLATE latin1_general_cs DEFAULT NULL,
   `qtrs` tinyint(4) DEFAULT NULL,
@@ -57251,16 +56931,37 @@ ALTER TABLE `datasets`
   ADD PRIMARY KEY (`name`);
 
 --
+-- Indexes for table `edgar_names`
+--
+ALTER TABLE `edgar_names`
+  ADD PRIMARY KEY (`adsh`,`cik`,`name_ci`);
+ALTER TABLE `edgar_names` ADD FULLTEXT KEY `name_ci` (`name_ci`);
+ALTER TABLE `edgar_names` ADD FULLTEXT KEY `lastname_soundex` (`lastname_soundex`);
+
+--
 -- Indexes for table `eventlog`
 --
 ALTER TABLE `eventlog`
   ADD PRIMARY KEY (`id`);
 
 --
--- Indexes for table `facts`
+-- Indexes for table `exemptOffering`
 --
-ALTER TABLE `facts`
-  ADD PRIMARY KEY (`tag`,`ddate`,`uom`,`qtrs`);
+ALTER TABLE `exemptOffering`
+  ADD PRIMARY KEY (`adsh`),
+  ADD KEY `previousadsh` (`previousAccessionNumber`);
+
+--
+-- Indexes for table `exemptOfferingIssuers`
+--
+ALTER TABLE `exemptOfferingIssuers`
+  ADD PRIMARY KEY (`adsh`,`issuernum`);
+
+--
+-- Indexes for table `exemptOfferingPersons`
+--
+ALTER TABLE `exemptOfferingPersons`
+  ADD PRIMARY KEY (`adsh`,`personnum`);
 
 --
 -- Indexes for table `fin_num`
@@ -57268,7 +56969,7 @@ ALTER TABLE `facts`
 ALTER TABLE `fin_num`
   ADD PRIMARY KEY (`id`),
   ADD KEY `ix_adshtag` (`adsh`,`tag`),
-  ADD KEY `tag` (`tag`,`ddate`);
+  ADD KEY `tag` (`tag`,`start`);
 
 --
 -- Indexes for table `fin_pre`
@@ -57350,7 +57051,13 @@ ALTER TABLE `fp_ranks`
 -- Indexes for table `frames`
 --
 ALTER TABLE `frames`
-  ADD PRIMARY KEY (`tag`,`ddate`,`uom`,`qtrs`);
+  ADD PRIMARY KEY (`tag`,`ccp`,`uom`,`qtrs`);
+
+--
+-- Indexes for table `frame_working`
+--
+ALTER TABLE `frame_working`
+  ADD PRIMARY KEY (`tag`,`ccp`,`uom`,`cik`);
 
 --
 -- Indexes for table `f_num`
@@ -57358,7 +57065,7 @@ ALTER TABLE `frames`
 ALTER TABLE `f_num`
   ADD PRIMARY KEY (`id`),
   ADD KEY `ix_adshtag` (`adsh`,`tag`),
-  ADD KEY `tag` (`tag`,`ddate`);
+  ADD KEY `tagccpuom` (`tag`,`ccp`,`uom`) USING BTREE;
 
 --
 -- Indexes for table `f_pre`
@@ -57371,13 +57078,7 @@ ALTER TABLE `f_pre`
 --
 ALTER TABLE `f_sub`
   ADD PRIMARY KEY (`adsh`),
-  ADD KEY `ix_subcik` (`cik`);
-
---
--- Indexes for table `f_sub_raw`
---
-ALTER TABLE `f_sub_raw`
-  ADD UNIQUE KEY `id` (`id`);
+  ADD KEY `ix_subcik` (`cik`,`filed`) USING BTREE;
 
 --
 -- Indexes for table `f_tag`
@@ -57405,12 +57106,10 @@ ALTER TABLE `ownership_footnote`
   ADD PRIMARY KEY (`adsh`,`fnum`);
 
 --
--- Indexes for table `ownership_names`
+-- Indexes for table `ownership_names_tmp`
 --
-ALTER TABLE `ownership_names`
-  ADD PRIMARY KEY (`ownercik`,`ownername_ci`);
-ALTER TABLE `ownership_names` ADD FULLTEXT KEY `ownername_ci` (`ownername_ci`);
-ALTER TABLE `ownership_names` ADD FULLTEXT KEY `ownerlastname_soundex` (`ownerlastname_soundex`);
+ALTER TABLE `ownership_names_tmp`
+  ADD PRIMARY KEY (`adsh`,`cik`,`name_ci`);
 
 --
 -- Indexes for table `ownership_reporter`
@@ -57496,6 +57195,12 @@ ALTER TABLE `timeseries`
   ADD KEY `ixtimeseries_tag` (`tag`);
 
 --
+-- Indexes for table `Xf_sub_raw`
+--
+ALTER TABLE `Xf_sub_raw`
+  ADD UNIQUE KEY `id` (`id`);
+
+--
 -- AUTO_INCREMENT for dumped tables
 --
 
@@ -57518,12 +57223,6 @@ ALTER TABLE `f_num`
   MODIFY `id` int(9) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `f_sub_raw`
---
-ALTER TABLE `f_sub_raw`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
 -- AUTO_INCREMENT for table `ownership_submission`
 --
 ALTER TABLE `ownership_submission`
@@ -57534,6 +57233,279 @@ ALTER TABLE `ownership_submission`
 --
 ALTER TABLE `sectors`
   MODIFY `sector_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+
+--
+-- AUTO_INCREMENT for table `Xf_sub_raw`
+--
+ALTER TABLE `Xf_sub_raw`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+
+--
+-- Metadata
+--
+USE `phpmyadmin`;
+
+--
+-- Metadata for table countries
+--
+
+--
+-- Metadata for table datasets
+--
+
+--
+-- Metadata for table edgar_names
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'edgar_names', '[]', '2019-05-11 10:48:41');
+
+--
+-- Metadata for table eventlog
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'eventlog', '{\"sorted_col\":\"`eventlog`.`id`  DESC\"}', '2019-05-14 11:13:49');
+
+--
+-- Metadata for table exemptOffering
+--
+
+--
+-- Metadata for table exemptOfferingIssuers
+--
+
+--
+-- Metadata for table exemptOfferingPersons
+--
+
+--
+-- Metadata for table fin_num
+--
+
+--
+-- Metadata for table fin_pre
+--
+
+--
+-- Metadata for table fin_sub
+--
+
+--
+-- Metadata for table fin_tag
+--
+
+--
+-- Metadata for table fn_cal
+--
+
+--
+-- Metadata for table fn_dim
+--
+
+--
+-- Metadata for table fn_num
+--
+
+--
+-- Metadata for table fn_pre
+--
+
+--
+-- Metadata for table fn_ren
+--
+
+--
+-- Metadata for table fn_sub
+--
+
+--
+-- Metadata for table fn_tag
+--
+
+--
+-- Metadata for table form_ranks
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'form_ranks', '{\"sorted_col\":\"`form_ranks`.`rank`  ASC\"}', '2018-11-18 18:07:59');
+
+--
+-- Metadata for table fp_ranks
+--
+
+--
+-- Metadata for table frames
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'frames', '{\"sorted_col\":\"`frames`.`tag` ASC\"}', '2019-03-30 13:31:33');
+
+--
+-- Metadata for table frame_working
+--
+
+--
+-- Metadata for table f_num
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'f_num', '{\"sorted_col\":\"`f_num`.`adsh`  DESC\"}', '2019-05-16 12:15:06');
+
+--
+-- Metadata for table f_pre
+--
+
+--
+-- Metadata for table f_sub
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'f_sub', '{\"CREATE_TIME\":\"2019-03-29 14:15:17\"}', '2019-05-17 15:22:01');
+
+--
+-- Metadata for table f_tag
+--
+
+--
+-- Metadata for table ownership_api_issuer
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'ownership_api_issuer', '{\"sorted_col\":\"`ownership_api_issuer`.`cik`  ASC\"}', '2019-05-11 15:25:06');
+
+--
+-- Metadata for table ownership_api_reporter
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'ownership_api_reporter', '{\"sorted_col\":\"`ownership_api_reporter`.`cik` ASC\"}', '2019-05-11 15:24:21');
+
+--
+-- Metadata for table ownership_footnote
+--
+
+--
+-- Metadata for table ownership_names_tmp
+--
+
+--
+-- Metadata for table ownership_reporter
+--
+
+--
+-- Metadata for table ownership_submission
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'ownership_submission', '{\"sorted_col\":\"`ownership_submission`.`id`  DESC\"}', '2019-04-20 01:55:13');
+
+--
+-- Metadata for table ownership_transaction
+--
+
+--
+-- Metadata for table ownership_transaction_footnote
+--
+
+--
+-- Metadata for table postcodeloc
+--
+
+--
+-- Metadata for table scattersets
+--
+
+--
+-- Metadata for table sectors
+--
+
+--
+-- Metadata for table siccodes
+--
+
+--
+-- Metadata for table standardtag
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'standardtag', '{\"sorted_col\":\"`standardtag`.`tag` ASC\"}', '2019-05-15 14:58:09');
+
+--
+-- Metadata for table statdefs
+--
+
+--
+-- Metadata for table stats
+--
+
+--
+-- Metadata for table tickers
+--
+
+--
+-- Metadata for table timeseries
+--
+
+--
+-- Dumping data for table `pma__table_uiprefs`
+--
+
+INSERT INTO `pma__table_uiprefs` (`username`, `db_name`, `table_name`, `prefs`, `last_update`) VALUES
+('root', 'secdata', 'timeseries', '{\"sorted_col\":\"`timeseries`.`tag` ASC\"}', '2018-11-06 03:01:32');
+
+--
+-- Metadata for table Xf_sub_raw
+--
+
+--
+-- Metadata for table Xtmp_factvalues
+--
+
+--
+-- Metadata for database secdata
+--
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
