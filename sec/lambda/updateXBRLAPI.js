@@ -79,7 +79,7 @@ exports.handler = async (event, context) => {
         namespaces: {},
         contextTree: {},
         unitTree: {},
-        numericalFacts: []
+        facts: {}
     };  //event = processIndexHeaders parsing of index-headers.html file
     //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
     for (let i = 0; i < event.files.length; i++) {
@@ -246,27 +246,27 @@ function parseXBRL($, submission){
                 tag = nameParts[1];
                 if((skipNameSpaces.indexOf(tax)==-1) && val.length){
                     if(tax=='dei'){
-                        submission.dei[tag] = val;
-                        if (!this.attribs.contextref) common.logEvent("missing DEI contextRef for "+tag, submission.filing.adsh);
-                        if (!submission.dei.contextref && this.attribs.contextref) {
-                            submission.dei.contextref = this.attribs.contextref;
-                        } else {
-                            if(submission.dei.contextref != this.attribs.contextref) common.logEvent("conflicting DEI contextRef", submission.filing.adsh);
-                        }
+                        submission.dei[tag] = {
+                            val: val,
+                            contextRef: this.attribs.contextRef || this.attribs.contextref
+                        };
+                        if (!submission.dei[tag].contextRef) common.logEvent("missing DEI contextRef for "+tag, submission.filing.adsh);
                     } else {
-                        let xbrl = extractFactInfo(submission, $, elem);
-                        if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
-                            if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
-                                let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom+':'+xbrl.end;
-                                if(!submission.facts[factKey]){
-                                    submission.facts[factKey] = xbrl;
-                                    submission.hasXBRL = true;
-                                } else {
-                                    if(submission.facts[factKey].value != xbrl.value)
-                                        common.logEvent('ERROR: XBRL value conflict in '+submission.filing.adsh, '['+JSON.stringify(xbrl)+','
-                                            +JSON.stringify(submission.facts[factKey])+']');
+                        if(standardNumericalTaxonomies.indexOf(tax)!=-1){
+                            let xbrl = extractFactInfo(submission, $, elem);
+                            if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
+                                if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
+                                    let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom+':'+xbrl.end;
+                                    if(!submission.facts[factKey]){
+                                        submission.facts[factKey] = xbrl;
+                                        submission.hasXBRL = true;
+                                    } else {
+                                        if(submission.facts[factKey].value != xbrl.value)
+                                            common.logEvent('ERROR: XBRL value conflict in '+submission.filing.adsh, '['+JSON.stringify(xbrl)+','
+                                                +JSON.stringify(submission.facts[factKey])+']');
+                                    }
+                                    submission.counts.standardFacts++;
                                 }
-                                submission.counts.standardFacts++;
                             }
                         }
                     }
@@ -293,15 +293,14 @@ function parseIXBRL($, parsedFacts){
     if($deiTags.length==0) return;  //this html doc does not contain SEC compliant inline XBRL
     if(!parsedFacts.dei) parsedFacts.dei = {};
     $deiTags.each((i, elem)=> {
-        parsedFacts.dei[elem.attribs.name.substr(4)] = $(elem).text();
-        if (!elem.attribs.contextref) common.logEvent("missing DEI contextRef", parsedFacts.filing.adsh);
-        if (!parsedFacts.dei.contextref && elem.attribs.contextref) {
-            parsedFacts.dei.contextref = elem.attribs.contextref;
-        } else {
-            if(parsedFacts.dei.contextref != elem.attribs.contextref) common.logEvent("conflicting DEI contextRef", parsedFacts.filing.adsh);
-        }
-        if(elem.attribs.format && elem.attribs.format.indexOf('daymonth')!=-1) common.logEvent("unhandled data form", elem.attribs.format + ' in iXBRL of ' + parsedFacts.filing.adsh);
+        let deiTag = elem.attribs.name.split(':').pop();
+        parsedFacts.dei[deiTag] = {
+            val: $(elem).text(),
+            contextRef:  elem.attribs.contextref || elem.attribs.contextRef
+        }.text();
+        if (!elem.attribs.contextref) common.logEvent("missing DEI contextRef for "+deiTag, parsedFacts.filing.adsh);
         //problematic date formats all contain the string 'daymonth': http://www.xbrl.org/inlineXBRL/transformation/
+        if(elem.attribs.format && elem.attribs.format.indexOf('daymonth')!=-1) common.logEvent("unhandled data form", elem.attribs.format + ' in iXBRL of ' + parsedFacts.filing.adsh);
     });
     /*  parsedFacts.dei =>  { EntityRegistrantName: 'DOVER Corp',
             CurrentFiscalYearEndDate: '--12-31',
@@ -360,10 +359,10 @@ function parseContextElement($, element, submissionObject){
     if($start.length==1) {
         start = $start.text().trim();
         dtStart = new Date(start);
-        $end = $(this).find('xbrli\\:endDate');
-        if(!$end.length) $end = $(this).find('endDate');
+        $end = $element.find('xbrli\\:endDate');
+        if(!$end.length) $end = $element.find('endDate');
         end = $end.text().trim();
-        dtEnd = new Date(dtEnd);
+        dtEnd = new Date(end);
         newContext = {
             start: start,
             end: end,
@@ -430,14 +429,14 @@ function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
             uom: objParsedSubmission.unitTree[unitRef],
             taxonomy: nameParts[0],
             tag: nameParts[1],
-            scale: $ix.attr('scale'),
-            format: $ix.attr('format'),
-            sign: $ix.attr('sign'),
+            scale: ix.attribs.scale, //$ix.attr('scale'),  //iXBRL only; XBRL has scale in contextRef
+            decimals: ix.attribs.decimals, //XBRL & iXBRL
+            format: ix.attribs.format,  //only iXBRL?
+            sign: ix.attribs.sign,
             isStandard: standardNumericalTaxonomies.indexOf(nameParts[0])!==-1,
             text: $ix.text().trim()
         };
-    console.log(JSON.stringify(xbrl));
-    xbrl.value = xbrlToNumber(xbrl.text, xbrl.format, xbrl.scale);
+    xbrl.value = xbrlToNumber(xbrl.text, xbrl.format||'standard', xbrl.scale);
     if(objParsedSubmission.contextTree[contextRef]){
         let context = objParsedSubmission.contextTree[contextRef];
         xbrl.qtrs = context.qtrs;
@@ -456,45 +455,36 @@ function xbrlToNumber(text, format, scale){
         case "ixt:zerodash":
             if(text=='—') return 0;  //falls through to numdotdecimal
         case "ixt:numdotdecimal":
+        case 'standard':
             return parseFloat(text.replace(/,/g, ''))*10**(scale||0);
         case "ixt:numcommadecimal":
             return parseFloat(text.replace(/\./g, '').replace(/,/,'.'))*10**(scale||0);
         case "ixt-sec:numtexten":
-            //todo:  adapt regex to convert english to numbers
+        //todo:  adapt regex to convert english to numbers
         default:
             throw('unrecognized numerical format '+ format+ ' for '+text);
     }
 }
+
 async function saveXBRLSubmission(s){
+    console.log(JSON.stringify(s)); //debug only!!!
     //save main submission record into fin_sub
-    /*  EntityRegistrantName: 'DOVER Corp',
-        CurrentFiscalYearEndDate: '--12-31',
-        EntityCurrentReportingStatus: 'Yes',
-        EntityFilerCategory: 'Large Accelerated Filer',
-        EntitySmallBusiness: 'FALSE',
-        EntityEmergingGrowthCompany: 'FALSE',
-        DocumentFiscalYearFocus: '2018',
-        DocumentFiscalPeriodFocus: 'Q1',
-        DocumentType: '10-Q',
-        AmendmentFlag: 'FALSE',
-        DocumentPeriodEndDate: '3/31/2019',
-        EntityCentralIndexKey: '0000029905' } */
     let q = common.q,
         start = new Date(),
         sql = 'INSERT INTO fin_sub(adsh, cik, name, sic, fye, form, period, fy, fp, filed'
-        + ', countryba, stprba, cityba, zipba, bas1, bas2, baph, '
-        + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, afs, wksi, '
-        +' accepted, prevrpt, detail, instance, nciks, aciks '
-        + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey+","+q(s.dei.EntityRegistrantName)+(s.filing.sic||0)+','
-        + q(s.dei.CurrentFiscalYearEndDate.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType)+q(s.dei.DocumentPeriodEndDate)
-        + q(s.dei.DocumentFiscalYearFocus)+q(s.dei.DocumentFiscalPeriodFocus)+q(s.filing.filingDate)
-        + q(s.filing.businessAddress.country)+q(s.filing.businessAddress.state)+q(s.filing.businessAddress.city)+q(s.filing.businessAddress.zip)
-        + q(s.filing.businessAddress.street1)+q(s.filing.businessAddress.street2)+q(s.filing.businessAddress.phone)
-        + q(s.filing.mailingAddress.country)+q(s.filing.mailingAddress.state)+q(s.filing.mailingAddress.city)+q(s.filing.mailingAddress.zip)
-        + q(s.filing.mailingAddress.street1)+q(s.filing.mailingAddress.street2)
-        + q(s.filing.incorporation?s.filing.incorporation.country:null)+q(s.filing.incorporation?s.filing.incorporation.state:null)+q(s.filing.ein)
-        + q('former')+q('changed')+ q('afs')+q(s.dei.EntityFilerCategory)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
-        + q(s.dei.instance)+"12342,"+q(s.dei.EntityCentralIndexKey, true)+")";
+            + ', countryba, stprba, cityba, zipba, bas1, bas2, baph, '
+            + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, afs, wksi, '
+            +' accepted, prevrpt, detail, instance, nciks, aciks '
+            + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey.val+","+q(s.dei.EntityRegistrantName.val)+(s.filing.sic||0)+','
+            + q(s.dei.CurrentFiscalYearEndDate.val.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType.val)+q(s.dei.DocumentPeriodEndDate.val)
+            + q(s.dei.DocumentFiscalYearFocus.val)+q(s.dei.DocumentFiscalPeriodFocus.val)+q(s.filing.filingDate)
+            + q(s.filing.businessAddress.country)+q(s.filing.businessAddress.state)+q(s.filing.businessAddress.city)+q(s.filing.businessAddress.zip)
+            + q(s.filing.businessAddress.street1)+q(s.filing.businessAddress.street2)+q(s.filing.businessAddress.phone)
+            + q(s.filing.mailingAddress.country)+q(s.filing.mailingAddress.state)+q(s.filing.mailingAddress.city)+q(s.filing.mailingAddress.zip)
+            + q(s.filing.mailingAddress.street1)+q(s.filing.mailingAddress.street2)
+            + q(s.filing.incorporation?s.filing.incorporation.country:null)+q(s.filing.incorporation?s.filing.incorporation.state:null)+q(s.filing.ein)
+            + q('former')+q('changed')+ q('afs')+q(s.dei.EntityFilerCategory.val)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
+            + q(s.dei.instance.val)+"12342,"+q(s.dei.EntityCentralIndexKey.val, true)+")";
     await common.runQuery(sql);
 
     //save numerical fact records into fin_num
@@ -526,7 +516,7 @@ async function saveXBRLSubmission(s){
     console.log('wrote ' + i + ' facts for '+s.coname+' ' + s.form + ' for ' + s.fy + s.fp + ' ('+ s.adsh +') in ' + (end-start) + ' ms');
 }
 
-/*////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
+/*//////////////////// TEST CARDS  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 // TEST Card A: iXBRL 10Q:  https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index.htm
 const event = 	{
   "path": "sec/edgar/29905/000002990519000029/",
@@ -634,217 +624,128 @@ const event = 	{
 };
 exports.handler(event);
 ///////////////////////////////////////////////////////////////////////////////////////////////*/
-/*
-#single select has all frame info, but need node.js to par
-select count(*) as pts, fr.tag, fr.ddate, fr.qtrs, fr.uom, fr.tlabel, fr.doc,
-  CONCAT('[', GROUP_CONCAT(CONCAT('["', s.adsh, '",', s.cik, ',', s.sic, ',"', s.name, '",', n.value, ',', s.filed, ']') order by cik, filed), ']') as json
-from f_num n
-INNER JOIN f_sub s on n.adsh = s.adsh
-inner join
-(SELECT
-  distinct n.tag, ddate, qtrs, uom, st.tlabel, st.doc
-  FROM f_num n
-  INNER JOIN standardtag st ON n.tag = st.tag
- WHERE n.version<>n.adsh
-  AND n.coreg=''
-  AND n.qtrs in (0,1,4)
-  AND n.adsh='0000002178-18-000067'
-) fr ON fr.tag=n.tag and fr.uom=n.uom and fr.ddate=n.ddate and fr.qtrs=n.qtrs
-WHERE n.coreg='' AND n.version<>n.adsh
-GROUP BY fr.tag, fr.ddate, fr.qtrs, fr.uom, fr.tlabel, fr.doc
-
-*/
-
-/*
-
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `updateFrames`(ADSH as varchar(20))
-NO SQL
-BEGIN
-#creates ~ 100 records (avg) per ADSH in ???s
-
-    #variable declarations
-DECLARE newTag varchar(255);
-DECLARE standardTlabel varchar(512);
-DECLARE standardDoc varchar(2048);
-DECLARE newDdate char(10);
-DECLARE newUom varchar(256);
-DECLARE newQtrs tinyint;
-DECLARE json text;
-DECLARE pts int;
-DECLARE terminate INT DEFAULT 0;
-
-#cursor and handler declarations
-DECLARE cr_newtagdates CURSOR FOR
-  SELECT distinct n.tag, ddate, qtrs, uom, st.tlabel, st.doc
-  FROM f_num n
-  INNER JOIN standardtag st ON n.tag = st.tag
-  AND n.version<>n.adsh
-  AND n.coreg=''
-  AND n.qtrs in (0,1,4)
-  AND n.adsh=ADSH;
-DECLARE CONTINUE HANDLER FOR NOT FOUND SET terminate = 1;
-
-#double the max size to 2 MB for group_concat and concat
-set @@session.group_concat_max_len = 1048576 * 2;
-set @@global.max_allowed_packet = 1048576 * 2;
-
-CREATE TEMPORARY TABLE tmp_frame_num
-select s.adsh, s.cik, s.filed as lastfiled, n.value from f_sub s inner join f_num n on n.adsh=s.adsh limit 0;
-
-Open cr_newtagdates;
-fact_loop: LOOP
-FETCH cr_newtagdates INTO newTag, newDdate, newQtrs, newUom,
-    standardTlabel, standardDoc;
-IF terminate = 1 THEN
-LEAVE fact_loop;
-END IF;
-
-# regular table = not thread safe to allow multiple procedures to run
-truncate table tmp_frame_num;
-insert into frame_working  (adsh, cik, lastfiled, value)
-SELECT s.adsh, s.cik, max(s.filed) as lastfiled, value
-FROM f_num n
-INNER JOIN f_sub s on n.adsh = s.adsh
-WHERE n.tag=newTag AND n.qtrs=newQtrs
-AND n.ddate=newDdate AND n.uom=newUom
-AND n.coreg='' AND n.value is not null
-AND n.adsh <> n.version
-GROUP BY s.cik, s.adsh, value;
-
-#make the fact's JSON
-SELECT
-count(*) as pts,
-CONCAT('[', GROUP_CONCAT(CONCAT('["', s.adsh, '",', s.cik, ',', s.sic, ',"', s.name, '","', s.countryba, '",', COALESCE(concat('[', pl.lat, ',', pl.lon, ']'), 'null'), ',', n.value, ',', revisions, ']')), ']') as json
-INTO json, pts
-FROM f_sub s
-INNER JOIN (
-    select cik, max(adsh) as adsh, lastfiled, revisions
-from frame_working fw
-inner join (select cik, max(filed) as mxfiled, count(distinct value) as revisions from frame_working group by cik) mx
-on mx.cik=fw.cik and mx.mxfiled=fw.filed
-) mxfw on s.adsh=mxfw.adsh
-INNER JOIN frame_working fw on mxfw.adsh=fs.adsh
-LEFT OUTER JOIN postcodeloc pl on s.countryba = pl.cnty and left(s.zipba, 5) = pl.zip;
-
-INSERT INTO frames
-(tag, ddate, uom, qtrs, tlabel, tdoc, pts, json, api_written)
-VALUES (newTag, newDdate, newUom, newQtrs, currentTlabel, currentDoc, pts, json, 0)
-ON DUPLICATE KEY UPDATE
-json=json, pts=pts, tlabel=currentTlabel, doc=currentDoc, api_written=0;
-
-truncate table tmp_frame_num;
-
-END LOOP fact_loop;
-
-#update submission's state (Note: not thread safe)
-UPDATE f_sub set api_state=0 WHERE api_state=3;
-#cleanup and exit
-CLOSE cr_newtagdates;
-END$$
-DELIMITER ;
 
 
+/*////////////////////////////////////////////////////////////////////////////////////////////////
+// TEST Card B: XBRL 10K:  https://www.sec.gov/Archives/edgar/data/1000180/000100018016000068/0001000180-16-000068-index.htm
 
-
-
-
-DELIMITER $$
-CREATE DEFINER=`root`@`localhost` PROCEDURE `updateTimeSeries`(IN `adsh` VARCHAR(25))
-NO SQL
-BEGIN
-#added analytical index (moved to addFilingIndexes), created 3.8M times series & drop index (moved to addFilingIndexes) in 28 minutes (for single ADSH should be ~100ms)
-DECLARE currentCik INT;
-#DECLARE currentCoName VARCHAR(150);
-DECLARE terminate INTEGER DEFAULT 0;
-DECLARE ciks CURSOR FOR
-SELECT DISTINCT cik FROM f_sub
-where api_state=1 or not updatesOnly;  #unprocessed has multiple state
-DECLARE CONTINUE HANDLER
-FOR NOT FOUND SET terminate = 1;
-
-CREATE TEMPORARY TABLE tmp_adsh
-select adsh, name, sic, fy, fp, form, api_state
-from f_sub ;
-
-CREATE TEMPORARY TABLE tmp_timeseries
-Select cik, tag, uom, qtrs, pts, json, newpoints
-from timeseries limit 0;
-
-if(NOT updatesOnly)
-then truncate table timeseries;
-end if;
-
-Open ciks;
-cik_loop: LOOP
-
-FETCH ciks INTO currentCik;
-IF terminate = 1 THEN
-LEAVE cik_loop;
-END IF;
-
-#set submission state = TS step 1 processing
-update f_sub s SET s.processedState = 2
-where s.cik=currentcik and s.processedState = 1;
-
-#create a tmp table of just the adsh for this cik (b/c mysql is incompetent at optimizing this query)
-TRUNCATE TABLE tmp_adsh;
-insert into tmp_adsh
-select adsh, name, sic, fy, fp, form, api_state
-from f_sub where cik = currentCik;
-
-#insert the current cik’s f_num records into temp table
-CREATE TEMPORARY TABLE standard_pts
-SELECT n.adsh, n.tag, n.uom, n.qtrs, n.value, n.ddate, name, sic, fy, fp, form
-FROM f_num n inner join tmp_adsh ta on n.adsh=ta.adsh
-WHERE n.version <> n.adsh and coreg="" and qtrs in (0,1,4);
-
-#insert the cik’s timeseries records into temp table
-truncate tmp_timeseries;
-INSERT INTO tmp_timeseries
-Select currentCik,
-    tag,
-    uom,
-    qtrs,
-    COUNT(distinct ddate) as pts,
-    CONCAT("[",  GROUP_CONCAT(CONCAT("[""", ddate, """,", value, ",""", adsh, """,""", fy, " ", fp, """,""", form, """,""", replace(name, "'", "''"), """,", sic, "]") ORDER BY ddate ASC, ADSH DESC SEPARATOR ","), "]") as json,
-    sum(if(api_state=2, 1, 0)) as newpoints
-from standard_pts
-group by tag, uom, qtrs;
-
-#inpute/update
-INSERT INTO timeseries (cik, tag, uom, qtrs, pts, json, newpoints)
-Select cik, tag, uom, qtrs, pts, json, newpoints
-from tmp_timeseries
-where newpoints>0 or not updatesOnly
-ON DUPLICATE KEY UPDATE
-timeseries.pts = tmp_timeseries.pts,
-    timeseries.json = tmp_timeseries.json,
-    timeseries.newpoints = tmp_timeseries.newpoints;
-
-DROP TEMPORARY TABLE IF EXISTS standard_pts;
-
-END LOOP cik_loop;
-
-#release resources
-CLOSE ciks;
-DROP TEMPORARY TABLE IF EXISTS tmp_adsh;
-DROP TEMPORARY TABLE IF EXISTS tmp_timeseries;
-CALL dropIndexSafely('f_num', 'ix_adshtag');
-
-#final update of timeseries’ co name, tag name, and tag description from f-tag and f_sub
-
-#get latest definition of all standard tag into temp table
-UPDATE standardtag st, timeseries ts
-set ts.tlabel=st.tlabel, ts.doc=st.doc
-where ts.tag=st.tag;
-
-#get latest company name too
-update timeseries ts
-inner join f_sub s on ts.cik = s.cik
-inner join (select max(period) as period, cik from f_sub group by cik) mxs on mxs.cik = s.cik and mxs.period = s.period
-set ts.coname = s.name;
-
-END$$
-DELIMITER ;
+{
+  "path": "sec/edgar/data/1000180/000100018016000068/",
+  "adsh": "0001000180-16-000068",
+  "cik": "0001000180",
+  "fileNum": "000-26734",
+  "form": "10-K",
+  "filingDate": "20160212",
+  "period": "20160103",
+  "acceptanceDateTime": "20160212170356",
+  "indexHeaderFileName": "sec/edgar/data/1000180/000100018016000068/0001000180-16-000068-index-headers.html",
+  "files": [
+    {
+      "name": "sndk201510-k.htm",
+      "description": "FORM 10-K FY15",
+      "type": "10-K"
+    },
+    {
+      "name": "sndkex-1037xnewy2facilitya.htm",
+      "description": "NEW Y2 FACILITY AGREEMENT",
+      "type": "EX-10.37"
+    },
+    {
+      "name": "sndkex-121xratioofearnings.htm",
+      "description": "COMPUTATION OF RATIO TO FIXED CHARGES",
+      "type": "EX-12.1"
+    },
+    {
+      "name": "sndkex-211xsignificantsubs.htm",
+      "description": "SUBSIDIARIES OF THE REGISTRANT",
+      "type": "EX-21.1"
+    },
+    {
+      "name": "sndkex-231xconsentofindepe.htm",
+      "description": "CONSENT OF INDEPENDENT REGISTERED PUBLIC ACCOUNTING FIRM",
+      "type": "EX-23.1"
+    },
+    {
+      "name": "sndkex-311xsoxceocertfy15.htm",
+      "description": "CEO CERTIFICATION TO SECTION 302",
+      "type": "EX-31.1"
+    },
+    {
+      "name": "sndkex-312xsoxcfocertfy15.htm",
+      "description": "CFO CERTIFICATION TO SECTION 302",
+      "type": "EX-31.2"
+    },
+    {
+      "name": "sndkex-321xsec906ceocertfy.htm",
+      "description": "CEO CERTIFICATION TO SECTION 906",
+      "type": "EX-32.1"
+    },
+    {
+      "name": "sndkex-322xsec906cfocertfy.htm",
+      "description": "CFO CERTIFICATION TO SECTION 906",
+      "type": "EX-32.2"
+    },
+    {
+      "name": "sndk-20160103.xml",
+      "description": "XBRL INSTANCE DOCUMENT",
+      "type": "EX-101.INS"
+    },
+    {
+      "name": "sndk-20160103.xsd",
+      "description": "XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT",
+      "type": "EX-101.SCH"
+    },
+    {
+      "name": "sndk-20160103_cal.xml",
+      "description": "XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT",
+      "type": "EX-101.CAL"
+    },
+    {
+      "name": "sndk-20160103_def.xml",
+      "description": "XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT",
+      "type": "EX-101.DEF"
+    },
+    {
+      "name": "sndk-20160103_lab.xml",
+      "description": "XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT",
+      "type": "EX-101.LAB"
+    },
+    {
+      "name": "sndk-20160103_pre.xml",
+      "description": "XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT",
+      "type": "EX-101.PRE"
+    },
+    {
+      "name": "performancegraph2015.jpg",
+      "type": "GRAPHIC"
+    },
+    {
+      "name": "sndk.jpg",
+      "type": "GRAPHIC"
+    }
+  ],
+  "bucket": "restapi.publicdata.guru",
+  "sic": "3572",
+  "ein": "770191793",
+  "incorporation": {
+    "state": "DE",
+    "country": false
+  },
+  "businessAddress": {
+    "street1": "951 SANDISK DRIVE",
+    "street2": false,
+    "city": "MILPITAS",
+    "state": "CA",
+    "zip": "95035",
+    "phone": "408-801-1000"
+  },
+  "mailingAddress": {
+    "street1": "951 SANDISK DRIVE",
+    "street2": false,
+    "city": "MILPITAS",
+    "state": "CA",
+    "zip": "95035",
+    "phone": false
+  }
+}
 */

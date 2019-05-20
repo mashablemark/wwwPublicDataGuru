@@ -52,11 +52,18 @@ let me = {
         let workingEnd = new Date(end);
         if(start){
             let qtrs = Math.round((end - start)/(365/4*24*3600*1000));
-            if(qtrs==1) return 'CY' + workingEnd.setDate(end.getDate()-180).getFullYear() + 'Q' + qtrs;
-            if(qtrs==4) return 'CY' + workingEnd.setDate(end.getDate()-180).getFullYear();
+            if(qtrs==1) {
+                workingEnd.setDate(end.getDate()-40);
+                return 'CY' + workingEnd.getFullYear() + 'Q' + qtrs;
+            }
+            if(qtrs==4) {
+                workingEnd.setDate(end.getDate()-180);
+                return 'CY' + workingEnd.getFullYear();
+            }
             return null;  //if qtrs not 0, 1 or 4;
         } else {
-            if(qtrs==1) return 'CY' + workingEnd.setDate(end.getDate()-180).getFullYear() + 'Q' + qtrs + 'I';
+            workingEnd.setDate(end.getDate()-40);
+            return 'CY' + workingEnd.getFullYear() + 'Q' + qtrs + 'I';
         }
     },
     wait: (ms) => {
