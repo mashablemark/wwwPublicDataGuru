@@ -351,7 +351,7 @@ var ixbrlViewer = {
 
     drawBarChart: function(oVars, callback){  //can be called to redraw
         var self = this,
-            url = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik;
+            url = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik + '.json';
         self.fetchTimeSeriesToCache(oVars,
             function(aryTimeSeries){
                 if(aryTimeSeries.length==0 || !self.secDataCache[url]){
@@ -622,7 +622,7 @@ var ixbrlViewer = {
             yFrame,
             oChart,
             xUrl,
-            yUrl = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
+            yUrl = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.closestCalendricalPeriod(oVars.end, oVars.qtrs)+'.json',
             ply,
             $playerControls,
             $home,
@@ -663,7 +663,7 @@ var ixbrlViewer = {
                         if(oVars.xTag != xTagValue) {
                             oVars.xTag = xTagValue;
                             $xSelector.attr('disabled', 'disabled');
-                            xUrl = 'https://restapi.publicdata.guru/sec/frames/' + oVars.xTag + '/' + oVars.uom + '/DQ' + oVars.qtrs + '/' + self.cdate(oVars.ddate, oVars.qtrs);
+                            xUrl = 'https://restapi.publicdata.guru/sec/frames/' + oVars.xTag + '/' + oVars.uom + '/DQ' + oVars.qtrs + '/' + self.closestCalendricalPeriod(oVars.end, oVars.qtrs);
                             self.getRestfulData(xUrl,
                                 function (frame) {   //parallel fetch of x Axis data
                                     xFrame = frame;
@@ -787,8 +787,8 @@ var ixbrlViewer = {
         function changeFrame(dateIndex){
             newDateIndex = dateIndex;
             newDate = ply.dateIndex[dateIndex];
-            yUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.cdate(newDate, oVars.qtrs);
-            xUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.xTag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.cdate(newDate, oVars.qtrs);
+            yUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.closestCalendricalPeriod(newDate, oVars.qtrs)+'.json';
+            xUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.xTag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.closestCalendricalPeriod(newDate, oVars.qtrs)+'.json';
             newFrameFetches = 0;
             fetchNew(xUrlNew);
             fetchNew(yUrlNew);
@@ -1087,7 +1087,7 @@ var ixbrlViewer = {
             ply = self.playerIndexes(oVars),
             $slider,
             frameTableOptions = false;
-        for(var i in ply.dateIndex) ply.dateIndex[i] = self.cdate(ply.dateIndex[i], oVars.qtrs);  //convert to cdates
+        for(var i in ply.dateIndex) ply.dateIndex[i] = self.closestCalendricalPeriod(ply.dateIndex[i], oVars.qtrs);  //convert to cdates
         self.setHashSilently('y=' + oVars.tag +'&d=' +  oVars.ddate  +'&u=' +  oVars.uom  +'&q=' +  oVars.qtrs +'&c=f');
         if(!this.dtFrame){
             frameTableOptions = {
@@ -1100,7 +1100,7 @@ var ixbrlViewer = {
                     }
                 ],
                 cdates: [
-                    self.cdate(oVars.ddate, oVars.qtrs)
+                    self.closestCalendricalPeriod(oVars.ddate, oVars.qtrs)
                 ]
             };
             initializeFrameControls(oVars);
@@ -1120,7 +1120,8 @@ var ixbrlViewer = {
             for(t=0; t<frameTableOptions.tags.length; t++) {
                 for (d = 0; d<frameTableOptions.cdates.length; d++) {
                     var url = 'https://restapi.publicdata.guru/sec/frames/' + frameTableOptions.tags[t].tag + '/'
-                        + frameTableOptions.tags[t].uom + '/DQ' + frameTableOptions.tags[t].qtrs + '/' + frameTableOptions.cdates[d];
+                        + frameTableOptions.tags[t].uom + '/DQ' + frameTableOptions.tags[t].qtrs + '/'
+                        + frameTableOptions.cdates[d] + '.json';
                     urlsToFetch[url] = {
                         order: requestCount++,
                         tag: frameTableOptions.tags[t].tag,
@@ -1192,15 +1193,15 @@ var ixbrlViewer = {
                         tableData = [];
                         for(var r=0;r<frame.data.length;r++) tableData.push(frame.data[r].slice(0,1).concat(frame.data[r].slice(0,headerColumnLength-1)));
                     }
-                    var headerLabel = frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')';
-                    var rgxHeaderColSpan = new RegExp('colspan="\(\\d+\)">'+ frame.tlabel +' \\('+ ixbrlViewer.durationNames[frame.qtrs]+'\\)');
+                    var headerLabel = frame.label +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')';
+                    var rgxHeaderColSpan = new RegExp('colspan="\(\\d+\)">'+ frame.label +' \\('+ ixbrlViewer.durationNames[frame.qtrs]+'\\)');
                     var match = topHeaderCells.match(rgxHeaderColSpan);
                     //add top header cells over date & value; extend span instead of adding repeat
                     if(match){
                         var extendedColSpan = parseInt(match[1]) + 2;
-                        topHeaderCells = topHeaderCells.replace(rgxHeaderColSpan, 'colspan="' + extendedColSpan + '">'+ frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')')
+                        topHeaderCells = topHeaderCells.replace(rgxHeaderColSpan, 'colspan="' + extendedColSpan + '">'+ frame.label +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')')
                     } else {
-                        topHeaderCells += '<th  class="th-underline-with-break" colspan="2">'+ frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')</th>';
+                        topHeaderCells += '<th  class="th-underline-with-break" colspan="2">'+ frame.label +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')</th>';
                     }
                     //add the new rows
                     var tableRowIndex = 0, frameRowIndex = 0;
@@ -1243,7 +1244,7 @@ var ixbrlViewer = {
                                 return typeof(data)=='undefined' || data===null?'':'<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh .replace(/-/g,'')
                                     + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+2]) + '</a>'
                         }}, //this version of value includes the units is formatted with commas
-                        {   title: frame.tlabel, export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},  //unformatted clean version for export
+                        {   title: frame.label, export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},  //unformatted clean version for export
                         {   title: "units", export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},
                         {   title: "version", export: false, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}}
                     ]);
@@ -1376,7 +1377,7 @@ var ixbrlViewer = {
 
     showMap: function(oVars){
         //get frame data via REST API (S3 bucket)
-        var url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs+'/'+ this.cdate(oVars.ddate, oVars.qtrs);
+        var url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs+'/'+ this.closestCalendricalPeriod(oVars.ddate, oVars.qtrs);
         var self = this;
         self.getRestfulData(url,
             function(frame){
@@ -1498,12 +1499,12 @@ var ixbrlViewer = {
     },
     parseTsPoint: function(tsPoint){
         var parsedPoint = {
-            date: tsPoint[0],
-            y: tsPoint[1],
-            adsh: tsPoint[2],
-            rptPeriod: tsPoint[3],
-            rptForm: tsPoint[4],
-            coName: tsPoint[5]
+            date: tsPoint.end,
+            start: tsPoint.start,
+            y: tsPoint.val,
+            adsh: tsPoint.accn,
+            rptPeriod: 'FY' + tsPoint.fy + ' ' + tsPoint.fp,
+            rptForm: tsPoint.form 
         };
         parsedPoint.ageRank = parseFloat(parsedPoint.rptPeriod.substring(0,4) + '.' + (parsedPoint.rptPeriod.substr(-2,2)=='FY'?'4':parsedPoint.rptPeriod.substr(-1,1)));
         return parsedPoint;
@@ -1529,7 +1530,7 @@ var ixbrlViewer = {
                 '</select>';
     },
     playerIndexes: function(params){
-        var cached = this.secDataCache['https://restapi.publicdata.guru/sec/timeseries/' + params.tag + '/cik' + params.cik];
+        var cached = this.secDataCache['https://restapi.publicdata.guru/sec/timeseries/' + params.tag + '/cik' + params.cik+'.json'];
         if(cached){
             var tsObject = cached[params.tag]['cik'+params.cik];
             if(tsObject['units'][params.uom] && tsObject['units'][params.uom][ixbrlViewer.durationPrefix+params.qtrs]){
@@ -1566,7 +1567,7 @@ var ixbrlViewer = {
     fetchTimeSeriesToCache: function(oVars, callBack){
         //1. get the full list of urls to fetch from saved series and companies
         var self = this,
-            clickedUrl = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik,
+            clickedUrl = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik + '.json',
             savedTimeSeries = self.getSavedTimeSeries(),
             savedCompanies = self.getComparedCompanies(),
             fldSC = self.localStorageFields.comparedCompanies,
@@ -1584,7 +1585,7 @@ var ixbrlViewer = {
         for(i=0; i<savedTimeSeries.length; i++){
             if(savedTimeSeries[i][0]){
                 url = 'https://restapi.publicdata.guru/sec/timeseries/' + savedTimeSeries[i][fldTS.tag]
-                    + '/cik' + savedTimeSeries[i][fldTS.cik];
+                    + '/cik' + savedTimeSeries[i][fldTS.cik] + '.json';
                 if(url != clickedUrl){
                     requests.push({
                         url: url,
@@ -1600,7 +1601,7 @@ var ixbrlViewer = {
         for(i=0; i<savedCompanies.length; i++){
             if(savedCompanies[i][0]){
                 url = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag
-                    + '/cik' + savedCompanies[i][fldSC.cik];
+                    + '/cik' + savedCompanies[i][fldSC.cik] + '.json';
                 if(url != clickedUrl){
                     requests.push({
                         url: url,
@@ -1644,7 +1645,7 @@ var ixbrlViewer = {
         } else {
             var dbUrl = false;
             if(window.location.href.indexOf('maker.publicdata')!=-1){ //use database for maker.publicdata.guru
-                var uParts = url.split('/');  //e.g. 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
+                var uParts = url.split('/');  //e.g. 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.closestCalendricalPeriod(oVars.ddate, oVars.qtrs),
                 switch(uParts[4]){
                     case 'frames':
                         dbUrl = 'http://maker.publicdata.guru/sec/api.php?process='+uParts[4]+'&t='+uParts[5]+'&u='+encodeURIComponent(uParts[6]) +'&q='+uParts[7]+'&d='+uParts[8];
@@ -1740,12 +1741,22 @@ var ixbrlViewer = {
         return (uom=='USD'?'$':'') + num.toLocaleString() + '&nbsp;' + uom;
     },
 
-    cdate: function(ddate, duration){  //frames are
-        var closestEndMonth = new Date(ddate);
-        return closestEndMonth.getUTCFullYear() + (duration==4?'':'C' + (Math.floor(closestEndMonth.getUTCMonth()/3)+1));
+    closestCalendricalPeriod: function(end, durationInQuarters) {
+        let workingEnd = new Date(end);
+        switch(parseInt(durationInQuarters)){
+            case 0:
+                return 'CY' + workingEnd.getFullYear() + 'Q' + (Math.floor(workingEnd.getMonth()/3) + 1) + 'I';
+            case 1:
+                workingEnd.setDate(end.getDate()-40);
+                return 'CY' + workingEnd.getFullYear() + 'Q' + (Math.floor(workingEnd.getMonth()/3) + 1);
+            case 4:
+                workingEnd.setDate(end.getDate()-180);
+                return 'CY' + workingEnd.getFullYear();
+        }
+        return null;  //if qtrs not 0, 1 or 4;
     },
 
-//global vars
+    ////////////////////////  global vars  /////////////////////////////////////////
     htmlTemplates: {
         popWindow:
             '<div id="popviz" style="width:80%;">' +
