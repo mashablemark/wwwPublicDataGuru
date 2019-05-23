@@ -326,12 +326,7 @@ var ixbrlViewer = {
         if(!self.makeXAxisSelector(oVars.tag, oVars.uom, oVars.qtrs)) disable.push(2);
         $('#popviz').tabs({'disabled': disable});
         $('a[href="#tabs-ts"]').click(function(){$('#save, #compare').show()});
-        $('a[href="#tabs-map"]').click(function(){
-            if(!ixbrlViewer.bubbleMap)self.showMap(oVars);
-            $('#save, #compare').hide();
-        });
-        $('a[href="#tabs-scatter"]').click(function(){
-            if(!ixbrlViewer.scatterChart)self.showScatterChart(oVars);
+        $('a[href="#tabs-info"]').click(function(){
             $('#save, #compare').hide();
         });
         $('a[href="#tabs-frame"]').click(function(){
@@ -393,14 +388,6 @@ var ixbrlViewer = {
                 oChart.chart.renderTo = $('#tschart')[0];
                 if(self.barChart) self.barChart.destroy();
                 self.barChart = new Highcharts.Chart(oChart);
-                if(self.scatterChart) {
-                    self.scatterChart.destroy();
-                    self.scatterChart = false;
-                }
-                if(self.bubbleMap){
-                    self.bubbleMap.remove();
-                    self.bubbleMap = false;
-                }
                 $('#popviz_durations, #popviz_units').change(function(){
                     var duration = $('#popviz_durations').val();
                     self.vars.qtrs = (duration && duration.substr(2)) || self.vars.qtrs;
@@ -615,472 +602,6 @@ var ixbrlViewer = {
         }
     },
 
-    showScatterChart: function(oVars){
-        //get data for both frames via REST API (S3 bucket)
-        var self = this,
-            xFrame,
-            yFrame,
-            oChart,
-            xUrl,
-            yUrl = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.closestCalendricalPeriod(oVars.end, oVars.qtrs)+'.json',
-            ply,
-            $playerControls,
-            $home,
-            $playPause,
-            $slider,
-            playing = false,
-            frameChanged = false,
-            cancelChange = false,
-            animationTimer = false,
-            newFrameFetches = 0;
-        
-        self.getRestfulData(
-            yUrl,
-            function(frame){   //parallel fetch of y Axis data
-                yFrame = frame;
-                self.vars.sic = self.getSicFromFrame(yFrame, self.vars.cik);
-                $('#scatterchart').html('Y-Axis data successfully loaded for ' + oVars.tag);
-                $('#scattercontrols')
-                    .html(self.makeXAxisSelector(oVars.tag, oVars.uom, oVars.qtrs) + self.makeSicFilterHTML(self.vars.sic))
-                    .find('select.sic_filter')
-                    .change(function(){
-                        oVars.sicFilter = $(this).val();
-                        if(self.scatterChart){
-                            self.scatterChart.destroy();
-                            self.scatterChart = false;
-                        }
-                        oChart = makeScatterChartObject(xFrame, yFrame, oVars);
-                        linLogControl(oVars);
-                        oChart.chart.renderTo = $('#scatterchart')[0];
-                        self.scatterChart = new Highcharts.Chart(oChart);
-                    })
-                    .end()
-                    .find('#scatter-x-axis-select')
-                    .change(function(){
-                        var $xSelector = $(this),
-                            xTagValue = $xSelector.val();
-                        $xSelector.find('option[init="instructions"]').remove();
-                        if(oVars.xTag != xTagValue) {
-                            oVars.xTag = xTagValue;
-                            $xSelector.attr('disabled', 'disabled');
-                            xUrl = 'https://restapi.publicdata.guru/sec/frames/' + oVars.xTag + '/' + oVars.uom + '/DQ' + oVars.qtrs + '/' + self.closestCalendricalPeriod(oVars.end, oVars.qtrs);
-                            self.getRestfulData(xUrl,
-                                function (frame) {   //parallel fetch of x Axis data
-                                    xFrame = frame;
-                                    self.setHashSilently('y=' + oVars.tag + '&x=' + oVars.xTag + '&u=' + oVars.uom + '&q='
-                                        + oVars.qtrs + '&d=' + oVars.ddate + '&c=s');
-                                    if (self.scatterChart) {
-                                        self.scatterChart.destroy();
-                                        self.scatterChart = false;
-                                    }
-                                    var oChart = makeScatterChartObject(xFrame, yFrame, oVars);
-                                    linLogControl(oVars);
-                                    oChart.chart.renderTo = $('#scatterchart')[0];
-                                    self.scatterChart = new Highcharts.Chart(oChart);
-                                    $xSelector.removeAttr('disabled');
-                                    ply = self.playerIndexes(oVars);
-                                    if(ply.dateIndex.length>1 && $('#scattercontrols .player_controls').length==0){
-                                        $playerControls = $('#scattercontrols').append(self.htmlTemplates.playerControls);
-                                        $home = $playerControls.find('.player_home').button({icon: "ui-icon-home", 'disabled': true})
-                                            .click(function(){
-                                                stopAnimation(); //turn off any animation
-                                                cancelChange = false;
-                                                newFrameFetches=0;
-                                                changeFrame(ply.homeIndex);
-                                            });
-                                        $playPause = $playerControls.find('.player_play').button({icon: "ui-icon-play"})
-                                            .click(function(){
-                                                if($playPause.find('.ui-icon-play').length){
-                                                    startAnimation();
-                                                } else {
-                                                    stopAnimation();
-                                                }
-                                                //set slider index to zero
-                                                //start animation (which changes play icon to pause icon)
-                                            });
-                                        $slider = $playerControls.find('.player_slider').slider({
-                                                min: 0,
-                                                max: ply.dateIndex.length -1,
-                                                value: ply.homeIndex,
-                                                start: function() {
-                                                    stopAnimation(); //user starts slide: halt any animation
-                                                },
-                                                stop: function() {
-                                                    cancelChange = false;
-                                                    changeFrame($slider.slider('value')); //force change on user slide
-                                                },
-                                            change: function() {
-                                                $home.button(ply.homeIndex == $slider.slider('value') ? 'disable' : 'enable');
-                                            }
-                                        }).mousemove(function(e){
-                                            if(e.currentTarget!=e.target) return;
-                                                var index = Math.round(e.offsetX/this.offsetWidth * (ply.dateIndex.length-1)),
-                                                    $st = $('#sliderTip');
-                                            $st.html(ply.dateIndex[index]).show()
-                                                .css('left', (index*this.offsetWidth/ply.dateIndex.length-$st.width()/2)+'px');
-                                        }).mouseout(function(e){$('#sliderTip').hide()});
-                                    }
-                                },
-                                function(failedUrl) {
-                                    $xSelector.removeAttr('disabled');
-                                    fetch_error(failedUrl)
-                                })
-                        }
-                    });
-                if(oVars.xTag){ //if preselected
-                    $('#scatter-x-axis-select').val(oVars.xTag);
-                    oVars.xTag = ''; //make it think its a new value
-                    $('#scatter-x-axis-select').change(); //trigger load and chart draw
-                }
-            },
-            fetch_error
-        );
-
-        
-        /*var url = 'https://restapi.publicdata.guru/sec/timeseries/'+oVars.tag+'/cik'+oVars.cik;
-        self.getRestfulData(url, function(timeseries){  //this should be from memory
-            //todo: make the play controls
-        });*/
-
-        function fetch_error(url){
-            $('#scatterchart').html('Unable to load snapshot from API for ' + url);
-        }
-
-        function linLogControl(oVars){
-            //disabled for now with flase in if statement on following line
-            if(false && oVars.positiveValuesX && oVars.positiveValuesY){
-                if(!$('#linlog').length){
-                    var $controls = $('#scattercontrols'),
-                    $linlog = $controls.append(self.htmlTemplates.linLogToggle).find('#linlog');
-                    $linlog
-                        .controlgroup({icon: false})
-                        .find('input').click(function() {
-                            var type = this.value;
-                    });
-                }
-            } else {
-                $('#linlog').remove();
-            }
-        }
-
-
-        function startAnimation(){
-            playing = true;
-            frameChanged = false;
-            cancelChange = false;
-            var sliderValue = $slider.slider("value"),
-                newSliderValue = (sliderValue==ply.dateIndex.length-1 || sliderValue==ply.homeIndex)?0:sliderValue+1;
-            $slider.slider("value", newSliderValue);
-            changeFrame(newSliderValue);
-            $playPause.button({icon: "ui-icon-pause"});
-        }
-
-        function stopAnimation(){
-            clearTimeout(animationTimer);
-            animationTimer = false;
-            cancelChange = true;
-            playing = false;
-            frameChanged = false;
-            $playPause.button({icon: "ui-icon-play"});
-        }
-        var newDate, yUrlNew, xUrlNew, newDateIndex;
-        function changeFrame(dateIndex){
-            newDateIndex = dateIndex;
-            newDate = ply.dateIndex[dateIndex];
-            yUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.closestCalendricalPeriod(newDate, oVars.qtrs)+'.json';
-            xUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.xTag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.closestCalendricalPeriod(newDate, oVars.qtrs)+'.json';
-            newFrameFetches = 0;
-            fetchNew(xUrlNew);
-            fetchNew(yUrlNew);
-            function fetchNew(url){
-                self.getRestfulData(url, function(data){
-                        newFrameFetches++;
-                        if(newFrameFetches==2 && !animationTimer) makeFrame();
-                    },
-                    function(url){
-                        stopAnimation();  //REST fetch failure:  no animation for this frame
-                    }
-                )
-            }
-
-        }
-        function makeFrame(){
-            var xFrame = self.secDataCache[xUrlNew],
-                yFrame = self.secDataCache[yUrlNew],
-                updatedSeries = makeScatterSeries(xFrame, yFrame, oVars),
-                hcSeries = ixbrlViewer.scatterChart.series,
-                fastAlgo = hcSeries[0].data.length>10000, //note: the updates are much faster in HC 6.x!
-                pt, ptTree = {}, s, i;
-            //the setData method takes 64ms vs. 900ms looping through point updates for 7000 points
-            if(fastAlgo){  //algorithm switching
-                for(s=0; s<hcSeries.length;s++) {
-                    if(updatedSeries[s]){
-                        hcSeries[s].setData(updatedSeries[s].data, false, false, false);
-                    } else {
-                        hcSeries[s].setData([], false, false, false);
-                    }
-                }
-            } else {  //animate point moves = slower algorithm, but can be used for fewer points
-                for(s=0; s<updatedSeries.length;s++){
-                    for(i=0;i<updatedSeries[s].data.length;i++){
-                        ptTree[updatedSeries[s].data[i].id] = updatedSeries[s].data[i];
-                    }
-                }
-                for(s=0; s<hcSeries.length;s++){
-                    for(i=hcSeries[s].data.length-1;i>=0;i--){ //better able to push new and slice out old
-                        if(ptTree[hcSeries[s].data[i].id]){
-                            //update point:
-                            hcSeries[s].data[i].update(
-                                {x: ptTree[hcSeries[s].data[i].id].x, y: ptTree[hcSeries[s].data[i].id].y},
-                                false,
-                                true
-                            );
-                            delete ptTree[hcSeries[s].data[i].id];
-                        } else {
-                            //delete point:
-                            hcSeries[s].removePoint(i, false, false);
-                        }
-                    }
-                }
-                for(var id in ptTree){
-                    if(ptTree[id]){
-                        //add point:
-                        hcSeries[ptTree[id].hl?1:0].addPoint(ptTree[id], false, false, true);
-                    }
-                }
-            }
-            ixbrlViewer.scatterChart.setTitle({ text: titleText(xFrame, yFrame)}, null, false);
-            ixbrlViewer.scatterChart.redraw(!fastAlgo);
-            $slider.slider("value", newDateIndex); //set if not already
-            if(playing) nextFrame();
-        }
-
-        function nextFrame(){
-            if($slider.slider("value")==ply.dateIndex.length-1){
-                stopAnimation();
-            } else {
-                changeFrame(newDateIndex+1);
-                var ms = Math.min(Math.max(250, 4000/ply.dateIndex.length), 1000);
-                animationTimer = setTimeout(function(){
-                    clearTimeout(animationTimer);
-                    animationTimer = false;
-                    if(newFrameFetches==2) makeFrame();
-                }, ms);
-            }
-        }
-        function makeScatterChartObject(xFrame, yFrame, callingParams){
-            var scatterSeries = makeScatterSeries(xFrame, yFrame, callingParams); //sets callingParam values used in next statement
-            var oChart = {
-                chart: {
-                    type: 'scatter',
-                    zoomType: 'xy'
-                },
-                legend: {enabled: true},
-                tooltip: {
-                    //formatter: function(){console.log(this)},
-                    useHTML: true,
-                    formatter: function () {
-                        var pt = this.point;
-
-                        return '<b>' + pt.name + '</b><div style="color: ' + pt.divColor + '"><b>' + pt.divName + '</b><br>'+ixbrlViewer.sicCode[pt.sic]+'</div>' +
-                            '<br><br>' +
-                            '<table>' +
-                            '<tr>' +
-                            '<td>' + yFrame.label + '</td><td style="text-align: right">' + self.numberFormatter(pt.y, callingParams.uom) + '</td>' +
-                            '</tr>' +
-                            '<tr>' +
-                            '<td>' + xFrame.label + '</td><td style="text-align: right">' + self.numberFormatter(pt.x, callingParams.uom) + '</td>' +
-                            '</tr>' +
-                            '</table>' +
-                            '<div><i>click on point to navigate to source disclosure</i></div>';
-                    }
-                },
-                plotOptions: {
-                    scatter: {
-                        cursor: 'pointer',
-                        point: {
-                            events: {
-                                click: function () {
-                                    var fld = self.frameDataCol,
-                                        factRow = yFrame.data[this.iy];
-                                    location.href = '/sec/viewer.php?doc=' + factRow[fld.cik]
-                                        +'/'+factRow[fld.adsh].replace(self.rgxAllDash,'')+'/'+ factRow[fld.adsh]
-                                        +'-index&u='+yFrame.uom+'&q='+yFrame.qtrs+'&d='+yFrame.ddate
-                                        +'&t='+yFrame.tag;
-                                }
-                            }
-                        },
-                        turboThreshold: 10000
-                    }
-                },
-                title: {
-                    text: titleText(xFrame, yFrame)
-                },
-                subtitle: {
-                    text: ''
-                },
-                credits: {
-                    enabled: true,
-                    text: 'data provided by U.S. Securities and Exchange Commission',
-                    href: 'https://www.sec.gov'
-                },
-                yAxis: {
-                    type: (callingParams.log?'logarithmic':'linear'),
-                    //min: 0,
-                    title: {
-                        text: yFrame.uom
-                    },
-                    labels: {
-                        formatter: function() {
-                            return self.axesLabelFormatter(this);
-                        }
-                    }
-                },
-                xAxis: {
-                    type: (callingParams.log?'logarithmic':'linear'),
-                    //min: 0,
-                    title: {
-                        text: xFrame.uom
-                    },
-                    labels: {
-                        formatter: function() {
-                            return self.axesLabelFormatter(this);
-                        }
-                    }
-                },
-                series: scatterSeries
-            };
-            if(callingParams.positiveValuesX && !callingParams.log){
-                oChart.xAxis.min = 0;
-            }
-            if(callingParams.positiveValuesY && !callingParams.log){
-                oChart.yAxis.min = 0;
-            }
-            return oChart;
-            //series format: [{data: [{ x: 95, y: 95, z: 13.8, name: 'BE', country: 'Belgium' },...]}, color:'blue',name'asdf']
-        }
-
-        function titleText(xFrame, yFrame){
-             return yFrame.label + ' versus ' + xFrame.label + ' as reported for ' + (xFrame.qtrs == 0 ? '' : (xFrame.qtrs == 1 ? 'quarter' : 'year') + ' ending ') + xFrame.ddate
-        }
-
-        function makeScatterSeries(xFrame, yFrame, callingParams){
-            var savedCompanies = self.getComparedCompanies();
-            var highlightCIKs = ['cik'+parseInt(oVars.cik)],
-                highlightPoints = {},
-                i,
-                flds = self.localStorageFields.comparedCompanies;
-            //saved companies that are selected
-            for(i=0; i<savedCompanies.length; i++){
-                highlightCIKs.push('cik'+parseInt(savedCompanies[i][flds.cik]));
-            }
-            var nonHighlightSerie = [],
-                xData = xFrame.data,
-                yData = yFrame.data,
-                positiveValuesX = true,  //calculated for axis min value and log option
-                positiveValuesY = true,
-                ix = 0,
-                iy = 0,
-                inFilter,
-                ptSic,
-                ptSicDivision,
-                divisionName = false,
-                color,
-                frameDataCol = self.frameDataCol,
-                pt;
-            //sort by CIKs
-            xData.sort(function(a,b){return b[frameDataCol.cik] - a[frameDataCol.cik]});
-            yData.sort(function(a,b){return b[frameDataCol.cik] - a[frameDataCol.cik]});
-            while(xData.length>ix && yData.length>iy){
-                if(xData[ix][frameDataCol.cik] == yData[iy][frameDataCol.cik]){
-                    ptSic = xData[ix][frameDataCol.sic];
-                    ptSicDivision = self.getSicDivision(ptSic);
-                    divisionName = ptSicDivision?ptSicDivision.name:'SIC code not available';
-                    switch(callingParams.sicFilter || 'all'){
-                        case "all":
-                            inFilter = true;
-                            break;
-                        case "div":
-                            inFilter = (ptSic >=callingParams.sicDivision.min && ptSic<=callingParams.sicDivision.max);
-                            break;
-                        case "ind":
-                            inFilter = (callingParams.sic == ptSic);
-                            break;
-                    }
-                    if(inFilter) {
-                        color = ptSicDivision?ptSicDivision.color:'grey';
-                        if(xData[ix][frameDataCol.value]<=0) positiveValuesX = false;
-                        if(yData[iy][frameDataCol.value]<=0) positiveValuesY = false;
-                        pt =  {
-                            x: xData[ix][frameDataCol.value],
-                            y: yData[iy][frameDataCol.value],
-                            id: 'cik' + xData[ix][frameDataCol.cik],
-                            ix: ix,
-                            iy: iy,
-                            sic: ptSic,
-                            divColor: color,
-                            divName: divisionName,
-                            name: xData[ix][frameDataCol.name],
-                            marker: {
-                                lineColor: color
-                            }
-                        };
-                        if(highlightCIKs.indexOf(pt.id) !== -1){
-                            delete pt.marker;
-                            highlightPoints[pt.id] = pt;
-                        } else {
-                            nonHighlightSerie.push(pt);
-                        }
-                    }
-                    ix++;
-                    iy++;
-                } else {
-                    if(xData[ix][frameDataCol.cik] > yData[iy][frameDataCol.cik]){
-                        ix++;
-                    } else {
-                        iy++;
-                    }
-                }
-            }
-            var scatterSeries = [{
-                marker: {
-                    fillColor: 'rgba(0,0,0,0)',
-                    symbol: 'diamond',
-                    lineWidth: 1,
-                    states: {
-                        hover: {
-                            fillColor: 'rgba(0,0,0,1)'
-                        }
-                    }
-                },
-                id: 'scatter-frame',
-                data: nonHighlightSerie,
-                showInLegend: false
-            }];
-            var cIndex = 0;
-            for(i=0; i<highlightCIKs.length; i++){
-                if(highlightPoints[highlightCIKs[i]]){
-                    scatterSeries.push({
-                        marker: {
-                            symbol: 'circle',
-                            fillColor: self.barChart.options.colors[cIndex],
-                            lineColor: 'black',
-                            lineWidth: 1
-                        },
-                        data: [highlightPoints[highlightCIKs[i]]],
-                        name: highlightPoints[highlightCIKs[i]].name,
-                        id: 'scatter-cik'+ highlightCIKs[i],
-                        showInLegend: true
-                    });
-                    cIndex++;
-                }
-            }
-            callingParams.positiveValuesX = positiveValuesX;
-            callingParams.positiveValuesY = positiveValuesY;
-            if(!(callingParams.positiveValuesY && callingParams.positiveValuesY)) callingParams.log = false;
-            return scatterSeries;
-        }
-    },
 
     showFrameTable: function(oVars){
         var self = this,
@@ -1375,128 +896,6 @@ var ixbrlViewer = {
         }
     },
 
-    showMap: function(oVars){
-        //get frame data via REST API (S3 bucket)
-        var url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs+'/'+ this.closestCalendricalPeriod(oVars.ddate, oVars.qtrs);
-        var self = this;
-        self.getRestfulData(url,
-            function(frame){
-                self.vars.sic = self.getSicFromFrame(frame, self.vars.cik);
-                var oMap = makeMapObject(frame);
-                self.bubbleMap = $('#mapchart').html('').height(500).vectorMap(oMap).vectorMap('get', 'mapObject');
-
-                $('#maptitle').html(self.makeTitle(frame.label, oVars.qtrs, oVars.ddate));
-                $('#mapcontrols')
-                    .html(self.makeSicFilterHTML(self.vars.sic))
-                    .find('select.sic_filter').change(function(){
-                        oVars.sicFilter = $(this).val();
-                        self.bubbleMap.remove();
-                        oMap = makeMapObject(frame);
-                        self.bubbleMap = $('#mapchart').html('').height(500).vectorMap(oMap).vectorMap('get', 'mapObject');
-                });
-                $('#mapdatalinks').html('data from <a href="'+url+'">'+url+'</a>');
-                self.setHashSilently('y=' + oVars.tag +'&d=' +  oVars.ddate  +'&u=' +  oVars.uom  +'&q=' +  oVars.qtrs +'&c=m');
-            },
-            function(){
-                $('#mapchart').html('Unable to fetch snapshot ' + url);
-            });
-        function makeMapObject(frame){
-            var frameDataCol = self.frameDataCol;
-            var oMap = {
-                map: 'us_aea_en',
-                backgroundColor: 'rgb(179, 224, 255)',
-                zoomAnimate: false,
-                zoomOnScrollSpeed: 1,
-                zoomOnScroll: true,
-                zoomStep: 2,
-                regionStyle: {
-                    initial: {
-                        fill: 'rgb(207, 226, 207)',
-                        stroke: 'black',
-                        "stroke-width": 0.5
-                    },
-                    hover: {
-                        cursor: 'default'
-                    }
-                },
-                onRegionTipShow: function(e, oTip, code){
-                    e.preventDefault();
-                },
-                onMarkerTipShow: function(e, oTip, index){
-                    var factRow = frame.data[oMap.markers[index].i],
-                        sicDivision = self.getSicDivision(factRow[self.frameDataCol.sic]);
-                    oTip.html((sicDivision?'<div style="color:'+sicDivision.color+'">'+sicDivision.name+':</div>':'')
-                        + factRow[frameDataCol.name] + ':<br>'
-                        + self.numberFormatter(factRow[frameDataCol.value], frame.uom)
-                        + (factRow[frameDataCol.versions]>1?'<br><i>Value is a revision from the entity\'s initial disclosure</i>':'')
-                        + '<br><br><i>click marker to view source filing</i>'
-                    );
-                },
-                onMarkerClick: function(e, index){
-                    var factRow = frame.data[oMap.markers[index].i];
-                    location.href = '/sec/viewer.php?doc=' + factRow[frameDataCol.cik]
-                        +'/'+factRow[frameDataCol.adsh].replace(self.rgxAllDash,'')+'/'+ factRow[frameDataCol.adsh]
-                        +'-index&u='+frame.uom+'&q='+frame.qtrs+'&d='+frame.ddate
-                        +'&t='+frame.tag;
-                },
-                markers: [],
-                markerStyle: {
-                    initial: {
-                        fill: '#F8E23B',
-                        stroke: '#383f47'
-                    }
-                }
-            };
-            var min = null, max = null, i, inFilter;
-            for(i=0; i<frame.data.length; i++){ //find min and max values for scaling
-                if(frame.data[i][frameDataCol.countryRegion].substr(0,2)=='US' && !isNaN(frame.data[i][frameDataCol.value])){
-                    if(!isNaN(min)){
-                        if(min>frame.data[i][frameDataCol.value]) min=frame.data[i][frameDataCol.value];
-                        if(max<frame.data[i][frameDataCol.value]) max=frame.data[i][frameDataCol.value];
-                    } else {
-                        min = max = frame.data[i][frameDataCol.value];
-                    }
-                }
-            }
-            frame.data.sort(function(a,b){return b[frameDataCol.value]-a[frameDataCol.value]}); //smaller bubbles on top
-            var R_MAX = 25, category, r, stokeColor;
-            for(i=0; i<frame.data.length; i++){
-                if(frame.data[i][frameDataCol.latLng]){
-                    switch(oVars.sicFilter || 'all'){
-                        case "all":
-                            inFilter = true;
-                            break;
-                        case "div":
-                            inFilter = (frame.data[i][frameDataCol.sic] >=oVars.sicDivision.min
-                                && frame.data[i][frameDataCol.sic]<=oVars.sicDivision.max);
-                            break;
-                        case "ind":
-                            inFilter = (oVars.sic == frame.data[i][frameDataCol.sic]);
-                            break;
-                        default:
-                            console.log('filter error in makeMapObject');
-                    }
-                    if(inFilter){
-                        r = Math.sqrt(Math.abs(frame.data[i][frameDataCol.value]))/Math.abs(Math.sqrt(max))*R_MAX+1;
-                        stokeColor = frame.data[i][frameDataCol.value]>0?'black':'red';
-                        category = self.getSicDivision( frame.data[i][frameDataCol.sic]);
-                        oMap.markers.push({
-                            latLng: frame.data[i][frameDataCol.latLng],
-                            i: i,
-                            name:  frame.data[i][frameDataCol.name],
-                            value:  frame.data[i][frameDataCol.value],
-                            style:{
-                                r: r,
-                                fill: frame.data[i][frameDataCol.cik]==oVars.cik?self.hcColors[0]:(category?category.color:'grey'),
-                                stroke: stokeColor
-                            }
-                        });
-                    }
-                }
-            }
-            return oMap;
-        }
-    },
     parseTsPoint: function(tsPoint){
         var parsedPoint = {
             date: tsPoint.end,
@@ -1546,21 +945,6 @@ var ixbrlViewer = {
                 }
                 return {dateIndex: playerIndex, homeIndex: homeIndex}
             }
-        }
-    },
-    makeXAxisSelector: function(yTag, uom, qtrs){
-        var htmlOptions = '',
-            branch = this.standardTagTree[ixbrlViewer.durationPrefix+qtrs][uom];
-        if(branch){
-            branch.sort();
-            for(var i=0;i<branch.length;i++){
-                if(yTag != branch[i]) htmlOptions += '<option value="'+branch[i]+'">'+branch[i]+ '</option>';
-            }
-        }
-        if(htmlOptions){
-            return '<select id="scatter-x-axis-select"><option init="instructions" selected="selected">select a frame for the X-Axis</option>' + htmlOptions + '</select>'
-        } else {
-            return false;
         }
     },
 
@@ -1763,14 +1147,12 @@ var ixbrlViewer = {
             '<button id="compare">compare</button><button id="save">save</button><span id="saved"></span>' +
             '<ul>' +
             '  <li><a href="#tabs-ts">time series</a></li>' +
-            '  <li><a href="#tabs-map"><span class="strikethrough">US map</span></a></li>' +
-            '  <li><a href="#tabs-scatter"><span class="strikethrough">scatter plot</span></a></li>' +
             '  <li><a href="#tabs-frame">all reporting companies</a></li>' +
+            '  <li><a href="#tabs-info">fact info</a></li>' +
             '</ul>' +
             '<div id="tabs-ts"><div id="tschart">loading... please wait</div><div id="tscontrols"></div></div>' +
-            '<div id="tabs-map"><div id="maptitle"></div><div id="mapchart">loading... please wait</div><div id="mapcontrols"></div><div id="mapdatalinks"></div></div>' +
-            '<div id="tabs-scatter"><div id="scatterchart">loading... please wait</div><div id="scattercontrols"></div></div>' +
             '<div id="tabs-frame"><div class="framecontrols">loading... please wait</div></div>' +
+            '<div id="tabs-info">show info about the XBRL fact here</div>' +
             '</div>',
         popOptions:
             '<div id="chart-options">' +
@@ -1787,12 +1169,6 @@ var ixbrlViewer = {
         frameColumnButton:
             '<button class="frameColumnButton"></button>',
         frameControls: '<select id="frameTagSelector"></select><div class="frameSlider"></div><button class="addCdate">Add Date</button></button><div id="frameOptionTags"></div>',
-        linLogToggle: '<div id="linlog">' +
-            '<label for="scatterLinear">linear</label>' +
-            '<input type="radio" name="scatterAxesType" id="scatterLinear" value="linear" checked="checked">' +
-            '<label for="scatterLogarithmic">logarithmic</label>' +
-            '<input type="radio" name="scatterAxesType" id="scatterLogarithmic" value="logarithmic">' +
-            '</div>',
         toolTip: '<div class="tagDialog"><div class="tagDialogText">say something</div></div>',
         playerControls: '<fieldset class="player_controls">' +
             '<legend>date controls:</legend>' +
@@ -1854,7 +1230,8 @@ var ixbrlViewer = {
     rgxAllDash: /-/g,
     durationPrefix: 'DQ',  //after API update this will be 'DQ'
     standardTaxonomies: ['us-gaap','ifrs','dei','country','invest','currency','srt','exch','stpr','naics','rr','sic'],
-    standardTagTree: {}, //filled on doc ready to provide denominator choices in scatter plot
+    //todo:  use MetaLinks.json to get names
+    standardTagTree: {}, //filled on doc ready to provide choices in frame table viewer
     contextTree: {}, //filled on doc ready to provide period (duration) lookup
     unitTree: {} //filled on doc ready to provide units lookup
 };
@@ -2013,8 +1390,6 @@ $(document).ready(function() {
             ixbrlViewer.openPopupVisualization(
                 ixbrlViewer.vars,
                 function(){ //callback after barChart is loaded
-                    if(hash.x) $('a[href="#tabs-scatter"]').click(); //trigger scatter chart load
-                    if(hash.c=='m') $('a[href="#tabs-map"]').click(); //trigger map load
                     if(hash.c=='f') $('a[href="#tabs-frame"]').click(); //trigger frame table load
                 });
         }
