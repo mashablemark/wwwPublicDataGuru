@@ -88,12 +88,15 @@ exports.handler = async (event, context) => {
             let fileBody = await common.readS3(event.path + event.files[i].name);
             console.log('html length: '+ fileBody.length);
             await parseIXBRL(cheerio.load(fileBody), submission);
+            if(submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
+            submission.primaryHTML = event.files[i].name;
             console.log(submission.counts);
         }
         if(XBRLDocuments.XBRL[event.files[i].type]) {
             console.log('XBRL '+event.files[i].type + ' doc found: '+ event.path + event.files[i].name);
             let fileBody = await common.readS3(event.path + event.files[i].name);
             await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
+            if(submission.hasXBRL) submission.hasXBRL = event.files[i].name;
             console.log(submission.counts);
         }
     }
@@ -170,7 +173,7 @@ exports.handler = async (event, context) => {
         //     returns (A) confirmation -> next fact) or (B) new timestamp and json for retry (step 2)
         return new Promise(async (resolve, reject) => {
             let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.ccp)+common.q(fact.uom)+"'', '')";  //no json = get request
-            let S3key = 'sec/frames/'+fact.tag+'/'+tag.uom+'/DQ'+tag.qtrs;
+            let S3key = 'sec/frames/'+fact.tag+'/'+fact.uom+'/'+fact.ccp+'.json';
             let needsUpdate = false;
             let frameRecord = await common.runQuery(getCommand);
             let frame = JSON.parse(frameRecord.data[0].json);
@@ -330,7 +333,7 @@ function parseIXBRL($, parsedFacts){
             let xbrl = extractFactInfo(parsedFacts, $, elem);
             if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
                 if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
-                    let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom+':'+xbrl.end;
+                    let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom.label+':'+xbrl.end;
                     if(!parsedFacts.facts[factKey]){
                         parsedFacts.facts[factKey] = xbrl;
                         parsedFacts.hasIXBRL = true;
@@ -467,13 +470,13 @@ function xbrlToNumber(text, format, scale){
 }
 
 async function saveXBRLSubmission(s){
-    console.log(JSON.stringify(s)); //debug only!!!
+    //console.log(JSON.stringify(s)); //debug only!!!
     //save main submission record into fin_sub
     let q = common.q,
         start = new Date(),
         sql = 'INSERT INTO fin_sub(adsh, cik, name, sic, fye, form, period, fy, fp, filed'
             + ', countryba, stprba, cityba, zipba, bas1, bas2, baph, '
-            + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, afs, wksi, '
+            + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, filercategory, '
             +' accepted, prevrpt, detail, instance, nciks, aciks '
             + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey.val+","+q(s.dei.EntityRegistrantName.val)+(s.filing.sic||0)+','
             + q(s.dei.CurrentFiscalYearEndDate.val.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType.val)+q(s.dei.DocumentPeriodEndDate.val)
@@ -483,19 +486,19 @@ async function saveXBRLSubmission(s){
             + q(s.filing.mailingAddress.country)+q(s.filing.mailingAddress.state)+q(s.filing.mailingAddress.city)+q(s.filing.mailingAddress.zip)
             + q(s.filing.mailingAddress.street1)+q(s.filing.mailingAddress.street2)
             + q(s.filing.incorporation?s.filing.incorporation.country:null)+q(s.filing.incorporation?s.filing.incorporation.state:null)+q(s.filing.ein)
-            + q('former')+q('changed')+ q('afs')+q(s.dei.EntityFilerCategory.val)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
-            + q(s.dei.instance.val)+"12342,"+q(s.dei.EntityCentralIndexKey.val, true)+")";
+            + q('former')+q('changed')+q(s.dei.EntityFilerCategory.val)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
+            + q(s.hasIXBRL||s.hasXBRL)+"1,"+q(s.dei.EntityCentralIndexKey.val, true)+")";
     await common.runQuery(sql);
 
     //save numerical fact records into fin_num
+    console.log('saving facts...');
     let i=0, fact, numSQL, version, coreg;
     const numInsertHeader = 'insert into fin_num (adsh, tag, version, coreg, start, end, qtrs, uom, value, footnote) values ';
     numSQL = numInsertHeader;
     for(let factKey in s.facts){
         fact = s.facts[factKey]; //fact object properties: tag, ns, unitRef, contextRef, decimals & val
-        if(fact.unit.nomid && s.unitTree[fact.unit.nomid]) fact.unit.label = s.unitTree[fact.unit.nomid].label || fact.unit.label;
-        if(fact.unit.denomid) fact.label += ' per ' + (s.unitTree[fact.unit.denomid].label || fact.unit.denomid);
-
+        console.log('DEBUG ONLY');  //todo: DEBUG ONLY!!
+        console.log(JSON.stringify(fact));  //todo: DEBUG ONLY!!
         if (fact.member) {
             coreg = fact.member.split(':').pop();
             if (coreg.length > 5 && coreg.substr(-5, 5) == 'Member') coreg = coreg.substr(0, coreg.length - 5);  //hack to match DERA dataset
@@ -503,8 +506,8 @@ async function saveXBRLSubmission(s){
         version = (standardNumericalTaxonomies.indexOf(fact.ns) == -1) ? s.adsh : fact.ns;
         if(version!=s.adsh && coreg=='' && fact.unit) fact.isStandard = true;
         //multi-row inserts are faster
-        numSQL += (i%1000==0?'':', ') + "(" + q(s.adsh) + q(fact.tag) + q(version) + q(coreg) + q(fact.start)  + q(fact.end)  + q(fact.qtrs)
-            + q(fact.unit)+ q(fact.val) + "','')";
+        numSQL += (i%1000==0?'':', ') + "(" + q(s.adsh) + q(fact.tag) + q(version) + q(coreg) + q(fact.start)  + q(fact.end)  + fact.qtrs+','
+            + q(fact.uom.label)+ fact.val + ",'')";
         i++;
         if(i%1000==0){ //but don't let the query get too long.... max packet size 2MB
             await common.runQuery(numSQL);
@@ -513,7 +516,7 @@ async function saveXBRLSubmission(s){
     }
     if(i%1000!=0) await common.runQuery(numSQL);  // execute multi-row insert
     let end = new Date();
-    console.log('wrote ' + i + ' facts for '+s.coname+' ' + s.form + ' for ' + s.fy + s.fp + ' ('+ s.adsh +') in ' + (end-start) + ' ms');
+    console.log('saveXBRLSubmission wrote ' + i + ' facts for '+s.coname+' ' + s.form + ' for ' + s.fy + s.fp + ' ('+ s.adsh +') in ' + (end-start) + ' ms');
 }
 
 /*//////////////////// TEST CARDS  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
