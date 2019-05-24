@@ -20,7 +20,7 @@ var ixbrlViewer = {
     },
     getSicFromFrame: function(fact, cik){
         for(var i=0; i<fact.data.length; i++){
-            if(fact.data[i][this.frameDataCol.cik] == cik) return fact.data[i][this.frameDataCol.sic];
+            if(fact.data[i].cik == cik) return fact.data[i].sic;
         }
         return false;
     },
@@ -322,11 +322,9 @@ var ixbrlViewer = {
                     }
                 }
             });
-        var disable = [];
-        if(!self.makeXAxisSelector(oVars.tag, oVars.uom, oVars.qtrs)) disable.push(2);
-        $('#popviz').tabs({'disabled': disable});
+        $('#popviz').tabs();
         $('a[href="#tabs-ts"]').click(function(){$('#save, #compare').show()});
-        $('a[href="#tabs-info"]').click(function(){
+        $('a[href="#tabs-info"], a[href="#tabs-frame"]').click(function(){
             $('#save, #compare').hide();
         });
         $('a[href="#tabs-frame"]').click(function(){
@@ -702,17 +700,19 @@ var ixbrlViewer = {
                 },
                 {   title: "Location", export: true, className: "dt-body-center" }
             ];
-            var headerColumnLength = columnDefs.length;
-            var topHeaderCells = '<th class="th-no-underline" colspan="3"></th>'; //only 3 visible
+            var row,
+                headerColumnLength = columnDefs.length,
+                topHeaderCells = '<th class="th-no-underline" colspan="3"></th>'; //only 3 visible
             for(var url in frameTableOptions.requestedFrames){
                 var frame = frameTableOptions.requestedFrames[url];
                 if(frame.data){ //will be false if frame DNEresponseCount
-                    frame.data.sort(function(row1,row2){
-                        return parseInt(row1[ixbrlViewer.frameDataCol.cik])-parseInt(row2[ixbrlViewer.frameDataCol.cik])
-                    });
+                    frame.data.sort(function(row1,row2){return parseInt(row1.cik)-parseInt(row2.cik)});
                     if(!tableData){  //first frame get sets left 5 header columns
                         tableData = [];
-                        for(var r=0;r<frame.data.length;r++) tableData.push(frame.data[r].slice(0,1).concat(frame.data[r].slice(0,headerColumnLength-1)));
+                        for(var r=0;r<frame.data.length;r++) {
+                            row = frame.data[r];
+                            tableData.push([row.entityName, row.entityName, row.cik, row.sic, row.accn, row.loc]);
+                        }
                     }
                     var headerLabel = frame.label +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')';
                     var rgxHeaderColSpan = new RegExp('colspan="\(\\d+\)">'+ frame.label +' \\('+ ixbrlViewer.durationNames[frame.qtrs]+'\\)');
@@ -725,24 +725,30 @@ var ixbrlViewer = {
                         topHeaderCells += '<th  class="th-underline-with-break" colspan="2">'+ frame.label +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')</th>';
                     }
                     //add the new rows
-                    var tableRowIndex = 0, frameRowIndex = 0;
+                    var tableRowIndex = 0,
+                        frameRowIndex = 0,
+                        frameRow,
+                        frameCIK,
+                        tableCIK,
+                        newRow;
                     while(frameRowIndex<frame.data.length && tableRowIndex<tableData.length){
-                        var frameRow = frame.data[frameRowIndex];
-                        var frameCIK = parseInt(frameRow[ixbrlViewer.frameDataCol.cik]);
-                        var tableCIK = parseInt(tableData[tableRowIndex][ixbrlViewer.frameDataCol.cik + 1]);  //+1 because of extra name column for export vs. display
+                        frameRow = frame.data[frameRowIndex];
+                        frameCIK = parseInt(frameRow.cik);
+                        tableCIK = parseInt(tableData[tableRowIndex][2]); //
                         if(frameCIK<tableCIK){ //table is missing this CIK = add header cells and fill any preceding data cells with nulls
-                            var newRow = frame.data[frameRowIndex].slice(0,1).concat(frame.data[frameRowIndex].slice(0,headerColumnLength-1), new Array(columnDefs.length-headerColumnLength).fill(null));
+                            newRow = [frameRow.entityName, frameRow.entityName, frameRow.cik, frameRow.sic, frameRow.accn, frameRow.loc]
+                                .concat(new Array(columnDefs.length-headerColumnLength).fill(null));
                             tableData.splice(tableRowIndex-1,0, newRow);
                         }
                         if(frameCIK<=tableCIK){  //insync = add data to current row and advance both indexes together
                             tableData[tableRowIndex].splice(tableData[tableRowIndex].length, 0,
-                                frameRow[ixbrlViewer.frameDataCol.ddate],
+                                frameRow.end,
                                 frame.qtrs,
-                                frameRow[ixbrlViewer.frameDataCol.adsh],
-                                frameRow[ixbrlViewer.frameDataCol.value],
-                                frameRow[ixbrlViewer.frameDataCol.value],
+                                frameRow.accn,
+                                frameRow.val,
+                                frameRow.val,
                                 frame.uom,
-                                frameRow[ixbrlViewer.frameDataCol.versions]);
+                                frameRow.rev);
                             tableRowIndex++;
                             frameRowIndex++;
                         } else { //this frame does not have a row corresponding to the table's current CIK = fill data cell with nulls
@@ -1200,17 +1206,6 @@ var ixbrlViewer = {
         "1": "quarterly",
         "4": "annual"
     },
-    frameDataCol: {
-        name: 0,
-        cik: 1,
-        sic: 2,
-        adsh: 3,
-        countryRegion: 4,
-        latLng: 5,
-        ddate: 6,
-        value: 7,
-        versions: 8
-    },
     localStorageFields: {
         timeSeries: {
             compare: 0,
@@ -1236,7 +1231,7 @@ var ixbrlViewer = {
     unitTree: {} //filled on doc ready to provide units lookup
 };
 
-$(document).ready(function() {
+ixbrlViewer.parseIXBRL = function(iframeDoc) {
     //put any querystring parameters into an object for easy access
     var aParams = location.search.substr(1).split('&'),
         oQSParams = {}, tuplet, i;
@@ -1244,31 +1239,24 @@ $(document).ready(function() {
         tuplet = aParams[i].split('=');
         oQSParams[tuplet[0]] = tuplet[1];
     }
-
-
+    var $frameDoc = $(document.getElementById('app-inline-xbrl-doc').contentDocument);
     //calculate the fiscal to calendar relationship and set document reporting period, fy, adsh and cik
-    var $reportingPeriod = $('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]'),
+    var $reportingPeriod = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]'),
         contextref = $reportingPeriod.attr('contextref'),
         ddate = new Date($reportingPeriod.text()),
         fy = parseInt(contextref.substr(2,4)),
         fq = parseInt(contextref.substr(7,1)),
         fdate = new Date(fy, fq*3, 0);
     ixbrlViewer.deltaMonth = (fy-ddate.getFullYear())*12 + (fdate.getMonth()-ddate.getMonth());
-    ixbrlViewer.reportForm = $('ix\\:nonnumeric[name="dei\\:DocumentType"]').text();
+    ixbrlViewer.reportForm = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentType"]').text();
     ixbrlViewer.reportPeriod = fy + (fq==4?' FY':' Q'+fq);
     var docPart = window.location.href.split('?doc=')[1].split('/');
     ixbrlViewer.cik = docPart[0];
     ixbrlViewer.adsh = docPart[1];
 
-
-    //fix images source links
-    $('img').each(function(){
-        $(this).attr('src', 'https://www.sec.gov/Archives/edgar/data/'+ixbrlViewer.cik+'/'+ixbrlViewer.adsh+'/' + $(this).attr('src'));
-    });
-
     //get iXBRL context tags make lookup tree for contextRef date values and dimensions
     var $context, start, end, ddate, $this, $start, $member;
-    $('xbrli\\:context').each(function(i) {
+    $frameDoc.find('xbrli\\:context').each(function(i) {
         $this = $(this);
         $start = $this.find('xbrli\\:startdate');
         if($start.length==1) {
@@ -1295,7 +1283,7 @@ $(document).ready(function() {
 
     //get iXBRL unit tags and make lookup tree for unitRef values
     var $measure, unitParts;
-    $('xbrli\\:unit').each(function(i) {
+    $frameDoc.find('xbrli\\:unit').each(function(i) {
         $this = $(this);
         $measure = $this.find('xbrli\\:unitnumerator xbrli\\:measure');
         if($measure.length==0) $measure = $this.find('xbrli\\:measure');
@@ -1306,7 +1294,7 @@ $(document).ready(function() {
     });
 
     var $standardTag, navigateToTag = false;
-    $('ix\\:nonfraction').each(function(i){
+    $frameDoc.find('ix\\:nonfraction').each(function(i){
         var xbrl = ixbrlViewer.extractXbrlInfo(this);
         if(xbrl.isStandard){
             if(!xbrl.dim && (xbrl.qtrs ==0 || xbrl.qtrs ==1 || xbrl.qtrs ==4)) {
@@ -1329,7 +1317,7 @@ $(document).ready(function() {
             $(this).addClass("ixbrlViewer_customTaxonomy");
         }
     });
-    $('ix\\:nonfraction').click(function(){
+    $frameDoc.find('ix\\:nonfraction').click(function(){
         var xbrl = ixbrlViewer.extractXbrlInfo(this);
         ixbrlViewer.vars = xbrl;
         if(xbrl.isStandard){
@@ -1394,7 +1382,7 @@ $(document).ready(function() {
                 });
         }
     }
-});
+};
 
 ixbrlViewer.sicCode = {
     100: "Agricultural Production-Crops",

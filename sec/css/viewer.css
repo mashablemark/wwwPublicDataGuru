@@ -14,7 +14,7 @@ ix\:nonfraction.ixbrlViewer_customTaxonomy {
     cursor: default !important;
     border: thin lightgrey solid;
 }
-#tabs-ts, #tabs-map, #tabs-scatter, #tabs-frame{
+#tabs-ts, #tabs-frame, #tabs-info{
     min-height: 500px;
 }
 div.framecontrols{
@@ -160,10 +160,14 @@ button.player_play {
     background: url(/global/js/jqueryui/images/ui-icons_cc0000_256x240.png);
     background-position: -96px -128px;
 }
-th.th-no-underline{
+#frame-table th.th-no-underline{
     border-bottom: none !important;
 }
-th.th-underline-with-break{
+#frame-table th.th-underline-with-break{
     border-bottom-left-radius: 3px;
     border-bottom-right-radius: 3px;
 }
+#frame-table{
+    line-height: 0.9;
+}
+
