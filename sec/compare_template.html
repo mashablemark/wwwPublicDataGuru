@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>textual comparison</title>
+    <script type="text/javascript" src="js/wikEdDiff.js"></script>
+    <script type="text/javascript">
+        function insertStyles(){  //note actual difference executed in parent frame; this instantiation inserts styles in IFRAME
+            var wikEdDiffConfig = {
+            blockMinLength: 3,
+            charDiff: true,
+            coloredBlocks: true,
+            debug: false,
+            fullDiff: true,
+            noUnicodeSymbols: false,
+            recursionMax: 20,
+            recursiveDiff: true,
+            repeatedDiff: true,
+            showBlockMoves: true,
+            stripTrailingNewline: false,
+            timer: false,
+            unitTesting: false,
+            unlinkBlocks: false,
+            unlinkMax: 20
+        };
+            var wikEdDiff = new WikEdDiff();
+        }
+    </script>
+    <style>
+        .wikEdDiffDelete {
+            background-color: red !important;
+            text-decoration: line-through;
+        }
+    </style>
+</head>
+<body onload="insertStyles()">Loading source document and comparing...   Please wait 5-10 seconds.
+
+</body>
+</html>

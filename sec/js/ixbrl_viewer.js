@@ -2,12 +2,17 @@
 /**
  * Created by User on 10/26/2018.
  */
-//deltaMonth is added to fiscal year quarter to get actual date.  A value of 0 means company's fiscal year aligns with calendar year
-var ixbrlViewer = {
+
+$(document).ready(function() {
+
+});
+
+
+
+var ixbrlViewer = {  //single object of all viewer methods and properties
 
     //ixbrlViewer global variables
     rgxSeparator: /[\s.;]+/g,
-    deltaMonth: false,
     cik: false,
     adsh: false,
     secDataCache: {},  //used to keep local copy of data to avoid repeat fetches
@@ -20,19 +25,9 @@ var ixbrlViewer = {
     },
     getSicFromFrame: function(fact, cik){
         for(var i=0; i<fact.data.length; i++){
-            if(fact.data[i][this.frameDataCol.cik] == cik) return fact.data[i][this.frameDataCol.sic];
+            if(fact.data[i].cik == cik) return fact.data[i].sic;
         }
         return false;
-    },
-    contextRef: function(ddate, qtrs){  //only used in document.ready
-        var rptDate = new Date(ddate),
-            contextString;
-        rptDate.setMonth(rptDate.getMonth() + this.deltaMonth);
-        contextString = (qtrs==0?'FI':'FD');
-        contextString += rptDate.getFullYear() + 'Q' + (rptDate.getMonth()+1)/3;
-        if(qtrs==1) contextString += 'QTD';
-        if(qtrs==4) contextString += 'YTD';
-        return contextString;
     },
     extractXbrlInfo: function(ix){
         var $ix = $(ix),
@@ -47,12 +42,13 @@ var ixbrlViewer = {
             isGaap: nameParts[0]=='us-gaap',
             isStandard: this.standardTaxonomies.indexOf(nameParts[0])!==-1,
             value: $(ix).text(),
-            cik: this.cik,
+            cik: parseInt(this.cik),
             num_adsh: this.adsh
         };
         if(this.contextTree[contextRef]){
             xbrl.qtrs = this.contextTree[contextRef].qtrs;
-            xbrl.ddate = this.contextTree[contextRef].ddate;
+            xbrl.end = this.contextTree[contextRef].end;
+            xbrl.start = (this.contextTree[contextRef].start?this.contextTree[contextRef].start:null);
             xbrl.member = (xbrl.member?xbrl.member:false);
             xbrl.dim = (xbrl.dim?xbrl.dim:false);
         }
@@ -101,7 +97,7 @@ var ixbrlViewer = {
         $('#saved').html(savedTS.length + ' saved time series');
         var tagVars = self.vars, //check saved status of current tag & update UI
             tagIndex = self.getStoredTimeSeriesRowIndex(tagVars.tag, tagVars.uom, tagVars.qtrs, tagVars.cik);
-        $('#save').html(tagIndex===false?'save':'saved');
+        $('#save').html(tagIndex===false?'save &amp; compare':'saved');
     },
 
     getStoredTimeSeriesRowIndex: function(tag, uom, qtrs, cik){
@@ -322,28 +318,21 @@ var ixbrlViewer = {
                     }
                 }
             });
-        var disable = [];
-        if(!self.makeXAxisSelector(oVars.tag, oVars.uom, oVars.qtrs)) disable.push(2);
-        $('#popviz').tabs({'disabled': disable});
+        $('#popviz').tabs();
         $('a[href="#tabs-ts"]').click(function(){$('#save, #compare').show()});
-        $('a[href="#tabs-map"]').click(function(){
-            if(!ixbrlViewer.bubbleMap)self.showMap(oVars);
-            $('#save, #compare').hide();
-        });
-        $('a[href="#tabs-scatter"]').click(function(){
-            if(!ixbrlViewer.scatterChart)self.showScatterChart(oVars);
+        $('a[href="#tabs-info"], a[href="#tabs-frame"]').click(function(){
             $('#save, #compare').hide();
         });
         $('a[href="#tabs-frame"]').click(function(){
             if(!ixbrlViewer.dtFrame)self.showFrameTable(oVars);
-            //$('#save, #compare').hide();
         });
         self.configureSaveControls(oVars);
         $('#save').click(function(){
             var $save = $('#save'),
-                save = $save.html() == 'save';
+                save = $save.html() == 'save &amp; compare';
+            oVars.compare = true;
             self.changeTimeSeriesStorage(oVars, save);
-            $save.html(save?'saved':'save');
+            $save.html(save?'saved':'save &amp; compare');
         });
         $('#compare').click(function(){self.showCompareOptions(oVars)});
         self.drawBarChart(oVars, callback);
@@ -351,41 +340,13 @@ var ixbrlViewer = {
 
     drawBarChart: function(oVars, callback){  //can be called to redraw
         var self = this,
-            url = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik;
+            url = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik + '.json';
         self.fetchTimeSeriesToCache(oVars,
             function(aryTimeSeries){
                 if(aryTimeSeries.length==0 || !self.secDataCache[url]){
                     $('#popviz').html('Unable to load data from API for this series.  This may be because it is a sole-point or because the API has not yet been updated.');
                     return false
                 }
-                //DISCUSS!! -> add clicked value if not in API (possible when disclosure just desseminated and APIs have not yet been updated)
-                if(aryTimeSeries.length>0 && aryTimeSeries[0].url == url){
-                    var timeseries = aryTimeSeries[0],
-                        ts = self.secDataCache[url][oVars.tag]['cik'+oVars.cik]['units'][oVars.uom][ixbrlViewer.durationPrefix+oVars.qtrs],
-                        found = false,
-                        pt,
-                        coName;
-                    oVars.adsh =  oVars.num_adsh.substr(0,10) + '-' + oVars.num_adsh.substr(10,2) + '-' + oVars.num_adsh.substr(12,6);
-                    for(var i=0;i<ts.length;i++){
-                        pt = self.parseTsPoint(ts[i]);
-                        coName = pt.coName;
-                        if(pt.adsh == oVars.adsh){
-                            found = true;
-                            break;
-                        }
-                    }
-                    if(!found){
-                        ts.push([
-                            oVars.ddate,
-                            parseFloat(oVars.value.replace(',','')),
-                            oVars.adsh,
-                            self.reportPeriod,
-                            self.reportForm,
-                            coName
-                        ]);
-                    }
-                }
-
                 oVars.label = self.secDataCache[url][oVars.tag].label;
                 oVars.company = self.secDataCache[url][oVars.tag]['cik'+oVars.cik].name;
                 var oChart = makeTimeSeriesChartObject(aryTimeSeries, oVars);
@@ -393,14 +354,6 @@ var ixbrlViewer = {
                 oChart.chart.renderTo = $('#tschart')[0];
                 if(self.barChart) self.barChart.destroy();
                 self.barChart = new Highcharts.Chart(oChart);
-                if(self.scatterChart) {
-                    self.scatterChart.destroy();
-                    self.scatterChart = false;
-                }
-                if(self.bubbleMap){
-                    self.bubbleMap.remove();
-                    self.bubbleMap = false;
-                }
                 $('#popviz_durations, #popviz_units').change(function(){
                     var duration = $('#popviz_durations').val();
                     self.vars.qtrs = (duration && duration.substr(2)) || self.vars.qtrs;
@@ -412,7 +365,7 @@ var ixbrlViewer = {
                         self.barChart = new Highcharts.Chart(oChart);
                     });
                 });
-                if(callback) callback(); else self.setHashSilently('y=' + oVars.tag +'&d=' +  oVars.ddate  +'&u=' +  oVars.uom  +'&q=' +  oVars.qtrs +'&c=b');
+                if(callback) callback(); else self.setHashSilently('y=' + oVars.tag +'&d=' +  oVars.end  +'&u=' +  oVars.uom  +'&q=' +  oVars.qtrs +'&c=b');
             }
         );
 
@@ -455,7 +408,8 @@ var ixbrlViewer = {
                 }
                 var oChart = {
                     chart: {
-                        type: 'column'
+                        type: 'column',
+                        height: 500
                     },
                     tooltip:{
                         followPointer: false,
@@ -464,6 +418,7 @@ var ixbrlViewer = {
                         style: {
                             pointerEvents: 'auto'
                         },
+                        headerFormat: '',
                         pointFormatter: function(){ //change to "" in Highcharts v.4+
                             //todo:  fix this for multiseries charts
                             var sParam = aryTimeSeriesParams[this.series.index],
@@ -471,14 +426,14 @@ var ixbrlViewer = {
                             var disclosures = [], disclosure, lastDisclosure = false;
                             for(var i=0;i<ts.length;i++){
                                 disclosure = self.parseTsPoint(ts[i]);
-                                if(disclosure.date==this.ddate){
+                                if(disclosure.end==this.end){
                                     if(lastDisclosure && lastDisclosure.y != disclosure.y){
                                         disclosures.push('<span style="color:orange;"><b>Revised from:</b></span>');
                                     }
-                                    if(disclosure.adsh != callingParams.adsh){
+                                    if(disclosure.adsh.replace(/-/g,'') != callingParams.num_adsh){
                                         disclosures.push('<a href="/sec/viewer.php?doc=' + callingParams.cik
                                             +'/'+disclosure.adsh.replace(self.rgxAllDash,'')+'/'+ disclosure.adsh
-                                            +'-index&u='+callingParams.uom+'&q='+callingParams.qtrs+'&d='+disclosure.date
+                                            +'-index&u='+callingParams.uom+'&q='+callingParams.qtrs+'&d='+disclosure.end
                                             +'&t='+callingParams.tag
                                             +'" style="color:blue;">'+disclosure.adsh + '</a>: ' + disclosure.rptForm
                                             + ' ' + disclosure.rptPeriod + ' reported ' + self.numberFormatter(disclosure.y, callingParams.uom));
@@ -489,7 +444,7 @@ var ixbrlViewer = {
                                     lastDisclosure = disclosure;
                                 }
                             }
-                            return '<b>' + self.secDataCache[sParam.url][sParam.tag]['cik'+sParam.cik].name + ' disclosures for ' + this.ddate + '</b><br><br>' + disclosures.join('<br>');
+                            return '<b>' + self.secDataCache[sParam.url][sParam.tag]['cik'+sParam.cik].name + ' disclosures for ' + this.end + '</b><br><br>' + disclosures.join('<br>');
                         }
                     },
                     title: {
@@ -583,7 +538,7 @@ var ixbrlViewer = {
                     for(var j=0; j<ts.length ;j++) {
                         point = self.parseTsPoint(ts[j]);
                         if(latestPoint) {
-                            if (latestPoint.date != point.date) {
+                            if (latestPoint.end != point.end) {
                                 addPoint(serie, latestPoint, adjusted);
                                 latestPoint = point;
                                 adjusted = false;
@@ -602,9 +557,9 @@ var ixbrlViewer = {
                 return aSeries;
 
                 function addPoint(serie, pt, adjusted){
-                    var xDate = new Date(pt.date),
+                    var xDate = new Date(pt.end),
                         hcDate = Date.UTC(xDate.getFullYear(), xDate.getMonth(), xDate.getDay()),
-                        hcPt = {x: hcDate, y: pt.y, ddate: pt.date};
+                        hcPt = {x: hcDate, y: pt.y, end: pt.end, start: pt.start};
                     if(adjusted)
                         hcPt.borderColor = 'orange';
                     serie.data.push(hcPt);
@@ -615,480 +570,14 @@ var ixbrlViewer = {
         }
     },
 
-    showScatterChart: function(oVars){
-        //get data for both frames via REST API (S3 bucket)
-        var self = this,
-            xFrame,
-            yFrame,
-            oChart,
-            xUrl,
-            yUrl = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
-            ply,
-            $playerControls,
-            $home,
-            $playPause,
-            $slider,
-            playing = false,
-            frameChanged = false,
-            cancelChange = false,
-            animationTimer = false,
-            newFrameFetches = 0;
-        
-        self.getRestfulData(
-            yUrl,
-            function(frame){   //parallel fetch of y Axis data
-                yFrame = frame;
-                self.vars.sic = self.getSicFromFrame(yFrame, self.vars.cik);
-                $('#scatterchart').html('Y-Axis data successfully loaded for ' + oVars.tag);
-                $('#scattercontrols')
-                    .html(self.makeXAxisSelector(oVars.tag, oVars.uom, oVars.qtrs) + self.makeSicFilterHTML(self.vars.sic))
-                    .find('select.sic_filter')
-                    .change(function(){
-                        oVars.sicFilter = $(this).val();
-                        if(self.scatterChart){
-                            self.scatterChart.destroy();
-                            self.scatterChart = false;
-                        }
-                        oChart = makeScatterChartObject(xFrame, yFrame, oVars);
-                        linLogControl(oVars);
-                        oChart.chart.renderTo = $('#scatterchart')[0];
-                        self.scatterChart = new Highcharts.Chart(oChart);
-                    })
-                    .end()
-                    .find('#scatter-x-axis-select')
-                    .change(function(){
-                        var $xSelector = $(this),
-                            xTagValue = $xSelector.val();
-                        $xSelector.find('option[init="instructions"]').remove();
-                        if(oVars.xTag != xTagValue) {
-                            oVars.xTag = xTagValue;
-                            $xSelector.attr('disabled', 'disabled');
-                            xUrl = 'https://restapi.publicdata.guru/sec/frames/' + oVars.xTag + '/' + oVars.uom + '/DQ' + oVars.qtrs + '/' + self.cdate(oVars.ddate, oVars.qtrs);
-                            self.getRestfulData(xUrl,
-                                function (frame) {   //parallel fetch of x Axis data
-                                    xFrame = frame;
-                                    self.setHashSilently('y=' + oVars.tag + '&x=' + oVars.xTag + '&u=' + oVars.uom + '&q='
-                                        + oVars.qtrs + '&d=' + oVars.ddate + '&c=s');
-                                    if (self.scatterChart) {
-                                        self.scatterChart.destroy();
-                                        self.scatterChart = false;
-                                    }
-                                    var oChart = makeScatterChartObject(xFrame, yFrame, oVars);
-                                    linLogControl(oVars);
-                                    oChart.chart.renderTo = $('#scatterchart')[0];
-                                    self.scatterChart = new Highcharts.Chart(oChart);
-                                    $xSelector.removeAttr('disabled');
-                                    ply = self.playerIndexes(oVars);
-                                    if(ply.dateIndex.length>1 && $('#scattercontrols .player_controls').length==0){
-                                        $playerControls = $('#scattercontrols').append(self.htmlTemplates.playerControls);
-                                        $home = $playerControls.find('.player_home').button({icon: "ui-icon-home", 'disabled': true})
-                                            .click(function(){
-                                                stopAnimation(); //turn off any animation
-                                                cancelChange = false;
-                                                newFrameFetches=0;
-                                                changeFrame(ply.homeIndex);
-                                            });
-                                        $playPause = $playerControls.find('.player_play').button({icon: "ui-icon-play"})
-                                            .click(function(){
-                                                if($playPause.find('.ui-icon-play').length){
-                                                    startAnimation();
-                                                } else {
-                                                    stopAnimation();
-                                                }
-                                                //set slider index to zero
-                                                //start animation (which changes play icon to pause icon)
-                                            });
-                                        $slider = $playerControls.find('.player_slider').slider({
-                                                min: 0,
-                                                max: ply.dateIndex.length -1,
-                                                value: ply.homeIndex,
-                                                start: function() {
-                                                    stopAnimation(); //user starts slide: halt any animation
-                                                },
-                                                stop: function() {
-                                                    cancelChange = false;
-                                                    changeFrame($slider.slider('value')); //force change on user slide
-                                                },
-                                            change: function() {
-                                                $home.button(ply.homeIndex == $slider.slider('value') ? 'disable' : 'enable');
-                                            }
-                                        }).mousemove(function(e){
-                                            if(e.currentTarget!=e.target) return;
-                                                var index = Math.round(e.offsetX/this.offsetWidth * (ply.dateIndex.length-1)),
-                                                    $st = $('#sliderTip');
-                                            $st.html(ply.dateIndex[index]).show()
-                                                .css('left', (index*this.offsetWidth/ply.dateIndex.length-$st.width()/2)+'px');
-                                        }).mouseout(function(e){$('#sliderTip').hide()});
-                                    }
-                                },
-                                function(failedUrl) {
-                                    $xSelector.removeAttr('disabled');
-                                    fetch_error(failedUrl)
-                                })
-                        }
-                    });
-                if(oVars.xTag){ //if preselected
-                    $('#scatter-x-axis-select').val(oVars.xTag);
-                    oVars.xTag = ''; //make it think its a new value
-                    $('#scatter-x-axis-select').change(); //trigger load and chart draw
-                }
-            },
-            fetch_error
-        );
-
-        
-        /*var url = 'https://restapi.publicdata.guru/sec/timeseries/'+oVars.tag+'/cik'+oVars.cik;
-        self.getRestfulData(url, function(timeseries){  //this should be from memory
-            //todo: make the play controls
-        });*/
-
-        function fetch_error(url){
-            $('#scatterchart').html('Unable to load snapshot from API for ' + url);
-        }
-
-        function linLogControl(oVars){
-            //disabled for now with flase in if statement on following line
-            if(false && oVars.positiveValuesX && oVars.positiveValuesY){
-                if(!$('#linlog').length){
-                    var $controls = $('#scattercontrols'),
-                    $linlog = $controls.append(self.htmlTemplates.linLogToggle).find('#linlog');
-                    $linlog
-                        .controlgroup({icon: false})
-                        .find('input').click(function() {
-                            var type = this.value;
-                    });
-                }
-            } else {
-                $('#linlog').remove();
-            }
-        }
-
-
-        function startAnimation(){
-            playing = true;
-            frameChanged = false;
-            cancelChange = false;
-            var sliderValue = $slider.slider("value"),
-                newSliderValue = (sliderValue==ply.dateIndex.length-1 || sliderValue==ply.homeIndex)?0:sliderValue+1;
-            $slider.slider("value", newSliderValue);
-            changeFrame(newSliderValue);
-            $playPause.button({icon: "ui-icon-pause"});
-        }
-
-        function stopAnimation(){
-            clearTimeout(animationTimer);
-            animationTimer = false;
-            cancelChange = true;
-            playing = false;
-            frameChanged = false;
-            $playPause.button({icon: "ui-icon-play"});
-        }
-        var newDate, yUrlNew, xUrlNew, newDateIndex;
-        function changeFrame(dateIndex){
-            newDateIndex = dateIndex;
-            newDate = ply.dateIndex[dateIndex];
-            yUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.cdate(newDate, oVars.qtrs);
-            xUrlNew = 'https://restapi.publicdata.guru/sec/frames/'+oVars.xTag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+self.cdate(newDate, oVars.qtrs);
-            newFrameFetches = 0;
-            fetchNew(xUrlNew);
-            fetchNew(yUrlNew);
-            function fetchNew(url){
-                self.getRestfulData(url, function(data){
-                        newFrameFetches++;
-                        if(newFrameFetches==2 && !animationTimer) makeFrame();
-                    },
-                    function(url){
-                        stopAnimation();  //REST fetch failure:  no animation for this frame
-                    }
-                )
-            }
-
-        }
-        function makeFrame(){
-            var xFrame = self.secDataCache[xUrlNew],
-                yFrame = self.secDataCache[yUrlNew],
-                updatedSeries = makeScatterSeries(xFrame, yFrame, oVars),
-                hcSeries = ixbrlViewer.scatterChart.series,
-                fastAlgo = hcSeries[0].data.length>10000, //note: the updates are much faster in HC 6.x!
-                pt, ptTree = {}, s, i;
-            //the setData method takes 64ms vs. 900ms looping through point updates for 7000 points
-            if(fastAlgo){  //algorithm switching
-                for(s=0; s<hcSeries.length;s++) {
-                    if(updatedSeries[s]){
-                        hcSeries[s].setData(updatedSeries[s].data, false, false, false);
-                    } else {
-                        hcSeries[s].setData([], false, false, false);
-                    }
-                }
-            } else {  //animate point moves = slower algorithm, but can be used for fewer points
-                for(s=0; s<updatedSeries.length;s++){
-                    for(i=0;i<updatedSeries[s].data.length;i++){
-                        ptTree[updatedSeries[s].data[i].id] = updatedSeries[s].data[i];
-                    }
-                }
-                for(s=0; s<hcSeries.length;s++){
-                    for(i=hcSeries[s].data.length-1;i>=0;i--){ //better able to push new and slice out old
-                        if(ptTree[hcSeries[s].data[i].id]){
-                            //update point:
-                            hcSeries[s].data[i].update(
-                                {x: ptTree[hcSeries[s].data[i].id].x, y: ptTree[hcSeries[s].data[i].id].y},
-                                false,
-                                true
-                            );
-                            delete ptTree[hcSeries[s].data[i].id];
-                        } else {
-                            //delete point:
-                            hcSeries[s].removePoint(i, false, false);
-                        }
-                    }
-                }
-                for(var id in ptTree){
-                    if(ptTree[id]){
-                        //add point:
-                        hcSeries[ptTree[id].hl?1:0].addPoint(ptTree[id], false, false, true);
-                    }
-                }
-            }
-            ixbrlViewer.scatterChart.setTitle({ text: titleText(xFrame, yFrame)}, null, false);
-            ixbrlViewer.scatterChart.redraw(!fastAlgo);
-            $slider.slider("value", newDateIndex); //set if not already
-            if(playing) nextFrame();
-        }
-
-        function nextFrame(){
-            if($slider.slider("value")==ply.dateIndex.length-1){
-                stopAnimation();
-            } else {
-                changeFrame(newDateIndex+1);
-                var ms = Math.min(Math.max(250, 4000/ply.dateIndex.length), 1000);
-                animationTimer = setTimeout(function(){
-                    clearTimeout(animationTimer);
-                    animationTimer = false;
-                    if(newFrameFetches==2) makeFrame();
-                }, ms);
-            }
-        }
-        function makeScatterChartObject(xFrame, yFrame, callingParams){
-            var scatterSeries = makeScatterSeries(xFrame, yFrame, callingParams); //sets callingParam values used in next statement
-            var oChart = {
-                chart: {
-                    type: 'scatter',
-                    zoomType: 'xy'
-                },
-                legend: {enabled: true},
-                tooltip: {
-                    //formatter: function(){console.log(this)},
-                    useHTML: true,
-                    formatter: function () {
-                        var pt = this.point;
-
-                        return '<b>' + pt.name + '</b><div style="color: ' + pt.divColor + '"><b>' + pt.divName + '</b><br>'+ixbrlViewer.sicCode[pt.sic]+'</div>' +
-                            '<br><br>' +
-                            '<table>' +
-                            '<tr>' +
-                            '<td>' + yFrame.label + '</td><td style="text-align: right">' + self.numberFormatter(pt.y, callingParams.uom) + '</td>' +
-                            '</tr>' +
-                            '<tr>' +
-                            '<td>' + xFrame.label + '</td><td style="text-align: right">' + self.numberFormatter(pt.x, callingParams.uom) + '</td>' +
-                            '</tr>' +
-                            '</table>' +
-                            '<div><i>click on point to navigate to source disclosure</i></div>';
-                    }
-                },
-                plotOptions: {
-                    scatter: {
-                        cursor: 'pointer',
-                        point: {
-                            events: {
-                                click: function () {
-                                    var fld = self.frameDataCol,
-                                        factRow = yFrame.data[this.iy];
-                                    location.href = '/sec/viewer.php?doc=' + factRow[fld.cik]
-                                        +'/'+factRow[fld.adsh].replace(self.rgxAllDash,'')+'/'+ factRow[fld.adsh]
-                                        +'-index&u='+yFrame.uom+'&q='+yFrame.qtrs+'&d='+yFrame.ddate
-                                        +'&t='+yFrame.tag;
-                                }
-                            }
-                        },
-                        turboThreshold: 10000
-                    }
-                },
-                title: {
-                    text: titleText(xFrame, yFrame)
-                },
-                subtitle: {
-                    text: ''
-                },
-                credits: {
-                    enabled: true,
-                    text: 'data provided by U.S. Securities and Exchange Commission',
-                    href: 'https://www.sec.gov'
-                },
-                yAxis: {
-                    type: (callingParams.log?'logarithmic':'linear'),
-                    //min: 0,
-                    title: {
-                        text: yFrame.uom
-                    },
-                    labels: {
-                        formatter: function() {
-                            return self.axesLabelFormatter(this);
-                        }
-                    }
-                },
-                xAxis: {
-                    type: (callingParams.log?'logarithmic':'linear'),
-                    //min: 0,
-                    title: {
-                        text: xFrame.uom
-                    },
-                    labels: {
-                        formatter: function() {
-                            return self.axesLabelFormatter(this);
-                        }
-                    }
-                },
-                series: scatterSeries
-            };
-            if(callingParams.positiveValuesX && !callingParams.log){
-                oChart.xAxis.min = 0;
-            }
-            if(callingParams.positiveValuesY && !callingParams.log){
-                oChart.yAxis.min = 0;
-            }
-            return oChart;
-            //series format: [{data: [{ x: 95, y: 95, z: 13.8, name: 'BE', country: 'Belgium' },...]}, color:'blue',name'asdf']
-        }
-
-        function titleText(xFrame, yFrame){
-             return yFrame.label + ' versus ' + xFrame.label + ' as reported for ' + (xFrame.qtrs == 0 ? '' : (xFrame.qtrs == 1 ? 'quarter' : 'year') + ' ending ') + xFrame.ddate
-        }
-
-        function makeScatterSeries(xFrame, yFrame, callingParams){
-            var savedCompanies = self.getComparedCompanies();
-            var highlightCIKs = ['cik'+parseInt(oVars.cik)],
-                highlightPoints = {},
-                i,
-                flds = self.localStorageFields.comparedCompanies;
-            //saved companies that are selected
-            for(i=0; i<savedCompanies.length; i++){
-                highlightCIKs.push('cik'+parseInt(savedCompanies[i][flds.cik]));
-            }
-            var nonHighlightSerie = [],
-                xData = xFrame.data,
-                yData = yFrame.data,
-                positiveValuesX = true,  //calculated for axis min value and log option
-                positiveValuesY = true,
-                ix = 0,
-                iy = 0,
-                inFilter,
-                ptSic,
-                ptSicDivision,
-                divisionName = false,
-                color,
-                frameDataCol = self.frameDataCol,
-                pt;
-            //sort by CIKs
-            xData.sort(function(a,b){return b[frameDataCol.cik] - a[frameDataCol.cik]});
-            yData.sort(function(a,b){return b[frameDataCol.cik] - a[frameDataCol.cik]});
-            while(xData.length>ix && yData.length>iy){
-                if(xData[ix][frameDataCol.cik] == yData[iy][frameDataCol.cik]){
-                    ptSic = xData[ix][frameDataCol.sic];
-                    ptSicDivision = self.getSicDivision(ptSic);
-                    divisionName = ptSicDivision?ptSicDivision.name:'SIC code not available';
-                    switch(callingParams.sicFilter || 'all'){
-                        case "all":
-                            inFilter = true;
-                            break;
-                        case "div":
-                            inFilter = (ptSic >=callingParams.sicDivision.min && ptSic<=callingParams.sicDivision.max);
-                            break;
-                        case "ind":
-                            inFilter = (callingParams.sic == ptSic);
-                            break;
-                    }
-                    if(inFilter) {
-                        color = ptSicDivision?ptSicDivision.color:'grey';
-                        if(xData[ix][frameDataCol.value]<=0) positiveValuesX = false;
-                        if(yData[iy][frameDataCol.value]<=0) positiveValuesY = false;
-                        pt =  {
-                            x: xData[ix][frameDataCol.value],
-                            y: yData[iy][frameDataCol.value],
-                            id: 'cik' + xData[ix][frameDataCol.cik],
-                            ix: ix,
-                            iy: iy,
-                            sic: ptSic,
-                            divColor: color,
-                            divName: divisionName,
-                            name: xData[ix][frameDataCol.name],
-                            marker: {
-                                lineColor: color
-                            }
-                        };
-                        if(highlightCIKs.indexOf(pt.id) !== -1){
-                            delete pt.marker;
-                            highlightPoints[pt.id] = pt;
-                        } else {
-                            nonHighlightSerie.push(pt);
-                        }
-                    }
-                    ix++;
-                    iy++;
-                } else {
-                    if(xData[ix][frameDataCol.cik] > yData[iy][frameDataCol.cik]){
-                        ix++;
-                    } else {
-                        iy++;
-                    }
-                }
-            }
-            var scatterSeries = [{
-                marker: {
-                    fillColor: 'rgba(0,0,0,0)',
-                    symbol: 'diamond',
-                    lineWidth: 1,
-                    states: {
-                        hover: {
-                            fillColor: 'rgba(0,0,0,1)'
-                        }
-                    }
-                },
-                id: 'scatter-frame',
-                data: nonHighlightSerie,
-                showInLegend: false
-            }];
-            var cIndex = 0;
-            for(i=0; i<highlightCIKs.length; i++){
-                if(highlightPoints[highlightCIKs[i]]){
-                    scatterSeries.push({
-                        marker: {
-                            symbol: 'circle',
-                            fillColor: self.barChart.options.colors[cIndex],
-                            lineColor: 'black',
-                            lineWidth: 1
-                        },
-                        data: [highlightPoints[highlightCIKs[i]]],
-                        name: highlightPoints[highlightCIKs[i]].name,
-                        id: 'scatter-cik'+ highlightCIKs[i],
-                        showInLegend: true
-                    });
-                    cIndex++;
-                }
-            }
-            callingParams.positiveValuesX = positiveValuesX;
-            callingParams.positiveValuesY = positiveValuesY;
-            if(!(callingParams.positiveValuesY && callingParams.positiveValuesY)) callingParams.log = false;
-            return scatterSeries;
-        }
-    },
 
     showFrameTable: function(oVars){
         var self = this,
             ply = self.playerIndexes(oVars),
             $slider,
             frameTableOptions = false;
-        for(var i in ply.dateIndex) ply.dateIndex[i] = self.cdate(ply.dateIndex[i], oVars.qtrs);  //convert to cdates
-        self.setHashSilently('y=' + oVars.tag +'&d=' +  oVars.ddate  +'&u=' +  oVars.uom  +'&q=' +  oVars.qtrs +'&c=f');
+        for(var i in ply.dateIndex) ply.dateIndex[i] = self.closestCalendricalPeriod(ply.dateIndex[i], oVars.qtrs);  //convert to cdates
+        self.setHashSilently('y=' + oVars.tag +'&d=' +  oVars.end  +'&u=' +  oVars.uom  +'&q=' +  oVars.qtrs +'&c=f');
         if(!this.dtFrame){
             frameTableOptions = {
                 qtrs: oVars.qtrs,
@@ -1100,7 +589,7 @@ var ixbrlViewer = {
                     }
                 ],
                 cdates: [
-                    self.cdate(oVars.ddate, oVars.qtrs)
+                    self.closestCalendricalPeriod(oVars.end, oVars.qtrs)
                 ]
             };
             initializeFrameControls(oVars);
@@ -1120,7 +609,8 @@ var ixbrlViewer = {
             for(t=0; t<frameTableOptions.tags.length; t++) {
                 for (d = 0; d<frameTableOptions.cdates.length; d++) {
                     var url = 'https://restapi.publicdata.guru/sec/frames/' + frameTableOptions.tags[t].tag + '/'
-                        + frameTableOptions.tags[t].uom + '/DQ' + frameTableOptions.tags[t].qtrs + '/' + frameTableOptions.cdates[d];
+                        + frameTableOptions.tags[t].uom + '/DQ' + frameTableOptions.tags[t].qtrs + '/'
+                        + frameTableOptions.cdates[d] + '.json';
                     urlsToFetch[url] = {
                         order: requestCount++,
                         tag: frameTableOptions.tags[t].tag,
@@ -1162,7 +652,7 @@ var ixbrlViewer = {
         function makeFrameTable(frameTableOptions){
             //todo:  make widths constant when scrolling (vertical)
             var tableData = false;  //fetchedFramesData will be used to array to populate frameTable
-            var columnDefs = [ //["AAR CORP", 1750, 3720, "0001104659-18-073842", "US-IL", Array(2), "2018-05-31", 31100000, 1]
+            var columnDefs = [
                 {   title: "Entity", export: false, className: "dt-body-left", render: function(data, type, row, meta){
                         return '<a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + row[meta.col+2] + '">' + data + ' ('+row[meta.col+2] + ')</a>';
                     }},
@@ -1173,79 +663,101 @@ var ixbrlViewer = {
                         return data? data+' - ' + ixbrlViewer.sicCode[data]:'';
                     },
                     className: "dt-body-left"},
-                {   title: "Accession No.", visible: false, export: true,
-                    render: function (data, type, row, meta) {
-                        return '<a href="https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g,'') + '/' + data + '-index.html">' + data + '</a>';
-                    }
-                },
                 {   title: "Location", export: true, className: "dt-body-center" }
             ];
-            var headerColumnLength = columnDefs.length;
-            var topHeaderCells = '<th class="th-no-underline" colspan="3"></th>'; //only 3 visible
+            var row,
+                headerColumnLength = columnDefs.length,
+                topHeaderCells = '<th class="th-no-underline" colspan="3"></th>'; //only 3 visible
             for(var url in frameTableOptions.requestedFrames){
                 var frame = frameTableOptions.requestedFrames[url];
                 if(frame.data){ //will be false if frame DNEresponseCount
-                    frame.data.sort(function(row1,row2){
-                        return parseInt(row1[ixbrlViewer.frameDataCol.cik])-parseInt(row2[ixbrlViewer.frameDataCol.cik])
-                    });
+                    frame.data.sort(function(row1,row2){return parseInt(row1.cik)-parseInt(row2.cik)});
                     if(!tableData){  //first frame get sets left 5 header columns
                         tableData = [];
-                        for(var r=0;r<frame.data.length;r++) tableData.push(frame.data[r].slice(0,1).concat(frame.data[r].slice(0,headerColumnLength-1)));
+                        for(var r=0;r<frame.data.length;r++) {
+                            row = frame.data[r];
+                            tableData.push([row.entityName, row.entityName, row.cik, row.sic, row.loc]);
+                        }
                     }
-                    var headerLabel = frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')';
-                    var rgxHeaderColSpan = new RegExp('colspan="\(\\d+\)">'+ frame.tlabel +' \\('+ ixbrlViewer.durationNames[frame.qtrs]+'\\)');
+                    var rgxHeaderColSpan = new RegExp('colspan="\(\\d+\)">'+ frame.label +' \\('+ ixbrlViewer.durationNames[frame.qtrs]+'\\)');
                     var match = topHeaderCells.match(rgxHeaderColSpan);
                     //add top header cells over date & value; extend span instead of adding repeat
                     if(match){
-                        var extendedColSpan = parseInt(match[1]) + 2;
-                        topHeaderCells = topHeaderCells.replace(rgxHeaderColSpan, 'colspan="' + extendedColSpan + '">'+ frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')')
+                        var extendedColSpan = parseInt(match[1]) + 3;
+                        topHeaderCells = topHeaderCells.replace(rgxHeaderColSpan, 'colspan="' + extendedColSpan + '">'+ frame.label +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')')
                     } else {
-                        topHeaderCells += '<th  class="th-underline-with-break" colspan="2">'+ frame.tlabel +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')</th>';
+                        topHeaderCells += '<th  class="th-underline-with-break" colspan="3">'+ frame.label +' ('+ ixbrlViewer.durationNames[frame.qtrs]+')</th>';
                     }
                     //add the new rows
-                    var tableRowIndex = 0, frameRowIndex = 0;
-                    while(frameRowIndex<frame.data.length && tableRowIndex<tableData.length){
-                        var frameRow = frame.data[frameRowIndex];
-                        var frameCIK = parseInt(frameRow[ixbrlViewer.frameDataCol.cik]);
-                        var tableCIK = parseInt(tableData[tableRowIndex][ixbrlViewer.frameDataCol.cik + 1]);  //+1 because of extra name column for export vs. display
-                        if(frameCIK<tableCIK){ //table is missing this CIK = add header cells and fill any preceding data cells with nulls
-                            var newRow = frame.data[frameRowIndex].slice(0,1).concat(frame.data[frameRowIndex].slice(0,headerColumnLength-1), new Array(columnDefs.length-headerColumnLength).fill(null));
-                            tableData.splice(tableRowIndex-1,0, newRow);
+                    var tableRowIndex = 0,
+                        frameRowIndex = 0,
+                        frameRow,
+                        frameCIK,
+                        tableCIK,
+                        newRow;
+                    while(frameRowIndex<frame.data.length || tableRowIndex<tableData.length){
+                        newRow = null;
+                        if(tableRowIndex<tableData.length) tableCIK = parseInt(tableData[tableRowIndex][2]); //
+                        if(frameRowIndex<frame.data.length){
+                            frameRow = frame.data[frameRowIndex];
+                            frameCIK = parseInt(frameRow.cik);
+                            if(frameCIK<tableCIK || tableRowIndex==tableData.length){ //table is missing this CIK = add header cells and fill any preceding data cells with nulls
+                                newRow = [frameRow.entityName, frameRow.entityName, frameRow.cik, frameRow.sic, frameRow.loc]
+                                    .concat(new Array(columnDefs.length-headerColumnLength).fill(null));
+                                tableData.splice(tableRowIndex, 0, newRow);
+                            }
                         }
-                        if(frameCIK<=tableCIK){  //insync = add data to current row and advance both indexes together
-                            tableData[tableRowIndex].splice(tableData[tableRowIndex].length, 0,
-                                frameRow[ixbrlViewer.frameDataCol.ddate],
+                        if(frameCIK<=tableCIK && frameRowIndex<frame.data.length || newRow){  //insync = add data to current row and advance both indexes together
+                            var newColumns = [frameRow.start,  //don't add for
+                                frameRow.end,
                                 frame.qtrs,
-                                frameRow[ixbrlViewer.frameDataCol.adsh],
-                                frameRow[ixbrlViewer.frameDataCol.value],
-                                frameRow[ixbrlViewer.frameDataCol.value],
+                                frameRow.val,
+                                frameRow.val,
                                 frame.uom,
-                                frameRow[ixbrlViewer.frameDataCol.versions]);
+                                frameRow.rev,
+                                frameRow.accn];
+                            if(!frameRow.start) newColumns.shift();
+                            tableData[tableRowIndex] =  tableData[tableRowIndex].concat(newColumns);
                             tableRowIndex++;
                             frameRowIndex++;
                         } else { //this frame does not have a row corresponding to the table's current CIK = fill data cell with nulls
-                            tableData[tableRowIndex]= tableData[tableRowIndex].concat(new Array(7).fill(null));
+                            tableData[tableRowIndex] = tableData[tableRowIndex].concat(new Array(frameRow.start?8:7).fill(null));  //length of new data cols to be added to columnDefs
                             tableRowIndex++;
                         }
                     }
                     //add the new column defs for each frame
                     //todo:  add a customize function to xls export to convert source ADSH to HYPERLINK.  See https://stackoverflow.com/questions/40243616/jquery-datatables-export-to-excelhtml5-hyperlink-issue/49146977#49146977
+                    if(frame.qtrs!=0){
+                        columnDefs = columnDefs.concat(  //note: some fields are displayed in the beowser (visible) while others are exported
+                            [{   title: "From", export: true, render: function (data, type, row, meta) {
+                                    return typeof(data)=='undefined' || data===null?'':data;
+                                }},
+                            {   title: "To", export: true, render: function (data, type, row, meta) {
+                                    return typeof(data)=='undefined' || data===null?'':data;
+                                }
+                            }]
+                        );
+                    } else {
+                        columnDefs = columnDefs.concat(  //note: some fields are displayed in the beowser (visible) while others are exported
+                            [{   title: "As of", export: true, render: function (data, type, row, meta) {
+                                    return typeof(data)=='undefined' || data===null?'':data;
+                                }
+                            }]
+                        );
+                    }
+                    var hiddenValColumn = columnDefs.length+2;
                     columnDefs = columnDefs.concat([  //note: some fields are displayed in the beowser (visible) while others are exported
-                        {   title: "Period Ending", export: true, render: function (data, type, row, meta) {
-                            return typeof(data)=='undefined' || data===null?'':data.substr(0,7);
-                        }},
                         {   title: "quarters duration", visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},
-                        {   title: "source", export: true, visible: false, render: function(data) {
-                                return typeof(data)=='undefined' || data===null?'':'https://www.sec.gov/Archives/edgar/data/' + data + '/' + data.replace(/-/g, '') + '/' + data + '-index.html';
-                        }},
-                        {   title: "Disclosure", export: false, className: "dt-body-right", render: function(data, type, row, meta){
-                                var adsh = row[meta.col-1];
-                                return typeof(data)=='undefined' || data===null?'':'<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh .replace(/-/g,'')
+
+                        {   title: "Disclosure", orderData: hiddenValColumn, export: false, className: "dt-body-right",  render: function(data, type, row, meta){
+                                var adsh = row[meta.col+4];
+                                return typeof(data)=='undefined' || data===null?'':'<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh.replace(/-/g,'')
                                     + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+2]) + '</a>'
                         }}, //this version of value includes the units is formatted with commas
-                        {   title: frame.tlabel, export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},  //unformatted clean version for export
+                        {   title: frame.label, export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},  //unformatted clean version for export
                         {   title: "units", export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},
-                        {   title: "version", export: false, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}}
+                        {   title: "version", export: false, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},
+                        {   title: "accession no.", export: true, visible: false},
                     ]);
                 }
 
@@ -1284,7 +796,9 @@ var ixbrlViewer = {
             $('div.dataTables_scrollHead thead').prepend('<tr>' + topHeaderCells + '</tr>')
         }
         function initializeFrameControls(options){
-            $slider = $('#tabs-frame div.framecontrols').html(self.htmlTemplates.frameControls)
+            var $frameControls = $('#tabs-frame div.framecontrols');
+
+            $slider = $frameControls.html(self.htmlTemplates.frameControls)
                 .find('.frameSlider').slider({
                     min: 0,
                     max: ply.dateIndex.length - 1,
@@ -1294,7 +808,7 @@ var ixbrlViewer = {
                         $('button.addCdate').attr('cdate', cdate).button( "option", "label", cdate);
                     }
                 });
-            $('button.addCdate')
+            var $addCdate = $('button.addCdate')
                 .button({icon: 'ui-icon-plusthick', label: ply.dateIndex[ply.homeIndex]})
                 .click(function(){
                     frameTableOptions.cdates.push($(this).attr('cdate'));
@@ -1302,7 +816,6 @@ var ixbrlViewer = {
                     fetchFrameTableData(frameTableOptions);
                     showFrameColumnTags();
                 });
-
             var tagOptions = '<option value="null"></option>';
             var tagCombos = [];
             for(var duration in self.standardTagTree){
@@ -1317,7 +830,7 @@ var ixbrlViewer = {
                 var part = tagCombos[i].split(':');
                 tagOptions += '<option value="'+tagCombos[i]+'">'+part[0]+ ' ('+ self.durationNames[part[2].substr(2,1)] + ' in ' + part[1] + ')</option>';
             }
-            $("#frameTagSelector").html(tagOptions).combobox({
+            var $frameTagSelector = $("#frameTagSelector").html(tagOptions).combobox({
                 select: function(){
                     var tagParts = $(this).val().split(':');
                     frameTableOptions.tags.push({tag: tagParts[0], uom: tagParts[1], qtrs: parseInt(tagParts[2].substr(2))});
@@ -1325,6 +838,7 @@ var ixbrlViewer = {
                     showFrameColumnTags();
                 }
             });
+            $slider.width($frameControls.innerWidth()-$addCdate.outerWidth()-$('span.custom-combobox').outerWidth()-100);
         }
         function showFrameColumnTags(){
             console.log(frameTableOptions);
@@ -1374,136 +888,14 @@ var ixbrlViewer = {
         }
     },
 
-    showMap: function(oVars){
-        //get frame data via REST API (S3 bucket)
-        var url = 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs+'/'+ this.cdate(oVars.ddate, oVars.qtrs);
-        var self = this;
-        self.getRestfulData(url,
-            function(frame){
-                self.vars.sic = self.getSicFromFrame(frame, self.vars.cik);
-                var oMap = makeMapObject(frame);
-                self.bubbleMap = $('#mapchart').html('').height(500).vectorMap(oMap).vectorMap('get', 'mapObject');
-
-                $('#maptitle').html(self.makeTitle(frame.label, oVars.qtrs, oVars.ddate));
-                $('#mapcontrols')
-                    .html(self.makeSicFilterHTML(self.vars.sic))
-                    .find('select.sic_filter').change(function(){
-                        oVars.sicFilter = $(this).val();
-                        self.bubbleMap.remove();
-                        oMap = makeMapObject(frame);
-                        self.bubbleMap = $('#mapchart').html('').height(500).vectorMap(oMap).vectorMap('get', 'mapObject');
-                });
-                $('#mapdatalinks').html('data from <a href="'+url+'">'+url+'</a>');
-                self.setHashSilently('y=' + oVars.tag +'&d=' +  oVars.ddate  +'&u=' +  oVars.uom  +'&q=' +  oVars.qtrs +'&c=m');
-            },
-            function(){
-                $('#mapchart').html('Unable to fetch snapshot ' + url);
-            });
-        function makeMapObject(frame){
-            var frameDataCol = self.frameDataCol;
-            var oMap = {
-                map: 'us_aea_en',
-                backgroundColor: 'rgb(179, 224, 255)',
-                zoomAnimate: false,
-                zoomOnScrollSpeed: 1,
-                zoomOnScroll: true,
-                zoomStep: 2,
-                regionStyle: {
-                    initial: {
-                        fill: 'rgb(207, 226, 207)',
-                        stroke: 'black',
-                        "stroke-width": 0.5
-                    },
-                    hover: {
-                        cursor: 'default'
-                    }
-                },
-                onRegionTipShow: function(e, oTip, code){
-                    e.preventDefault();
-                },
-                onMarkerTipShow: function(e, oTip, index){
-                    var factRow = frame.data[oMap.markers[index].i],
-                        sicDivision = self.getSicDivision(factRow[self.frameDataCol.sic]);
-                    oTip.html((sicDivision?'<div style="color:'+sicDivision.color+'">'+sicDivision.name+':</div>':'')
-                        + factRow[frameDataCol.name] + ':<br>'
-                        + self.numberFormatter(factRow[frameDataCol.value], frame.uom)
-                        + (factRow[frameDataCol.versions]>1?'<br><i>Value is a revision from the entity\'s initial disclosure</i>':'')
-                        + '<br><br><i>click marker to view source filing</i>'
-                    );
-                },
-                onMarkerClick: function(e, index){
-                    var factRow = frame.data[oMap.markers[index].i];
-                    location.href = '/sec/viewer.php?doc=' + factRow[frameDataCol.cik]
-                        +'/'+factRow[frameDataCol.adsh].replace(self.rgxAllDash,'')+'/'+ factRow[frameDataCol.adsh]
-                        +'-index&u='+frame.uom+'&q='+frame.qtrs+'&d='+frame.ddate
-                        +'&t='+frame.tag;
-                },
-                markers: [],
-                markerStyle: {
-                    initial: {
-                        fill: '#F8E23B',
-                        stroke: '#383f47'
-                    }
-                }
-            };
-            var min = null, max = null, i, inFilter;
-            for(i=0; i<frame.data.length; i++){ //find min and max values for scaling
-                if(frame.data[i][frameDataCol.countryRegion].substr(0,2)=='US' && !isNaN(frame.data[i][frameDataCol.value])){
-                    if(!isNaN(min)){
-                        if(min>frame.data[i][frameDataCol.value]) min=frame.data[i][frameDataCol.value];
-                        if(max<frame.data[i][frameDataCol.value]) max=frame.data[i][frameDataCol.value];
-                    } else {
-                        min = max = frame.data[i][frameDataCol.value];
-                    }
-                }
-            }
-            frame.data.sort(function(a,b){return b[frameDataCol.value]-a[frameDataCol.value]}); //smaller bubbles on top
-            var R_MAX = 25, category, r, stokeColor;
-            for(i=0; i<frame.data.length; i++){
-                if(frame.data[i][frameDataCol.latLng]){
-                    switch(oVars.sicFilter || 'all'){
-                        case "all":
-                            inFilter = true;
-                            break;
-                        case "div":
-                            inFilter = (frame.data[i][frameDataCol.sic] >=oVars.sicDivision.min
-                                && frame.data[i][frameDataCol.sic]<=oVars.sicDivision.max);
-                            break;
-                        case "ind":
-                            inFilter = (oVars.sic == frame.data[i][frameDataCol.sic]);
-                            break;
-                        default:
-                            console.log('filter error in makeMapObject');
-                    }
-                    if(inFilter){
-                        r = Math.sqrt(Math.abs(frame.data[i][frameDataCol.value]))/Math.abs(Math.sqrt(max))*R_MAX+1;
-                        stokeColor = frame.data[i][frameDataCol.value]>0?'black':'red';
-                        category = self.getSicDivision( frame.data[i][frameDataCol.sic]);
-                        oMap.markers.push({
-                            latLng: frame.data[i][frameDataCol.latLng],
-                            i: i,
-                            name:  frame.data[i][frameDataCol.name],
-                            value:  frame.data[i][frameDataCol.value],
-                            style:{
-                                r: r,
-                                fill: frame.data[i][frameDataCol.cik]==oVars.cik?self.hcColors[0]:(category?category.color:'grey'),
-                                stroke: stokeColor
-                            }
-                        });
-                    }
-                }
-            }
-            return oMap;
-        }
-    },
     parseTsPoint: function(tsPoint){
         var parsedPoint = {
-            date: tsPoint[0],
-            y: tsPoint[1],
-            adsh: tsPoint[2],
-            rptPeriod: tsPoint[3],
-            rptForm: tsPoint[4],
-            coName: tsPoint[5]
+            end: tsPoint.end,
+            start: tsPoint.start,
+            y: tsPoint.val,
+            adsh: tsPoint.accn,
+            rptPeriod: 'FY' + tsPoint.fy + ' ' + tsPoint.fp,
+            rptForm: tsPoint.form 
         };
         parsedPoint.ageRank = parseFloat(parsedPoint.rptPeriod.substring(0,4) + '.' + (parsedPoint.rptPeriod.substr(-2,2)=='FY'?'4':parsedPoint.rptPeriod.substr(-1,1)));
         return parsedPoint;
@@ -1529,7 +921,7 @@ var ixbrlViewer = {
                 '</select>';
     },
     playerIndexes: function(params){
-        var cached = this.secDataCache['https://restapi.publicdata.guru/sec/timeseries/' + params.tag + '/cik' + params.cik];
+        var cached = this.secDataCache['https://restapi.publicdata.guru/sec/timeseries/' + params.tag + '/cik' + params.cik+'.json'];
         if(cached){
             var tsObject = cached[params.tag]['cik'+params.cik];
             if(tsObject['units'][params.uom] && tsObject['units'][params.uom][ixbrlViewer.durationPrefix+params.qtrs]){
@@ -1537,36 +929,21 @@ var ixbrlViewer = {
                 pt, lastDate = false, playerIndex = [], homeIndex=0;
                 for(var i=0; i<data.length; i++){
                 pt = this.parseTsPoint(data[i]);
-                    if(lastDate!=pt.date){
-                        playerIndex.push(pt.date);
-                        lastDate = pt.date;
+                    if(lastDate!=pt.end){
+                        playerIndex.push(pt.end);
+                        lastDate = pt.end;
                     }
-                    if(pt.date == params.ddate) homeIndex = playerIndex.length-1;
+                    if(pt.end == params.end) homeIndex = playerIndex.length-1;
                 }
                 return {dateIndex: playerIndex, homeIndex: homeIndex}
             }
-        }
-    },
-    makeXAxisSelector: function(yTag, uom, qtrs){
-        var htmlOptions = '',
-            branch = this.standardTagTree[ixbrlViewer.durationPrefix+qtrs][uom];
-        if(branch){
-            branch.sort();
-            for(var i=0;i<branch.length;i++){
-                if(yTag != branch[i]) htmlOptions += '<option value="'+branch[i]+'">'+branch[i]+ '</option>';
-            }
-        }
-        if(htmlOptions){
-            return '<select id="scatter-x-axis-select"><option init="instructions" selected="selected">select a frame for the X-Axis</option>' + htmlOptions + '</select>'
-        } else {
-            return false;
         }
     },
 
     fetchTimeSeriesToCache: function(oVars, callBack){
         //1. get the full list of urls to fetch from saved series and companies
         var self = this,
-            clickedUrl = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik,
+            clickedUrl = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag + '/cik' + oVars.cik + '.json',
             savedTimeSeries = self.getSavedTimeSeries(),
             savedCompanies = self.getComparedCompanies(),
             fldSC = self.localStorageFields.comparedCompanies,
@@ -1584,8 +961,8 @@ var ixbrlViewer = {
         for(i=0; i<savedTimeSeries.length; i++){
             if(savedTimeSeries[i][0]){
                 url = 'https://restapi.publicdata.guru/sec/timeseries/' + savedTimeSeries[i][fldTS.tag]
-                    + '/cik' + savedTimeSeries[i][fldTS.cik];
-                if(url != clickedUrl){
+                    + '/cik' + savedTimeSeries[i][fldTS.cik] + '.json';
+                if(url != clickedUrl && savedTimeSeries[i][fldTS.qtrs]==oVars.qtrs){
                     requests.push({
                         url: url,
                         uom: savedTimeSeries[i][fldTS.uom],
@@ -1600,7 +977,7 @@ var ixbrlViewer = {
         for(i=0; i<savedCompanies.length; i++){
             if(savedCompanies[i][0]){
                 url = 'https://restapi.publicdata.guru/sec/timeseries/' + oVars.tag
-                    + '/cik' + savedCompanies[i][fldSC.cik];
+                    + '/cik' + savedCompanies[i][fldSC.cik] + '.json';
                 if(url != clickedUrl){
                     requests.push({
                         url: url,
@@ -1644,7 +1021,7 @@ var ixbrlViewer = {
         } else {
             var dbUrl = false;
             if(window.location.href.indexOf('maker.publicdata')!=-1){ //use database for maker.publicdata.guru
-                var uParts = url.split('/');  //e.g. 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.cdate(oVars.ddate, oVars.qtrs),
+                var uParts = url.split('/');  //e.g. 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.closestCalendricalPeriod(oVars.end, oVars.qtrs),
                 switch(uParts[4]){
                     case 'frames':
                         dbUrl = 'http://maker.publicdata.guru/sec/api.php?process='+uParts[4]+'&t='+uParts[5]+'&u='+encodeURIComponent(uParts[6]) +'&q='+uParts[7]+'&d='+uParts[8];
@@ -1704,9 +1081,9 @@ var ixbrlViewer = {
         hasher.changed.active = true; //re-enable signal
     },
 
-    navigateToTag: function($navigateToTag){
+    navigateToTag: function($frameDoc, $navigateToTag){
         if($navigateToTag){
-            $('html,body').animate({
+            $frameDoc.find('body').animate({
                 scrollTop: $navigateToTag.offset().top - window.innerHeight/2
             });
             $navigateToTag.animate(
@@ -1740,26 +1117,232 @@ var ixbrlViewer = {
         return (uom=='USD'?'$':'') + num.toLocaleString() + '&nbsp;' + uom;
     },
 
-    cdate: function(ddate, duration){  //frames are
-        var closestEndMonth = new Date(ddate);
-        return closestEndMonth.getUTCFullYear() + (duration==4?'':'C' + (Math.floor(closestEndMonth.getUTCMonth()/3)+1));
+    closestCalendricalPeriod: function(end, durationInQuarters) {
+        let workingEnd = new Date(end);
+        switch(parseInt(durationInQuarters)){
+            case 0:
+                return 'CY' + workingEnd.getFullYear() + 'Q' + (Math.floor(workingEnd.getMonth()/3) + 1) + 'I';
+            case 1:
+                workingEnd.setDate(workingEnd.getDate()-40);
+                return 'CY' + workingEnd.getFullYear() + 'Q' + (Math.floor(workingEnd.getMonth()/3) + 1);
+            case 4:
+                workingEnd.setDate(workingEnd.getDate()-180);
+                return 'CY' + workingEnd.getFullYear();
+        }
+        return null;  //if qtrs not 0, 1 or 4;
     },
 
-//global vars
+    parseIXBRL: function(iframeDoc) {
+        //put any querystring parameters into an object for easy access
+        console.time('parseIXBRL');
+        var aParams = location.search.substr(1).split('&'),
+            oQSParams = {}, tuplet, i;
+        for(i=0;i<aParams.length;i++){
+            tuplet = aParams[i].split('=');
+            oQSParams[tuplet[0]] = tuplet[1];
+        }
+        var $frameDoc = $(document.getElementById('app-inline-xbrl-doc').contentDocument);
+        //calculate the fiscal to calendar relationship and set document reporting period, fy, adsh and cik
+        ixbrlViewer.documentPeriodEndDate= $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]').text();
+        ixbrlViewer.reportForm = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentType"]').text();
+        ixbrlViewer.cik = $frameDoc.find('ix\\:nonnumeric[name="dei\\:EntityCentralIndexKey"]').text();
+        ixbrlViewer.fy = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentFiscalYearFocus"]').text();
+        ixbrlViewer.fp = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentFiscalPeriodFocus"]').text();
+        ixbrlViewer.fp = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentFiscalPeriodFocus"]').text();
+        ixbrlViewer.adsh = window.location.href.split('?doc=')[1].split('/')[1];
+
+        $.getJSON('//restapi.publicdata.guru/sec/financialStatementsByCompany/cik'+parseInt(ixbrlViewer.cik)+'.json',
+            function(allFinancialStatements) {
+                ixbrlViewer.allFinancialStatements = allFinancialStatements;
+                var message = false,
+                    submissionsForCurrentDisclosure = [],
+                    options = '<option disabled selected hidden>select another disclosure to view or compare</option>';
+                $.each(allFinancialStatements, function(i, fs){
+                    var isMe = fs.accn.replace(/-/g,'') == ixbrlViewer.adsh;
+                    if(isMe) {
+                        ixbrlViewer.accn = fs.accn;
+                        ixbrlViewer.filed = fs.filed;
+                    }
+                    options += '<option value="'+fs.accn+'"'+(isMe?' disabled class="italic"':'')+'>'+fs.form+' for FY'+fs.fy+(fs.fp=='fy'?'':fs.fp)+' (filed on '+fs.filed+')</option>';
+                    if(isMe || (fs.form.split('/').shift()==ixbrlViewer.reportForm.split('/').shift() && fs.fy==ixbrlViewer.fy && fs.fp==ixbrlViewer.fp)){
+                        submissionsForCurrentDisclosure.push(fs);
+                    }
+                });
+                if(submissionsForCurrentDisclosure.length>1){  //this submission is part of a disclosure that has been amended
+                    if(submissionsForCurrentDisclosure[0].accn == ixbrlViewer.accn){  //this disclosure is the latest version = offer to compare
+                        var oldFS = submissionsForCurrentDisclosure[0];
+                        $('#amendmentMessage').html('Amended disclosure. <a href="compare.php?cik='+parseInt(ixbrlViewer.cik)
+                            + '&a='+oldFS.accn+"&b="+ixbrlViewer.accn + '>View comparison</a>');
+                    } else { //submission being viewed is not the latest! Offer to navigate to latest
+                        var latestFS = submissionsForCurrentDisclosure[0];
+                        $('#amendmentMessage').html('This submission has been amended. <a href="viewer.php?doc='+parseInt(ixbrlViewer.cik) +'/'
+                            + latestFS.accn.replace(/-/g,'') + '/' + latestFS.accn + '-index.html">View ammended submission</a>');
+                    }
+                }
+                $('#fs-select').html(options).change(function(){
+                    $('#fs-go').button({disabled: false});  //navigate is enabled on any selection
+                    var newAccn = $(this).val();
+                    var newFS = ixbrlViewer.allFinancialStatements.filter(function(fs){return fs.accn == newAccn})[0];
+                    //redline is enabled enabled only for the same form type (e.g 10-K matches 10-K or 10K/A)
+                    $('#fs-redline').button({disabled: !(newFS.form.toUpperCase().substr(0,4) == ixbrlViewer.reportForm.toUpperCase().substr(0,4))});  //navigate is enabled on any selection
+                });
+                $('#fs-redline').button({disabled: true}).click(function(){
+                    var newAccn = $('#fs-select').val();
+                    var newFS = ixbrlViewer.allFinancialStatements.filter(function(fs){return fs.accn == newAccn})[0];
+                    var url = "compare.php?cik="+parseInt(ixbrlViewer.cik)+ "&a="+(newFS.filed<ixbrlViewer.filed?newAccn:ixbrlViewer.accn)+"&b="+(newFS.filed<ixbrlViewer.filed?ixbrlViewer.accn:newAccn);
+                    window.location = url; //navigate there!
+                });
+                $('#fs-go').button({disabled: true}).click(function(){
+                    var newAccn = $('#fs-select').val();
+                    var doc = parseInt(ixbrlViewer.cik)+"/"+newAccn.replace(/-/g,'')+"/"+newAccn+"-index.html";
+                    window.location = "viewer.php?doc="+doc; //navigate there!
+                });
+            }
+        );
+
+        //get iXBRL context tags make lookup tree for contextRef date values and dimensions
+        var start, end, startDate, endDate, $this, $start, $member;
+        $frameDoc.find('xbrli\\:context').each(function(i) {
+            $this = $(this);
+            $start = $this.find('xbrli\\:startdate');
+            if($start.length==1) {
+                start = $start.html().trim();
+                startDate = new Date(start);
+                end = $this.find('xbrli\\:enddate').html().trim();
+                endDate = new Date(end);
+                ixbrlViewer.contextTree[$this.attr('id')] = {
+                    end: end,
+                    start: start,
+                    qtrs: ((endDate.getFullYear() - startDate.getFullYear())*12 + (endDate.getMonth() - startDate.getMonth())) / 3
+                }
+            } else {
+                end = $this.find('xbrli\\:instant').html();
+                ixbrlViewer.contextTree[$this.attr('id')] = {
+                    end: end,
+                    qtrs: 0
+                }
+            }
+            $member = $this.find('xbrldi\\:explicitmember');
+            if($member.length && $member.attr('dimension')){
+                ixbrlViewer.contextTree[$this.attr('id')].member = $member.html().trim();
+                ixbrlViewer.contextTree[$this.attr('id')].dim = $member.attr('dimension');
+            }
+        });
+
+        //get iXBRL unit tags and make lookup tree for unitRef values
+        var $measure, unitParts;
+        $frameDoc.find('xbrli\\:unit').each(function(i) {
+            $this = $(this);
+            $measure = $this.find('xbrli\\:unitnumerator xbrli\\:measure');
+            if($measure.length==0) $measure = $this.find('xbrli\\:measure');
+            if($measure.length==1){
+                unitParts = $measure.html().split(':');
+                ixbrlViewer.unitTree[$this.attr('id')] = unitParts.length>1?unitParts[1]:unitParts[0];
+            } else console.log('error parsing iXBRL unit tag:', this);
+        });
+
+        var $standardTag, navigateToTag = false;
+        $frameDoc.find('ix\\:nonfraction').each(function(i){
+            var xbrl = ixbrlViewer.extractXbrlInfo(this);
+            if(xbrl.isStandard){
+                if(!xbrl.dim && (xbrl.qtrs ==0 || xbrl.qtrs ==1 || xbrl.qtrs ==4)) {
+                    $standardTag = $(this).addClass("ixbrlViewer_standardFrame");  //only give standard facts an underline and hand
+                    if (!ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs]) ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs] = {};
+                    if (!ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom]) ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom] = [];
+                    if (ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom].indexOf(xbrl.tag) === -1) {
+                        ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom].push(xbrl.tag);
+                    }
+                    //flag to navigate to tag if info was supplied on the querystring
+                    if(oQSParams.t && oQSParams.q && oQSParams.d && oQSParams.u
+                        && xbrl.uom == oQSParams.u
+                        && xbrl.tag == oQSParams.t
+                        && xbrl.end == oQSParams.d
+                        && xbrl.qtrs == oQSParams.q) {
+                        navigateToTag = $standardTag;
+                    }
+                }
+            } else {
+                $(this).addClass("ixbrlViewer_customTaxonomy");
+            }
+        });
+        $frameDoc.find('head').append(ixbrlViewer.htmlTemplates.injectedTagStyles);
+        console.timeEnd('parseIXBRL');
+        console.time('addClickFuncs');
+        $frameDoc.find('ix\\:nonfraction').click(function(){
+            var xbrl = ixbrlViewer.extractXbrlInfo(this);
+            ixbrlViewer.vars = xbrl;
+            if(xbrl.isStandard){
+                if(xbrl.dim){
+                    $.fancybox.open('This fact is defined as using the <b>' +xbrl.taxonomy
+                        + '</b> standard taxonomy and further divided along the ' + xbrl.dim + 'dimension.<br><br>'
+                        + 'Only facts using standard taxonomy with no sub-dimension are organized into the time series API.');
+                } else {
+                    if(xbrl.qtrs ==0 || xbrl.qtrs ==1 || xbrl.qtrs ==4){
+                        ixbrlViewer.openPopupVisualization(xbrl);
+                    } else {
+                        $.fancybox.open('<h3>Duration not organized for graphing</h3><p>&nbsp;<p>This fact is defined as using the <b>' +xbrl.taxonomy
+                            + '</b> standard taxonomy for <b>' + xbrl.qtrs
+                            + ' quarters</b> by the filer.<p>Only facts of annual, quarterly, and '
+                            + ' as-measured-on-date reported (e.g. snapshot) durations are organized into time series and available for graphing.');
+                    }
+                }
+            } else {
+                $.fancybox.open('<h3>Custom Taxonomy</h3><p>&nbsp;<p>This fact is reported using the custom taxonomy <b>'+xbrl.taxonomy + '</b>.'
+                    + '<br><br>Only facts reported using standard taxonomies can be reliably compared and are this organized into time series for graphing.');
+            }
+        });
+        ixbrlViewer.navigateToTag($frameDoc, navigateToTag);
+
+        console.timeEnd('addClickFuncs');
+        //set Highcharts colors (bright) and SIC Division colors
+        var hcColorSet20 = ['#2f7ed8', '#0d233a', '#8bbc21', '#910000', '#1aadce', '#492970', '#f28f43', '#77a1e5', '#c42525', '#a6c96a'],
+            hcColorSet30 = ['#4572A7', '#AA4643', '#89A54E', '#80699B', '#3D96AE', '#DB843D', '#92A8CD', '#A47D7C', '#B5CA92'],
+            hcColorSet60 = ["#7cb5ec", "#434348", "#90ed7d", "#f7a35c", "#8085e9", "#f15c80", "#e4d354", "#2b908f", "#f45b5b", "#91e8e1"],
+            bright =  ['#058DC7', '#50B432', '#ED561B', '#DDDF00', '#24CBE5', '#64E572', '#FF9655', '#FFF263', '#6AF9C4'];
+        ixbrlViewer.divColors = bright.concat(hcColorSet30);
+        ixbrlViewer.hcColors = hcColorSet60.concat(hcColorSet30);
+        Highcharts.setOptions({colors: ixbrlViewer.hcColors});
+        for(i=0;i<ixbrlViewer.sicDivisions.length;i++){
+            ixbrlViewer.sicDivisions[i].color = ixbrlViewer.divColors[i];
+        }
+
+        //show chart on page load if Hash variables present
+        hasher.init();
+        var hash = ixbrlViewer.getHashAsObject();
+        if(hash){
+            if(hash.y && hash.d && hash.u && (hash.q || hash.q === '0')){
+                ixbrlViewer.vars = { //taxonomy, isGaap and value not set
+                    tag: hash.y,
+                    xTag: hash.x,
+                    end: hash.d,
+                    uom: hash.u,
+                    qtrs: hash.q,
+                    isStandard: true,
+                    cik: parseInt(ixbrlViewer.cik),
+                    num_adsh: ixbrlViewer.adsh
+                };
+                ixbrlViewer.openPopupVisualization(
+                    ixbrlViewer.vars,
+                    function(){ //callback after barChart is loaded
+                        if(hash.c=='f') $('a[href="#tabs-frame"]').click(); //trigger frame table load
+                    });
+            }
+        }
+    },
+
+    ////////////////////////  global vars  /////////////////////////////////////////
     htmlTemplates: {
         popWindow:
             '<div id="popviz" style="width:80%;">' +
-            '<button id="compare">compare</button><button id="save">save</button><span id="saved"></span>' +
+            '<button id="compare">edit comparisons</button><button id="save">save &amp; compare</button><span id="saved"></span>' +
             '<ul>' +
             '  <li><a href="#tabs-ts">time series</a></li>' +
-            '  <li><a href="#tabs-map"><span class="strikethrough">US map</span></a></li>' +
-            '  <li><a href="#tabs-scatter"><span class="strikethrough">scatter plot</span></a></li>' +
             '  <li><a href="#tabs-frame">all reporting companies</a></li>' +
+            '  <li><a href="#tabs-info">fact info</a></li>' +
             '</ul>' +
             '<div id="tabs-ts"><div id="tschart">loading... please wait</div><div id="tscontrols"></div></div>' +
-            '<div id="tabs-map"><div id="maptitle"></div><div id="mapchart">loading... please wait</div><div id="mapcontrols"></div><div id="mapdatalinks"></div></div>' +
-            '<div id="tabs-scatter"><div id="scatterchart">loading... please wait</div><div id="scattercontrols"></div></div>' +
             '<div id="tabs-frame"><div class="framecontrols">loading... please wait</div></div>' +
+            '<div id="tabs-info">show info about the XBRL fact here</div>' +
             '</div>',
         popOptions:
             '<div id="chart-options">' +
@@ -1776,12 +1359,6 @@ var ixbrlViewer = {
         frameColumnButton:
             '<button class="frameColumnButton"></button>',
         frameControls: '<select id="frameTagSelector"></select><div class="frameSlider"></div><button class="addCdate">Add Date</button></button><div id="frameOptionTags"></div>',
-        linLogToggle: '<div id="linlog">' +
-            '<label for="scatterLinear">linear</label>' +
-            '<input type="radio" name="scatterAxesType" id="scatterLinear" value="linear" checked="checked">' +
-            '<label for="scatterLogarithmic">logarithmic</label>' +
-            '<input type="radio" name="scatterAxesType" id="scatterLogarithmic" value="logarithmic">' +
-            '</div>',
         toolTip: '<div class="tagDialog"><div class="tagDialogText">say something</div></div>',
         playerControls: '<fieldset class="player_controls">' +
             '<legend>date controls:</legend>' +
@@ -1790,8 +1367,14 @@ var ixbrlViewer = {
                 '<div class="slider_outer"><div id="sliderTip"></div><div class="player_slider"></div></div>' +
                 '<button class="player_play" title="play entire sequence"></button>' +
               '</div>' +
-            '</fieldset>'
+            '</fieldset>',
+        injectedTagStyles: '<style>\n' +
+                'ix\\:nonfraction.ixbrlViewer_standardFrame {cursor: hand; border-bottom: 2px solid #FF6600 !important;}\n' +
+                'ix\\:nonfraction.ixbrlViewer_standardFrame:hover {background-color: lightsalmon;}\n' +
+                'ix\\:nonfraction.ixbrlViewer_customTaxonomy {cursor: hand; border-bottom: 1px dotted #FF6600!important;}\n' +
+            '</style>'
     },
+    htmlStyles: '',
     //CapitalizedUnits: //the filing ndataset capitalizes ISO currency codes
      //   ['USD', 'CNY', 'CAD', 'JPY', 'EUR', 'CHF', 'GBP', 'BRL', 'KRW', 'AUD', 'Y', 'INR', 'MXN', 'HKD', 'ILS','CLP', 'RUB', 'TWD','ARS'],
     sicDivisions: [  //length = 12 (including unused
@@ -1813,17 +1396,6 @@ var ixbrlViewer = {
         "1": "quarterly",
         "4": "annual"
     },
-    frameDataCol: {
-        name: 0,
-        cik: 1,
-        sic: 2,
-        adsh: 3,
-        countryRegion: 4,
-        latLng: 5,
-        ddate: 6,
-        value: 7,
-        versions: 8
-    },
     localStorageFields: {
         timeSeries: {
             compare: 0,
@@ -1843,172 +1415,12 @@ var ixbrlViewer = {
     rgxAllDash: /-/g,
     durationPrefix: 'DQ',  //after API update this will be 'DQ'
     standardTaxonomies: ['us-gaap','ifrs','dei','country','invest','currency','srt','exch','stpr','naics','rr','sic'],
-    standardTagTree: {}, //filled on doc ready to provide denominator choices in scatter plot
+    //todo:  use MetaLinks.json to get names
+    standardTagTree: {}, //filled on doc ready to provide choices in frame table viewer
     contextTree: {}, //filled on doc ready to provide period (duration) lookup
     unitTree: {} //filled on doc ready to provide units lookup
 };
 
-$(document).ready(function() {
-    //put any querystring parameters into an object for easy access
-    var aParams = location.search.substr(1).split('&'),
-        oQSParams = {}, tuplet, i;
-    for(i=0;i<aParams.length;i++){
-        tuplet = aParams[i].split('=');
-        oQSParams[tuplet[0]] = tuplet[1];
-    }
-
-
-    //calculate the fiscal to calendar relationship and set document reporting period, fy, adsh and cik
-    var $reportingPeriod = $('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]'),
-        contextref = $reportingPeriod.attr('contextref'),
-        ddate = new Date($reportingPeriod.text()),
-        fy = parseInt(contextref.substr(2,4)),
-        fq = parseInt(contextref.substr(7,1)),
-        fdate = new Date(fy, fq*3, 0);
-    ixbrlViewer.deltaMonth = (fy-ddate.getFullYear())*12 + (fdate.getMonth()-ddate.getMonth());
-    ixbrlViewer.reportForm = $('ix\\:nonnumeric[name="dei\\:DocumentType"]').text();
-    ixbrlViewer.reportPeriod = fy + (fq==4?' FY':' Q'+fq);
-    var docPart = window.location.href.split('?doc=')[1].split('/');
-    ixbrlViewer.cik = docPart[0];
-    ixbrlViewer.adsh = docPart[1];
-
-
-    //fix images source links
-    $('img').each(function(){
-        $(this).attr('src', 'https://www.sec.gov/Archives/edgar/data/'+ixbrlViewer.cik+'/'+ixbrlViewer.adsh+'/' + $(this).attr('src'));
-    });
-
-    //get iXBRL context tags make lookup tree for contextRef date values and dimensions
-    var $context, start, end, ddate, $this, $start, $member;
-    $('xbrli\\:context').each(function(i) {
-        $this = $(this);
-        $start = $this.find('xbrli\\:startdate');
-        if($start.length==1) {
-            start = new Date($start.html().trim());
-            ddate = $this.find('xbrli\\:enddate').html().trim();
-            end = new Date(ddate);
-            ixbrlViewer.contextTree[$this.attr('id')] = {
-                ddate: ddate,
-                qtrs: ((end.getFullYear() - start.getFullYear())*12 + (end.getMonth() - start.getMonth())) / 3
-            }
-        } else {
-            ddate = $this.find('xbrli\\:instant').html();
-            ixbrlViewer.contextTree[$this.attr('id')] = {
-                ddate: ddate,
-                qtrs: 0
-            }
-        }
-        $member = $this.find('xbrldi\\:explicitmember');
-        if($member.length && $member.attr('dimension')){
-            ixbrlViewer.contextTree[$this.attr('id')].member = $member.html().trim();
-            ixbrlViewer.contextTree[$this.attr('id')].dim = $member.attr('dimension');
-        }
-    });
-
-    //get iXBRL unit tags and make lookup tree for unitRef values
-    var $measure, unitParts;
-    $('xbrli\\:unit').each(function(i) {
-        $this = $(this);
-        $measure = $this.find('xbrli\\:unitnumerator xbrli\\:measure');
-        if($measure.length==0) $measure = $this.find('xbrli\\:measure');
-        if($measure.length==1){
-            unitParts = $measure.html().split(':');
-            ixbrlViewer.unitTree[$this.attr('id')] = unitParts.length>1?unitParts[1]:unitParts[0];
-        } else console.log('error parsing iXBRL unit tag:', this);
-    });
-
-    var $standardTag, navigateToTag = false;
-    $('ix\\:nonfraction').each(function(i){
-        var xbrl = ixbrlViewer.extractXbrlInfo(this);
-        if(xbrl.isStandard){
-            if(!xbrl.dim && (xbrl.qtrs ==0 || xbrl.qtrs ==1 || xbrl.qtrs ==4)) {
-                $standardTag = $(this).addClass("ixbrlViewer_standardFrame");  //only give standard facts an underline and hand
-                if (!ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs]) ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs] = {};
-                if (!ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom]) ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom] = [];
-                if (ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom].indexOf(xbrl.tag) === -1) {
-                    ixbrlViewer.standardTagTree[ixbrlViewer.durationPrefix + xbrl.qtrs][xbrl.uom].push(xbrl.tag);
-                }
-                //flag to navigate to tag if info was supplied on the querystring
-                if(oQSParams.t && oQSParams.q && oQSParams.d && oQSParams.u
-                    && xbrl.uom == oQSParams.u
-                    && xbrl.tag == oQSParams.t
-                    && xbrl.ddate == oQSParams.d
-                    && xbrl.qtrs == oQSParams.q) {
-                    navigateToTag = $standardTag;
-                }
-            }
-        } else {
-            $(this).addClass("ixbrlViewer_customTaxonomy");
-        }
-    });
-    $('ix\\:nonfraction').click(function(){
-        var xbrl = ixbrlViewer.extractXbrlInfo(this);
-        ixbrlViewer.vars = xbrl;
-        if(xbrl.isStandard){
-            if(xbrl.dim){
-                $(ixbrlViewer.htmlTemplates.toolTip)
-                    .find('.tagDialogText').html('This fact is defined as using the ' +xbrl.taxonomy
-                    + ' standard taxonomy and further divided along the ' + xbrl.dim + 'dimension.<br><br>'
-                    + 'Only facts using standard taxonomy with no sub-dimension are organized into the time series API.')
-                    .dialog({position: { my: "center top", at: "center bottom", of: this}});
-            } else {
-                if(xbrl.qtrs ==0 || xbrl.qtrs ==1 || xbrl.qtrs ==4){
-                    ixbrlViewer.openPopupVisualization(xbrl);
-                } else {
-                    $(ixbrlViewer.htmlTemplates.toolTip)
-                        .find('.tagDialogText').html('This fact is defined as using the ' +xbrl.taxonomy
-                        + ' standard taxonomy and covers ' + xbrl.qtrs
-                        + ' quarters by the filer.<br><br>Only facts of annual (quarters = 4), quarterly (quarters = 1), and '
-                        + ' as-on reporting date (quarters = 0) durations are organized into time series.')
-                        .dialog({modal: true, position: { my: "center top", at: "center bottom", of: this}});
-                }
-            }
-        } else {
-            $(ixbrlViewer.htmlTemplates.toolTip)
-                .find('.tagDialogText').html('This fact uses a custom taxonomy <b>'+xbrl.taxonomy + '</b>.'
-                + '<br><br>Only standard taxonomies can be reliably compared and are organized into time series.')
-                .dialog({modal: true, position: { my: "center top", at: "center bottom", of: this}});
-        }
-    });
-    ixbrlViewer.navigateToTag(navigateToTag);
-
-    //set Highcharts colors (bright) and SIC Division colors
-    var hcColorSet20 = ['#2f7ed8', '#0d233a', '#8bbc21', '#910000', '#1aadce', '#492970', '#f28f43', '#77a1e5', '#c42525', '#a6c96a'],
-        hcColorSet30 = ['#4572A7', '#AA4643', '#89A54E', '#80699B', '#3D96AE', '#DB843D', '#92A8CD', '#A47D7C', '#B5CA92'],
-        hcColorSet60 = ["#7cb5ec", "#434348", "#90ed7d", "#f7a35c", "#8085e9", "#f15c80", "#e4d354", "#2b908f", "#f45b5b", "#91e8e1"],
-        bright =  ['#058DC7', '#50B432', '#ED561B', '#DDDF00', '#24CBE5', '#64E572', '#FF9655', '#FFF263', '#6AF9C4'];
-    ixbrlViewer.divColors = bright.concat(hcColorSet30);
-    ixbrlViewer.hcColors = hcColorSet60.concat(hcColorSet30);
-        Highcharts.setOptions({colors: ixbrlViewer.hcColors});
-    for(i=0;i<ixbrlViewer.sicDivisions.length;i++){
-        ixbrlViewer.sicDivisions[i].color = ixbrlViewer.divColors[i];
-    }
-
-    //show chart on page load if Hash variables present
-    hasher.init();
-    var hash = ixbrlViewer.getHashAsObject();
-    if(hash){
-        if(hash.y && hash.d && hash.u && (hash.q || hash.q === '0')){
-            ixbrlViewer.vars = { //taxonomy, isGaap and value not set
-                tag: hash.y,
-                xTag: hash.x,
-                ddate: hash.d,
-                uom: hash.u,
-                qtrs: hash.q,
-                isStandard: true,
-                cik: ixbrlViewer.cik,
-                num_adsh: ixbrlViewer.adsh
-            };
-            ixbrlViewer.openPopupVisualization(
-                ixbrlViewer.vars,
-                function(){ //callback after barChart is loaded
-                    if(hash.x) $('a[href="#tabs-scatter"]').click(); //trigger scatter chart load
-                    if(hash.c=='m') $('a[href="#tabs-map"]').click(); //trigger map load
-                    if(hash.c=='f') $('a[href="#tabs-frame"]').click(); //trigger frame table load
-                });
-        }
-    }
-});
 
 ixbrlViewer.sicCode = {
     100: "Agricultural Production-Crops",

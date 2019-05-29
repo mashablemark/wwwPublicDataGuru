@@ -51,19 +51,19 @@ let me = {
     closestCalendricalPeriod: (start, end) => {
         let workingEnd = new Date(end);
         if(start){
-            let qtrs = Math.round((end - start)/(365/4*24*3600*1000));
-            if(qtrs==1) {
+            let durationInQuarters = Math.round((end - start)/(365/4*24*3600*1000));
+            if(durationInQuarters==1) {
                 workingEnd.setDate(end.getDate()-40);
-                return 'CY' + workingEnd.getFullYear() + 'Q' + qtrs;
+                return 'CY' + workingEnd.getFullYear() + 'Q' + (Math.floor(workingEnd.getMonth()/3) + 1);
             }
-            if(qtrs==4) {
+            if(durationInQuarters==4) {
                 workingEnd.setDate(end.getDate()-180);
                 return 'CY' + workingEnd.getFullYear();
             }
-            return null;  //if qtrs not 0, 1 or 4;
-        } else {
+            return null;  //if qtrs not 1 or 4 (or 0);
+        } else {  //instantaneous measurement => Q=0
             workingEnd.setDate(end.getDate()-40);
-            return 'CY' + workingEnd.getFullYear() + 'Q' + qtrs + 'I';
+            return 'CY' + workingEnd.getFullYear() + 'Q' + (Math.floor(workingEnd.getMonth()/3) + 1) + 'I';
         }
     },
     wait: (ms) => {
@@ -76,7 +76,9 @@ let me = {
         if(!me.con) me.con = await me.createDbConnection();
         if(sql.indexOf("''fatal MySQL error")===-1){
             try{
+                console.log('about to run query');
                 let [result, fields] = await me.con.query(sql);  //note: con.execute prepares a statement and will run into max_prepared_stmt_count limit
+                console.log('ran query');
                 return {data: result, fields: fields};
             } catch(err) {
                 console.log("fatal MySQL error: "+ err.message);
