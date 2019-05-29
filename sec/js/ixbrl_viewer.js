@@ -48,7 +48,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
         if(this.contextTree[contextRef]){
             xbrl.qtrs = this.contextTree[contextRef].qtrs;
             xbrl.end = this.contextTree[contextRef].end;
-            xbrl.start = (xbrl.start?xbrl.start:null);
+            xbrl.start = (this.contextTree[contextRef].start?this.contextTree[contextRef].start:null);
             xbrl.member = (xbrl.member?xbrl.member:false);
             xbrl.dim = (xbrl.dim?xbrl.dim:false);
         }
@@ -697,39 +697,53 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                         newRow;
                     while(frameRowIndex<frame.data.length || tableRowIndex<tableData.length){
                         frameRow = frame.data[frameRowIndex];
+                        newRow = null;
                         if(frameRow) frameCIK = parseInt(frameRow.cik);
-                        tableCIK = parseInt(tableData[tableRowIndex][2]); //
+                        if(tableRowIndex<tableData.length) tableCIK = parseInt(tableData[tableRowIndex][2]); //
                         if((frameCIK<tableCIK && frameRowIndex<frame.data.length) || tableRowIndex==tableData.length){ //table is missing this CIK = add header cells and fill any preceding data cells with nulls
                             newRow = [frameRow.entityName, frameRow.entityName, frameRow.cik, frameRow.sic, frameRow.loc]
                                 .concat(new Array(columnDefs.length-headerColumnLength).fill(null));
                             tableData.splice(tableRowIndex, 0, newRow);
                         }
-                        if(frameCIK<=tableCIK && frameRowIndex<frame.data.length){  //insync = add data to current row and advance both indexes together
-                            tableData[tableRowIndex].splice(tableData[tableRowIndex].length, 0,
-                                frameRow.start,
+                        if(frameCIK<=tableCIK && frameRowIndex<frame.data.length || newRow){  //insync = add data to current row and advance both indexes together
+                            var newColumns = [frameRow.start,  //don't add for
                                 frameRow.end,
                                 frame.qtrs,
                                 frameRow.val,
                                 frameRow.val,
                                 frame.uom,
                                 frameRow.rev,
-                                frameRow.accn);
+                                frameRow.accn];
+                            if(!frameRow.start) newColumns.shift();
+                            tableData[tableRowIndex] =  tableData[tableRowIndex].concat(newColumns);
                             tableRowIndex++;
                             frameRowIndex++;
                         } else { //this frame does not have a row corresponding to the table's current CIK = fill data cell with nulls
-                            tableData[tableRowIndex]= tableData[tableRowIndex].concat(new Array(8).fill(null));  //length of new data cols to be added to columnDefs
+                            tableData[tableRowIndex]= tableData[tableRowIndex].concat(new Array(frameRow.start?8:7).fill(null));  //length of new data cols to be added to columnDefs
                             tableRowIndex++;
                         }
                     }
                     //add the new column defs for each frame
                     //todo:  add a customize function to xls export to convert source ADSH to HYPERLINK.  See https://stackoverflow.com/questions/40243616/jquery-datatables-export-to-excelhtml5-hyperlink-issue/49146977#49146977
+                    if(frame.qtrs!=0){
+                        columnDefs = columnDefs.concat(  //note: some fields are displayed in the beowser (visible) while others are exported
+                            [{   title: "From", export: true, render: function (data, type, row, meta) {
+                                    return typeof(data)=='undefined' || data===null?'':data;
+                                }},
+                            {   title: "To", export: true, render: function (data, type, row, meta) {
+                                    return typeof(data)=='undefined' || data===null?'':data;
+                                }
+                            }]
+                        );
+                    } else {
+                        columnDefs = columnDefs.concat(  //note: some fields are displayed in the beowser (visible) while others are exported
+                            [{   title: "As of", export: true, render: function (data, type, row, meta) {
+                                    return typeof(data)=='undefined' || data===null?'':data;
+                                }
+                            }]
+                        );
+                    }
                     columnDefs = columnDefs.concat([  //note: some fields are displayed in the beowser (visible) while others are exported
-                        {   title: "From", export: true, render: function (data, type, row, meta) {
-                                return typeof(data)=='undefined' || data===null?'':data.substr(0,7);
-                            }},
-                        {   title: "To", export: true, render: function (data, type, row, meta) {
-                                return typeof(data)=='undefined' || data===null?'':data.substr(0,7);
-                            }},
                         {   title: "quarters duration", visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},
 
                         {   title: "Disclosure", export: false, className: "dt-body-right",  render: function(data, type, row, meta){
@@ -1147,7 +1161,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                         ixbrlViewer.filed = fs.filed;
                     }
                     options += '<option value="'+fs.accn+'"'+(isMe?' disabled class="italic"':'')+'>'+fs.form+' for FY'+fs.fy+(fs.fp=='fy'?'':fs.fp)+' (filed on '+fs.filed+')</option>';
-                    if(isMe || (fs.form.split('/').unshift()==ixbrlViewer.reportForm.split('/').unshift() && fs.fy==ixbrlViewer.fy && fs.fp==ixbrlViewer.fp)){
+                    if(isMe || (fs.form.split('/').shift()==ixbrlViewer.reportForm.split('/').shift() && fs.fy==ixbrlViewer.fy && fs.fp==ixbrlViewer.fp)){
                         submissionsForCurrentDisclosure.push(fs);
                     }
                 });
@@ -1192,7 +1206,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                 start = $start.html().trim();
                 startDate = new Date(start);
                 end = $this.find('xbrli\\:enddate').html().trim();
-                endDate = new Date(endDate);
+                endDate = new Date(end);
                 ixbrlViewer.contextTree[$this.attr('id')] = {
                     end: end,
                     start: start,
