@@ -6,25 +6,29 @@
  * Time: 3:14 PM
  */
 $doc = $_REQUEST["doc"];
+if(strpos($doc,".htm")=== false  && strpos($doc,".xml")=== false && strpos($doc,".json")=== false) $doc = $doc.".htm";
 $secPath = "https://www.sec.gov";
 $edgarPath = $secPath . "/Archives/edgar/data/";
 
 $docIXBRL = false;
 $remoteLocalPath = $edgarPath . substr($doc, 0, strrpos($doc,'/' )) ;
-if(isset($_REQUEST["f"]) && $_REQUEST["f"]){
-
-    echo repointHyperlinks(httpGet($edgarPath.$doc.".htm"));
-} elseif(isset($_REQUEST["t"]) && strpos($doc, "-index")){
-    //ADSH index page and t (tag) is is set => get index and check if for iXBRL doc and that in viewer if found
-    $target = $edgarPath.$doc;
-    $body = httpGet($target.".htm");
-    $sIxSig = "/ix?doc=/Archives/edgar/data/";
-    $ixPos = strpos($body, $sIxSig);
-    if($ixPos){
-        //load the iXBRL document into the viewer and have ixbrl_viewer.js navigate to the fact
-        $docIXBRL = substr($body, $ixPos + strlen($sIxSig), strpos($body, '.htm', $ixPos) - $ixPos - strlen($sIxSig));
+if((isset($_REQUEST["f"]) && $_REQUEST["f"])){ //f=force get and return (don't think!)
+    echo repointHyperlinks(httpGet($edgarPath.$doc));
+} elseif(strpos($doc, "-index")){
+    if(isset($_REQUEST["t"])){
+        //ADSH index page and t (tag) is is set => get index and check if for iXBRL doc and that in viewer if found
+        $body = httpGet($edgarPath.$doc);
+        $sIxSig = "/ix?doc=/Archives/edgar/data/";
+        $ixPos = strpos($body, $sIxSig);
+        if($ixPos){
+            //load the iXBRL document into the viewer and have ixbrl_viewer.js navigate to the fact
+            $docIXBRL = substr($body, $ixPos + strlen($sIxSig), strpos($body, '.htm', $ixPos) - $ixPos - strlen($sIxSig));
+        } else {
+            //no iXBRL document = show index page
+            echo repointHyperlinks($body);
+        }
     } else {
-        echo repointHyperlinks($body);
+        echo repointHyperlinks(httpGet($edgarPath.$doc));
     }
 } else {
     $docIXBRL = $doc;
@@ -65,6 +69,11 @@ are not subject to domestic copyright protection. 17 U.S.C. 105. -->
             }
         };
     </script>
+    <style>
+        .otherFinancialStatementsSection {
+            display: inline-block;
+        }
+    </style>
 
     <link  rel="stylesheet" href="/global/js/jqueryui/jquery-ui.css" />
     <link rel="stylesheet" href="/global/js/fancybox-master/dist/jquery.fancybox.min.css" type="text/css">
@@ -72,7 +81,7 @@ are not subject to domestic copyright protection. 17 U.S.C. 105. -->
     <link rel="stylesheet" href="css/viewer.css" type="text/css">
     <link rel="stylesheet" href="https://www.sec.gov/ixviewer/css/bootstrap/bootstrap.min.css" type="text/css">
     <link rel="stylesheet" href="https://www.sec.gov/ixviewer/css/app.css" type="text/css">
-    <link rel="stylesheet" href="https://www.sec.gov/ixviewer/css/icon-as-image.css" type="text/css">
+    <link rel="stylesheet" href="https://www.sec.gov/ixviewer/css/icon-as-img.css" type="text/css">
     <script type="text/javascript" src="/global/js/jquery/jquery-3.3.1.min.js"></script>
     <script type="text/javascript" src="/global/js/highcharts/js/highcharts.js"></script>
     <script type="text/javascript" src="/global/js/highcharts/js/modules/exporting.js"></script>
@@ -218,6 +227,14 @@ are not subject to domestic copyright protection. 17 U.S.C. 105. -->
                     </ul>
                 </li>
             </ul>
+        </div>
+
+        <div class="separator">&nbsp;</div>
+        <div class="otherFinancialStatementsSection">
+            <select id="fs-select"></select>
+            <button id="fs-redline" disabled="disabled">compare</button>
+            <button id="fs-go" disabled="disabled">view</button>
+            <span id="amendmentMessage"></span>
         </div>
         <!--
         <div class="moreFiltersSection hidden" id="additionalFormsListSection">
@@ -1664,6 +1681,7 @@ function repointHyperlinks($html){
     //repoint root relative links and images to SEC
     $repointedHTML = str_replace('href="/', 'href="' . $secPath . '/', $repointedHTML);
     $repointedHTML = str_replace('src="/', 'src="' . $secPath . '/', $repointedHTML);
+    $repointedHTML = str_replace('href="https://www.sec.gov/ix?doc=/Archives/edgar/data/', 'href="https://www.publicdata.guru/sec/viewer.php?doc=', $repointedHTML);
 
     return $repointedHTML;
 }
