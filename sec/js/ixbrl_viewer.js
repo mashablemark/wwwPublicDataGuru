@@ -696,14 +696,16 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                         tableCIK,
                         newRow;
                     while(frameRowIndex<frame.data.length || tableRowIndex<tableData.length){
-                        frameRow = frame.data[frameRowIndex];
                         newRow = null;
-                        if(frameRow) frameCIK = parseInt(frameRow.cik);
                         if(tableRowIndex<tableData.length) tableCIK = parseInt(tableData[tableRowIndex][2]); //
-                        if((frameCIK<tableCIK && frameRowIndex<frame.data.length) || tableRowIndex==tableData.length){ //table is missing this CIK = add header cells and fill any preceding data cells with nulls
-                            newRow = [frameRow.entityName, frameRow.entityName, frameRow.cik, frameRow.sic, frameRow.loc]
-                                .concat(new Array(columnDefs.length-headerColumnLength).fill(null));
-                            tableData.splice(tableRowIndex, 0, newRow);
+                        if(frameRowIndex<frame.data.length){
+                            frameRow = frame.data[frameRowIndex];
+                            frameCIK = parseInt(frameRow.cik);
+                            if(frameCIK<tableCIK || tableRowIndex==tableData.length){ //table is missing this CIK = add header cells and fill any preceding data cells with nulls
+                                newRow = [frameRow.entityName, frameRow.entityName, frameRow.cik, frameRow.sic, frameRow.loc]
+                                    .concat(new Array(columnDefs.length-headerColumnLength).fill(null));
+                                tableData.splice(tableRowIndex, 0, newRow);
+                            }
                         }
                         if(frameCIK<=tableCIK && frameRowIndex<frame.data.length || newRow){  //insync = add data to current row and advance both indexes together
                             var newColumns = [frameRow.start,  //don't add for
@@ -719,7 +721,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                             tableRowIndex++;
                             frameRowIndex++;
                         } else { //this frame does not have a row corresponding to the table's current CIK = fill data cell with nulls
-                            tableData[tableRowIndex]= tableData[tableRowIndex].concat(new Array(frameRow.start?8:7).fill(null));  //length of new data cols to be added to columnDefs
+                            tableData[tableRowIndex] = tableData[tableRowIndex].concat(new Array(frameRow.start?8:7).fill(null));  //length of new data cols to be added to columnDefs
                             tableRowIndex++;
                         }
                     }
@@ -743,10 +745,11 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                             }]
                         );
                     }
+                    var hiddenValColumn = columnDefs.length+2;
                     columnDefs = columnDefs.concat([  //note: some fields are displayed in the beowser (visible) while others are exported
                         {   title: "quarters duration", visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':''}},
 
-                        {   title: "Disclosure", export: false, className: "dt-body-right",  render: function(data, type, row, meta){
+                        {   title: "Disclosure", orderData: hiddenValColumn, export: false, className: "dt-body-right",  render: function(data, type, row, meta){
                                 var adsh = row[meta.col+4];
                                 return typeof(data)=='undefined' || data===null?'':'<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh.replace(/-/g,'')
                                     + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+2]) + '</a>'
