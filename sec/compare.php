@@ -9,9 +9,6 @@ $indexHeaderB = httpGet($edgarPath . $cik . "/".str_replace("-","", $accnB)."/".
 $A = parseIndexHeader($indexHeaderA);
 $B = parseIndexHeader($indexHeaderB);
 
-$urlA = $cik . "/".str_replace("-","", $accnA)."/" . $A["fileName"];
-$urlB = $cik . "/".str_replace("-","", $accnB)."/" . $B["fileName"];
-
 //$filingBodyA = bodyContents(httpGet($edgarPath . $cik . "/".str_replace("-","", $accnA)."/" . $A["fileName"]));
 //$filingBodyB = bodyContents(httpGet($edgarPath . $cik . "/".str_replace("-","", $accnB)."/" . $B["fileName"]));
 ?>
@@ -49,14 +46,14 @@ $urlB = $cik . "/".str_replace("-","", $accnB)."/" . $B["fileName"];
 <body>
 <div id="tabs" style="width:80%;">
     <!--button class="compare">compare</button-->
-    <!---ul>
-          <li><a href="#tabs-A"><?=$A["description"].' filed '.$A["filed"]?></a></li>
-          <li><a href="#tabs-B"><?=$B["description"].' filed '.$B["filed"]?></a></li>
+    <ul>
+          <li><a href="#tabs-A"><?=$A["description"].' (filed '.$A["filed"].")"?></a></li>
+          <li><a href="#tabs-B"><?=$B["description"].' (filed '.$B["filed"].")"?></a></li>
           <li><a href="#tabs-redline">Difference</a></li>
         </ul>
-    <div id="tabs-A" class="framepanel"><iframe id="iframe-A" src="viewer.php?f=true&doc=<?= $urlA?>" onload="iframeLoaded()"></iframe></div>
-    <div id="tabs-B" class="framepanel"><iframe id="iframe-B" src="viewer.php?f=true&doc=<?= $urlB ?>" onload="iframeLoaded()"></iframe></div>
-    <div id="tabs-redline" class="scrollpanel">
+    <div id="tabs-A" class="framepanel"><iframe id="iframe-A" src="viewer.php?f=true&doc=<?= $cik . "/".str_replace("-","", $accnA)."/" . $A["fileName"] ?>" onload="iframeLoaded()"></iframe></div>
+    <div id="tabs-B" class="framepanel"><iframe id="iframe-B" src="viewer.php?f=true&doc=<?= $cik . "/".str_replace("-","", $accnB)."/" . $B["fileName"] ?>" onload="iframeLoaded()"></iframe></div>
+    <div id="tabs-redline" class="framepanel">
         <div class="footerRight" style="position:fixed ; top: 200px; right: 5px;" >
             <div class="footerItemTitle">Legend
             </div>
@@ -72,70 +69,62 @@ $urlB = $cik . "/".str_replace("-","", $accnB)."/" . $B["fileName"];
                 </div>
             </div>
         </div>
-        <div id="redline"></div>
-    </div-->
+        <iframe src="compare_template.html" id="redline"></iframe>
+    </div>
 </div>
 </body>
 
 <script language="JavaScript">
-    var docA = false,
-        docB = false,
-        page = 'viewer.php?f=true&doc=',
-        urlA = page + '<?=$urlA?>',
-        urlB = page + '<?=$urlB?>',
-        rxBlockTags = /(<(tr|p|div)([^>]+)>)/ig,
-        rxAllTags = /(<([^>]+)>|&nbsp;)/ig,
-        rxIXHeader = /<ix:header[\s\S]+\/ix:header>/ig,
-        rxCR = /\n/g;
     $(document).ready(function() {
-        //$('#tabs').tabs();
-        //$('div.scrollpanel, div.framepanel').height(window.innerHeight-$('ul.ui-tabs-nav').outerHeight()-25);
-        $.ajax({
-            url: urlA,
-            dataType: 'text',
-            success: function(data){
-                docA = data.replace(rxIXHeader,' ').replace(rxCR,' ').replace(rxBlockTags,'\n').replace(rxAllTags,' ');
-                if(docB) compare();
-            }
-        });
-        $.ajax({
-            url: urlB,
-            dataType: 'text',
-            success: function(data){
-                docB = data.replace(rxIXHeader,' ').replace(rxCR,' ').replace(rxBlockTags,'\n').replace(rxAllTags,' ');
-                if(docA) compare()
-            }
-        });
-    });
-    function compare(){
-        // calculate the diff on load
-        /* for (var option = 0; option < WikEdDiffTool.options.length; option ++) {
-             wikEdDiffConfig[ WikEdDiffTool.options[option] ] = (document.getElementById(WikEdDiffTool.options[option]).checked === true);
-         }
-         wikEdDiffConfig.blockMinLength = parseInt(document.getElementById('blockMinLength').value);
-         wikEdDiffConfig.unlinkMax = parseInt(document.getElementById('unlinkMax').value);
-         wikEdDiffConfig.recursionMax = parseInt(document.getElementById('recursionMax').value);*/
+        $('#tabs').tabs();
+        $('div.scrollpanel, div.framepanel').height(window.innerHeight-$('ul.ui-tabs-nav').outerHeight()-25);
 
-        wikEdDiffConfig = {
-            blockMinLength: 3,
-            charDiff: true,
-            coloredBlocks: true,
-            debug: false,
-            fullDiff: true,
-            noUnicodeSymbols: false,
-            recursionMax: 20,
-            recursiveDiff: true,
-            repeatedDiff: true,
-            showBlockMoves: false,
-            stripTrailingNewline: false,
-            timer: false,
-            unitTesting: false,
-            unlinkBlocks: false,
-            unlinkMax: 20
-        };
-        var wikEdDiff = new WikEdDiff();
-        var diffHtml = wikEdDiff.diff(docA, docB);
-        document.getElementById('tabs').innerHTML = diffHtml;
+    });
+    var frameLoaded = 0;
+    function iframeLoaded(){
+        frameLoaded++;
+        if(frameLoaded==2){
+            // calculate the diff on load
+            /* for (var option = 0; option < WikEdDiffTool.options.length; option ++) {
+                 wikEdDiffConfig[ WikEdDiffTool.options[option] ] = (document.getElementById(WikEdDiffTool.options[option]).checked === true);
+             }
+             wikEdDiffConfig.blockMinLength = parseInt(document.getElementById('blockMinLength').value);
+             wikEdDiffConfig.unlinkMax = parseInt(document.getElementById('unlinkMax').value);
+             wikEdDiffConfig.recursionMax = parseInt(document.getElementById('recursionMax').value);*/
+console.time('rxges');  //
+            //getting the body string and removing tags via regex took 148ms for two 2.8MB complex 10-Q files
+            var rxBlockTags = /(<(tr|p|div)([^>]+)>)/ig,
+                rxDivInCell = /<td([^>]+)>(<span([^>]+)>)*<div[^>]+>/ig,  //avoid line breaks for DIVs next in table cells
+                rxAllTags = /(<([^>]+)>|&nbsp;)/ig,
+                rxIXHeader = /<ix:header[\s\S]+\/ix:header>/ig,
+                rxCR = /\n/g,
+                oldString = document.getElementById('iframe-A').contentDocument.body.innerHTML.replace(rxIXHeader,' ').replace(rxDivInCell,' ').replace(rxCR,' ').replace(rxBlockTags,'\n').replace(rxAllTags,' '),
+                newString = document.getElementById('iframe-B').contentDocument.body.innerHTML.replace(rxIXHeader,' ').replace(rxDivInCell,' ').replace(rxCR,' ').replace(rxBlockTags,'\n').replace(rxAllTags,' ');
+console.timeEnd('rxges');  //
+console.time('wikEdDiff');
+            wikEdDiffConfig = {
+                blockMinLength: 3,
+                charDiff: true,
+                coloredBlocks: true,
+                debug: false,
+                fullDiff: true,
+                noUnicodeSymbols: false,
+                recursionMax: 20,
+                recursiveDiff: true,
+                repeatedDiff: true,
+                showBlockMoves: true,
+                stripTrailingNewline: false,
+                timer: false,
+                unitTesting: false,
+                unlinkBlocks: false,
+                unlinkMax: 20
+            };
+            var wikEdDiff = new WikEdDiff();
+            var diffHtml = wikEdDiff.diff(oldString, newString).replace(/<\/*pre([^>]+)>/gi,'').replace(/\n/g,'<p>');
+            console.log(diffHtml.substring(0,100));
+console.timeEnd('wikEdDiff');
+            document.getElementById('redline').contentDocument.body.innerHTML = diffHtml;  //executes in 683ms for two 2.8MB complex 10-Q files
+        }
     }
 </script>
 
@@ -164,9 +153,10 @@ function httpGet($target, $timeout = 15){
     return $content;
 }
 function parseIndexHeader($body){
+    $filedNoDashes = getFirst($body, '<FILING-DATE>');
     return [
         "fileName" => getFirst($body, '&lt;FILENAME&gt;'),
-        "filed" => getFirst($body, '<FILING-DATE>'),
+        "filed" => substr($filedNoDashes, 0, 4) . "-" . substr($filedNoDashes, 4, 2). "-" . substr($filedNoDashes, 6, 2),
         "description" => getFirst($body, '&lt;DESCRIPTION&gt;')
     ];
 }
