@@ -76,9 +76,7 @@ let me = {
         if(!me.con) me.con = await me.createDbConnection();
         if(sql.indexOf("''fatal MySQL error")===-1){
             try{
-                console.log('about to run query');
                 let [result, fields] = await me.con.query(sql);  //note: con.execute prepares a statement and will run into max_prepared_stmt_count limit
-                console.log('ran query');
                 return {data: result, fields: fields};
             } catch(err) {
                 console.log("fatal MySQL error: "+ err.message);
@@ -95,7 +93,7 @@ let me = {
         }
     },
     logEvent: async (type, msg, display) => {
-        await me.runQuery("insert into eventlog (event, data) values ("+me.q(type)+me.q(msg, true)+")");
+        await me.runQuery("insert into eventlog (event, data) values ("+me.q(type)+me.q(msg.substr(0,59999), true)+")");  //data field is varchar 60,000
         if(display) console.log(type, msg);
     },
     readS3: async (file) => {

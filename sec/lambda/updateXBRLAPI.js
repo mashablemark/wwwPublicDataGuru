@@ -65,7 +65,11 @@ const XBRLDocuments= {
 const bucket = "restapi.publicdata.guru";
 
 exports.handler = async (event, context) => {
-    await common.logEvent('updateXBRL API started', JSON.stringify(event));
+    let dbCheckPromise = common.runQuery("select sum(recs) as records from ("
+        + "select count(*) as recs from fin_sub where adsh='"+event.adsh+"' "
+        + "   UNION ALL "
+        + "select count(*) as recs from fin_num where adsh='"+event.adsh+"') r"
+    );
 
     let submission = {
         filing: event,
@@ -101,9 +105,16 @@ exports.handler = async (event, context) => {
         }
     }
     console.log(JSON.stringify(submission.dei));
-
+    if(submission.dei.EntityCentralIndexKey.value!=submission.filing.cik)
+        await common.logEvent('ERROR: header and DEI CIK mismatch', submission.filing.path);
     //save parsed submission object into DB and update APIs
     if(submission.counts.standardFacts) {
+        let existingRecords = await dbCheckPromise;
+        if(existingRecords.data.length){
+            await common.logEvent('WARNING: existing XBRL records', event.adsh + ' has '+existingRecords.data[0].records+' fin_sub and fin_num records');
+            await common.runQuery("delete from fin_sub where adsh='"+ event.adsh+"'");
+            await common.runQuery("delete from fin_num where adsh='"+ event.adsh+"'");
+        }
         console.log('saving submission...');
         await saveXBRLSubmission(submission);
         console.log('sub mission saved: end of updateXBRL lambda event handler!');
@@ -112,9 +123,9 @@ exports.handler = async (event, context) => {
         //todo: have updateTSPromise  return all TS for cik/tag (not just UOM & QTRS updated)
 
         let updateAPIPromises = [];
-        const financialStatementsList = await common.runQuery("call getFinancialStatementsList('"+submission.dei.cik+"');");
+        const financialStatementsList = await common.runQuery("call listFinancialStatements('"+submission.dei.EntityCentralIndexKey.value+"');");
         //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
-        updateAPIPromises.push(common.writeS3('sec/financialStatementsByCompany/cik'+parseInt(submission.dei.cik), JSON.stringify(financialStatementsList.data)));
+        updateAPIPromises.push(common.writeS3('sec/financialStatementsByCompany/cik'+parseInt(submission.dei.EntityCentralIndexKey.value), JSON.stringify(financialStatementsList.data)));
 
         //write to time series REST API in S3
         let updatedTimeSeriesAPIDataset = await updateTSPromise;  //updates and returns all TS for the tags in submission (note: more returned than updated)
@@ -130,7 +141,7 @@ exports.handler = async (event, context) => {
             }
             lastCik = ts.cik;
             lastTag = ts.tag;
-            let cikKey = 'cik' + parseInt(ts.cik).toString();
+            let cikKey = 'cik' + parseInt(ts.cik, 10).toString();
             s3Key = 'sec/timeseries/' + ts.tag + '/' + cikKey + '.json';
             let qtrs = "DQ" + ts.qtrs;  //DQ prefix = duration in quarters
             if (!oTimeSeries.tag) {
@@ -138,13 +149,13 @@ exports.handler = async (event, context) => {
                     label: ts.label,
                     description: ts.description
                 };
-                oTimeSeries['cikKey'] = {
+                oTimeSeries[cikKey] = {
                     entityName: ts.entityname,
                     units: {}
-                }
+                };
             }
             if (!oTimeSeries[cikKey].units[ts.uom]) {
-                oTimeSeries[cikKey].units[ts.uom] = {}
+                oTimeSeries[cikKey].units[ts.uom] = {};
             }
             oTimeSeries[lastTag][cikKey]["units"][ts.uom]['DQ'+ts.qtrs] = JSON.parse(ts.json);  //DQ = duration in quarters
         }
@@ -178,7 +189,7 @@ exports.handler = async (event, context) => {
             let frameRecord = await common.runQuery(getCommand);
             let frame = JSON.parse(frameRecord.data[0].json);
             let newPoint = {"accn": submission.filing.adsh,
-                "cik": submission.dei.EntityCentralIndexKey || submission.filing.cik,
+                "cik": submission.dei.EntityCentralIndexKey.value || submission.filing.cik,
                 "entityName": submission.dei.EntityRegistrantName||submission.filing,
                 "sic": submission.filing.sic,
                 "loc": (submission.filing.businessAddress.country || submission.filing.businessAddress.country || 'US') + '-' + (submission.filing.businessAddress.state || submission.filing.businessAddress.state),
@@ -189,7 +200,7 @@ exports.handler = async (event, context) => {
             let i;
             for(i=0;i<frame.data.length;i++){
                 let point = frame.data[i];
-                if(point.cik==submission.dei.cik){
+                if(point.cik==submission.dei.EntityCentralIndexKey.value){
                     if((point.start!=newPoint.start && (point.start || newPoint.start)) || point.end!=newPoint.end)
                         throw("parsed tag "+fact.tag+" has different dates that frame for "+ S3key);
                     if(point.value!=newPoint.value) newPoint.rev = point.rev+1;
@@ -208,8 +219,8 @@ exports.handler = async (event, context) => {
                 getCommand  = "call updateFrame("+common.q(fact.tag)+common.q(fact.ccp)+common.q(fact.uom)+common.q(JSON.stringify(frame))+common.q(frameRecord.data[0].timestamp, true)+")";  //no json = get request
                 let response = await await common.runQuery(getCommand);
                 if(response.date[0].processed){
-                    await common.writeS3(s3Key, JSON.stringify(frame));
-                    resolve(s3Key);
+                    await common.writeS3(S3key, JSON.stringify(frame));
+                    resolve(S3key);
                 } else {
                     if(depth<3)
                         resolve(await updateFrame(fact, submissionObject, depth+1));  //retry up to 3 times
@@ -250,7 +261,7 @@ function parseXBRL($, submission){
                 if((skipNameSpaces.indexOf(tax)==-1) && val.length){
                     if(tax=='dei'){
                         submission.dei[tag] = {
-                            val: val,
+                            value: val,
                             contextRef: this.attribs.contextRef || this.attribs.contextref
                         };
                         if (!submission.dei[tag].contextRef) common.logEvent("missing DEI contextRef for "+tag, submission.filing.adsh);
@@ -320,7 +331,7 @@ function parseIXBRL($, parsedFacts){
 
     //get iXBRL context tags make lookup tree for contextRef date values and dimensions
     $('xbrli\\:context').each(function(i, elem) {
-        parseContextElement($, elem, submission);
+        parseContextElement($, elem, parsedFacts);
     });
 
     //get iXBRL unit tags and make lookup tree for unitRef values
@@ -338,16 +349,17 @@ function parseIXBRL($, parsedFacts){
                         parsedFacts.facts[factKey] = xbrl;
                         parsedFacts.hasIXBRL = true;
                     } else {
-                        if(parsedFacts.facts[factKey].value != xbrl.value)
+                        if(parsedFacts.facts[factKey].value != xbrl.value){
                             common.logEvent('ERROR: XBRL value conflict in '+parsedFacts.filing.adsh, '['+JSON.stringify(xbrl)+','
                                 +JSON.stringify(parsedFacts.facts[factKey])+']');
+                        }
                     }
                     parsedFacts.counts.standardFacts++;
                 }
             }
             parsedFacts.counts.facts++;
         } catch (e) {
-            common.logEvent('ERROR updateXBRLAPI extracting nonfraction from iXBRL in '+ parsedFacts.filing.adsh, e.message, true); //log error and continue parsing
+            common.logEvent('ERROR: updateXBRLAPI extracting nonfraction from iXBRL in '+ parsedFacts.filing.adsh, e.message, true); //log error and continue parsing
         }
     });
     return parsedFacts;
@@ -382,7 +394,7 @@ function parseContextElement($, element, submissionObject){
                 qtrs: 0,
             };
         } else {
-            console.log('ERROR parsing context '+contextID+' in XBRL doc of ' + submissionObject.filing.adsh);
+            console.log('ERROR: parsing context '+contextID+' in XBRL doc of ' + submissionObject.filing.adsh);
         }
     }
     if(standardQuarters.indexOf(newContext.qtrs)) newContext.ccp = common.closestCalendricalPeriod(dtStart, dtEnd);
@@ -416,11 +428,11 @@ function parseUnitElement($, element, submissionObject){
         if ($measure.length == 1) {
             submissionObject.unitTree[element.attribs.id] = {label: $measure.text().split(':').pop()};
         } else {
-            common.logEvent('ERROR updateXBRLAPI parsing unit tag in iXBRL doc :', element.attribs.id, true);
-            throw('ERROR updateXBRLAPI for parsing unit tag ' + element.attribs.id);
+            common.logEvent('ERROR: updateXBRLAPI parsing unit tag in iXBRL doc :', element.attribs.id, true);
+            throw('ERROR: updateXBRLAPI for parsing unit tag ' + element.attribs.id);
         }
     }
-    submissionObject.counts.units++
+    submissionObject.counts.units++;
 }
 function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
     let $ix = $(ix),
@@ -478,40 +490,43 @@ async function saveXBRLSubmission(s){
             + ', countryba, stprba, cityba, zipba, bas1, bas2, baph, '
             + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, filercategory, '
             +' accepted, prevrpt, detail, instance, nciks, aciks '
-            + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey.val+","+q(s.dei.EntityRegistrantName.val)+(s.filing.sic||0)+','
-            + q(s.dei.CurrentFiscalYearEndDate.val.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType.val)+q(s.dei.DocumentPeriodEndDate.val)
-            + q(s.dei.DocumentFiscalYearFocus.val)+q(s.dei.DocumentFiscalPeriodFocus.val)+q(s.filing.filingDate)
+            + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey.value+","+q(s.dei.EntityRegistrantName.value)+(s.filing.sic||0)+','
+            + q(s.dei.CurrentFiscalYearEndDate.value.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType.value)+q(s.dei.DocumentPeriodEndDate.value)
+            + q(s.dei.DocumentFiscalYearFocus.value)+q(s.dei.DocumentFiscalPeriodFocus.value)+q(s.filing.filingDate)
             + q(s.filing.businessAddress.country)+q(s.filing.businessAddress.state)+q(s.filing.businessAddress.city)+q(s.filing.businessAddress.zip)
             + q(s.filing.businessAddress.street1)+q(s.filing.businessAddress.street2)+q(s.filing.businessAddress.phone)
             + q(s.filing.mailingAddress.country)+q(s.filing.mailingAddress.state)+q(s.filing.mailingAddress.city)+q(s.filing.mailingAddress.zip)
             + q(s.filing.mailingAddress.street1)+q(s.filing.mailingAddress.street2)
             + q(s.filing.incorporation?s.filing.incorporation.country:null)+q(s.filing.incorporation?s.filing.incorporation.state:null)+q(s.filing.ein)
-            + q('former')+q('changed')+q(s.dei.EntityFilerCategory.val)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
-            + q(s.hasIXBRL||s.hasXBRL)+"1,"+q(s.dei.EntityCentralIndexKey.val, true)+")";
+            + q('former')+q('changed')+q(s.dei.EntityFilerCategory.value)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
+            + q(s.hasIXBRL||s.hasXBRL)+"1,"+q(s.dei.EntityCentralIndexKey.value, true)+")";
     await common.runQuery(sql);
 
     //save numerical fact records into fin_num
     console.log('saving facts...');
     let i=0, fact, numSQL, version, coreg;
-    const numInsertHeader = 'insert into fin_num (adsh, tag, version, coreg, start, end, qtrs, uom, value, footnote) values ';
+    const numInsertHeader = 'insert into fin_num (adsh, tag, version, coreg, start, end, qtrs, ccp, uom, value) values ';
     numSQL = numInsertHeader;
     for(let factKey in s.facts){
-        fact = s.facts[factKey]; //fact object properties: tag, ns, unitRef, contextRef, decimals & val
-        console.log('DEBUG ONLY');  //todo: DEBUG ONLY!!
         console.log(JSON.stringify(fact));  //todo: DEBUG ONLY!!
-        if (fact.member) {
-            coreg = fact.member.split(':').pop();
-            if (coreg.length > 5 && coreg.substr(-5, 5) == 'Member') coreg = coreg.substr(0, coreg.length - 5);  //hack to match DERA dataset
-        } else coreg = '';
-        version = (standardNumericalTaxonomies.indexOf(fact.ns) == -1) ? s.adsh : fact.ns;
-        if(version!=s.adsh && coreg=='' && fact.unit) fact.isStandard = true;
-        //multi-row inserts are faster
-        numSQL += (i%1000==0?'':', ') + "(" + q(s.adsh) + q(fact.tag) + q(version) + q(coreg) + q(fact.start)  + q(fact.end)  + fact.qtrs+','
-            + q(fact.uom.label)+ fact.val + ",'')";
-        i++;
-        if(i%1000==0){ //but don't let the query get too long.... max packet size 2MB
-            await common.runQuery(numSQL);
-            numSQL = numInsertHeader;
+        fact = s.facts[factKey]; //fact object properties: tag, ns, unitRef, contextRef, decimals & val
+        if(fact.uom){
+            if (fact.member) {
+                coreg = fact.member.split(':').pop();
+                if (coreg.length > 5 && coreg.substr(-5, 5) == 'Member') coreg = coreg.substr(0, coreg.length - 5);  //hack to match DERA dataset
+            } else coreg = '';
+            version = (standardNumericalTaxonomies.indexOf(fact.taxonomy) == -1) ? s.filing.adsh : fact.taxonomy;
+            if(version!=s.adsh && coreg=='' && fact.unit) fact.isStandard = true;
+            //multi-row inserts are faster
+            numSQL += (i%1000==0?'':', ') + "(" + q(s.filing.adsh) + q(fact.tag) + q(version) + "''," + q(fact.start)+ q(fact.end)  + fact.qtrs+','
+                + q(fact.ccp) + q(fact.uom.label) + fact.value + ")";
+            i++;
+            if(i%1000==0){ //but don't let the query get too long.... max packet size 2MB
+                await common.runQuery(numSQL);
+                numSQL = numInsertHeader;
+            }
+        }else {
+            console.log('WARNING: no units for tag '+fact.tag); //lots of footnotes and some date tags
         }
     }
     if(i%1000!=0) await common.runQuery(numSQL);  // execute multi-row insert
