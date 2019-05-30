@@ -69,7 +69,7 @@ $B = parseIndexHeader($indexHeaderB);
                 </div>
             </div>
         </div>
-        <iframe src="compare_template.html" id="redline"></iframe>
+        <iframe src="compare_template.html" id="redline" onload="iframeLoaded()"></iframe>
     </div>
 </div>
 </body>
@@ -83,7 +83,7 @@ $B = parseIndexHeader($indexHeaderB);
     var frameLoaded = 0;
     function iframeLoaded(){
         frameLoaded++;
-        if(frameLoaded==2){
+        if(frameLoaded==3){
             // calculate the diff on load
             /* for (var option = 0; option < WikEdDiffTool.options.length; option ++) {
                  wikEdDiffConfig[ WikEdDiffTool.options[option] ] = (document.getElementById(WikEdDiffTool.options[option]).checked === true);
