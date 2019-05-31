@@ -117,7 +117,7 @@ exports.handler = async (event, context) => {
         }
         console.log('saving submission...');
         await saveXBRLSubmission(submission);
-        console.log('sub mission saved: end of updateXBRL lambda event handler!');
+        console.log('submission saved');
 
         const updateTSPromise = common.runQuery("call updateTimeSeries('"+submission.filing.adsh+"');");  //52ms runtime
         //todo: have updateTSPromise  return all TS for cik/tag (not just UOM & QTRS updated)
@@ -128,69 +128,88 @@ exports.handler = async (event, context) => {
         updateAPIPromises.push(common.writeS3('sec/financialStatementsByCompany/cik'+parseInt(submission.dei.EntityCentralIndexKey.value), JSON.stringify(financialStatementsList.data)));
 
         //write to time series REST API in S3
+
+        let startTSProcess = new Date();
         let updatedTimeSeriesAPIDataset = await updateTSPromise;  //updates and returns all TS for the tags in submission (note: more returned than updated)
         let lastCik = false,
             lastTag = false,
             oTimeSeries = {},
-            s3Key;
-        for(let i=0; i<updatedTimeSeriesAPIDataset.data.length;i++) {
-            let ts = updatedTimeSeriesAPIDataset.data[i];
+            s3Key,
+            i,
+            timeSeriesFileCount = 0;
+        //note:  stroed procedures return select results dat[0] and the status date [1] as a 2-element array
+        console.log('count of TS to update: '+updatedTimeSeriesAPIDataset.data[0].length);
+        for(i=0; i<updatedTimeSeriesAPIDataset.data[0].length;i++) {
+            let ts = updatedTimeSeriesAPIDataset.data[0][i];
             if (lastCik && lastTag && (lastCik != ts.cik || lastTag != ts.tag)) {
                 updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));
                 oTimeSeries = {};
+                timeSeriesFileCount++;
             }
             lastCik = ts.cik;
             lastTag = ts.tag;
             let cikKey = 'cik' + parseInt(ts.cik, 10).toString();
-            s3Key = 'sec/timeseries/' + ts.tag + '/' + cikKey + '.json';
+            s3Key = 'test/timeseries/' + ts.tag + '/' + cikKey + '.json';  //todo: change root to sec to go live
             let qtrs = "DQ" + ts.qtrs;  //DQ prefix = duration in quarters
-            if (!oTimeSeries.tag) {
-                oTimeSeries.tag = {
+            if (!oTimeSeries[ts.tag]) {
+                oTimeSeries[ts.tag] = {
                     label: ts.label,
                     description: ts.description
                 };
-                oTimeSeries[cikKey] = {
-                    entityName: ts.entityname,
+                oTimeSeries[ts.tag][cikKey] = {
+                    entityName: ts.entityName,
                     units: {}
                 };
             }
-            if (!oTimeSeries[cikKey].units[ts.uom]) {
-                oTimeSeries[cikKey].units[ts.uom] = {};
+            if (!oTimeSeries[ts.tag][cikKey]["units"][ts.uom]) {
+                oTimeSeries[ts.tag][cikKey]["units"][ts.uom] = {};
             }
-            oTimeSeries[lastTag][cikKey]["units"][ts.uom]['DQ'+ts.qtrs] = JSON.parse(ts.json);  //DQ = duration in quarters
+            oTimeSeries[ts.tag][cikKey]["units"][ts.uom][qtrs] = JSON.parse(ts.json);  //DQ = duration in quarters
         }
         updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
+        timeSeriesFileCount++;
+        let endTSProcess = new Date();
+        console.log('process and make write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+submission.dei.EntityRegistrantName+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
         //write to frame REST API in S3 by looping through list of parsed facts and updating the DB's JSON object rather than recreating = too DB intensive
-        for(let tag in submission.facts){
-            let fact = submission.facts[tag];
-            if(fact.isStandard && fact.ccp){
+        for(let factKey in submission.facts){
+            let fact = submission.facts[factKey];
+            if(fact.isStandard && fact.ccp && fact.uom){  //no uom = text block tag such as footnotes -> not a frame!
                 updateAPIPromises.push(updateFrame(fact));
             }
         }
 
         //promise collection
         for(let i=0;i<updateAPIPromises.length;i++){
+            console.log('collecting updateAPIPromises #'+i);
             await updateAPIPromises[i];
         }
     } else {
         console.log('no iXBRL/XBRL found: end of updateXBRL lambda event handler!');
     }
-
+    console.log('end of updateXBRL lambda event handler!');
     function updateFrame(fact, submissionObject, depth=1){
         // 1. read JSON and timestamp from DB
         // 2. update JSON if needed
         // 3. if updated write to DB via stored procedure (updateFrame) that checks for timestamp constancy:
         //     returns (A) confirmation -> next fact) or (B) new timestamp and json for retry (step 2)
+
         return new Promise(async (resolve, reject) => {
-            let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.ccp)+common.q(fact.uom)+"'', '')";  //no json = get request
-            let S3key = 'sec/frames/'+fact.tag+'/'+fact.uom+'/'+fact.ccp+'.json';
+            console.log(fact);
+            let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs+",'', null)";  //no json = get request
+            //todo: change root to sec to go live for timeseries and frames S3 writes
+            let S3key = 'test/frames/'+fact.tag+'/'+fact.uom.label+'/'+fact.ccp+'.json';
             let needsUpdate = false;
             let frameRecord = await common.runQuery(getCommand);
-            let frame = JSON.parse(frameRecord.data[0].json);
+            try{
+                let frame = JSON.parse(frameRecord.data[0].json);
+            } catch(e){
+                console.log('ERROR PARSING FRAME FOR '+S3key);
+                console.log(frameRecord.data);
+            }
             let newPoint = {"accn": submission.filing.adsh,
                 "cik": submission.dei.EntityCentralIndexKey.value || submission.filing.cik,
-                "entityName": submission.dei.EntityRegistrantName||submission.filing,
+                "entityName": submission.dei.EntityRegistrantName||submission.filing.entityName,
                 "sic": submission.filing.sic,
                 "loc": (submission.filing.businessAddress.country || submission.filing.businessAddress.country || 'US') + '-' + (submission.filing.businessAddress.state || submission.filing.businessAddress.state),
                 "start": fact.start,
@@ -198,11 +217,11 @@ exports.handler = async (event, context) => {
                 "val": fact.value,
                 "rev": 1};
             let i;
-            for(i=0;i<frame.data.length;i++){
-                let point = frame.data[i];
+            for(i=0;i<frame.data[0].length;i++){
+                let point = frame.data[0][i];
                 if(point.cik==submission.dei.EntityCentralIndexKey.value){
                     if((point.start!=newPoint.start && (point.start || newPoint.start)) || point.end!=newPoint.end)
-                        throw("parsed tag "+fact.tag+" has different dates that frame for "+ S3key);
+                        throw("parsed tag "+fact.tag+" has different dates them the frame for "+ S3key);
                     if(point.value!=newPoint.value) newPoint.rev = point.rev+1;
                     if(point.value!=newPoint.value  || point.sic!=newPoint.sic  || point.entityName!=newPoint.entityName  || point.loc!=newPoint.loc){
                         frame.data.splice(i,1,newPoint);
@@ -216,7 +235,9 @@ exports.handler = async (event, context) => {
                 frame.data.push(newPoint);
             }
             if(needsUpdate){
-                getCommand  = "call updateFrame("+common.q(fact.tag)+common.q(fact.ccp)+common.q(fact.uom)+common.q(JSON.stringify(frame))+common.q(frameRecord.data[0].timestamp, true)+")";  //no json = get request
+                console.log(JSON.stringify(frame));
+                console.log(frameRecord);
+                getCommand  = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs+','+common.q(JSON.stringify(frame))+common.q(frameRecord.data[0].timestamp, true)+")";  //no json = get request
                 let response = await await common.runQuery(getCommand);
                 if(response.date[0].processed){
                     await common.writeS3(S3key, JSON.stringify(frame));
@@ -227,6 +248,8 @@ exports.handler = async (event, context) => {
                     else
                         reject(S3key);
                 }
+            } else {
+                resolve(true);
             }
         });
     }
@@ -444,10 +467,10 @@ function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
             uom: objParsedSubmission.unitTree[unitRef],
             taxonomy: nameParts[0],
             tag: nameParts[1],
-            scale: ix.attribs.scale, //$ix.attr('scale'),  //iXBRL only; XBRL has scale in contextRef
+            scale: ix.attribs.scale||'', //$ix.attr('scale'),  //iXBRL only; XBRL has scale in contextRef
             decimals: ix.attribs.decimals, //XBRL & iXBRL
-            format: ix.attribs.format,  //only iXBRL?
-            sign: ix.attribs.sign,
+            format: ix.attribs.format||'',  //only iXBRL?
+            sign: ix.attribs.sign||'',  //only iXBRL?
             isStandard: standardNumericalTaxonomies.indexOf(nameParts[0])!==-1,
             text: $ix.text().trim()
         };
@@ -457,6 +480,7 @@ function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
         xbrl.qtrs = context.qtrs;
         xbrl.end = context.end;
         if(context.start) xbrl.start = context.start;
+        if(context.scale) xbrl.scale = context.scale;
         if(context.member) xbrl.member = context.member;
         if(context.dim) xbrl.dim = context.dim;
         if(context.ccp) xbrl.ccp = context.ccp;
@@ -485,7 +509,7 @@ async function saveXBRLSubmission(s){
     //console.log(JSON.stringify(s)); //debug only!!!
     //save main submission record into fin_sub
     let q = common.q,
-        start = new Date(),
+        startProcess = new Date(),
         sql = 'INSERT INTO fin_sub(adsh, cik, name, sic, fye, form, period, fy, fp, filed'
             + ', countryba, stprba, cityba, zipba, bas1, bas2, baph, '
             + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, filercategory, '
@@ -508,7 +532,7 @@ async function saveXBRLSubmission(s){
     const numInsertHeader = 'insert into fin_num (adsh, tag, version, coreg, start, end, qtrs, ccp, uom, value) values ';
     numSQL = numInsertHeader;
     for(let factKey in s.facts){
-        console.log(JSON.stringify(fact));  //todo: DEBUG ONLY!!
+        //console.log(JSON.stringify(fact));  //todo: DEBUG ONLY!!
         fact = s.facts[factKey]; //fact object properties: tag, ns, unitRef, contextRef, decimals & val
         if(fact.uom){
             if (fact.member) {
@@ -530,8 +554,8 @@ async function saveXBRLSubmission(s){
         }
     }
     if(i%1000!=0) await common.runQuery(numSQL);  // execute multi-row insert
-    let end = new Date();
-    console.log('saveXBRLSubmission wrote ' + i + ' facts for '+s.coname+' ' + s.form + ' for ' + s.fy + s.fp + ' ('+ s.adsh +') in ' + (end-start) + ' ms');
+    let endProcess = new Date();
+    console.log('saveXBRLSubmission wrote ' + i + ' facts from '+s.dei.EntityRegistrantName+' ' + s.filing.form + ' for ' + s.filing.period + ' ('+ s.filing.adsh +') in ' + (endProcess-startProcess) + ' ms');
 }
 
 /*//////////////////// TEST CARDS  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
