@@ -169,7 +169,7 @@ exports.handler = async (event, context) => {
         updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
         timeSeriesFileCount++;
         let endTSProcess = new Date();
-        console.log('process and make write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+submission.dei.EntityRegistrantName+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        console.log('processed and made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
         //write to frame REST API in S3 by looping through list of parsed facts and updating the DB's JSON object rather than recreating = too DB intensive
         for(let factKey in submission.facts){
@@ -195,21 +195,24 @@ exports.handler = async (event, context) => {
         //     returns (A) confirmation -> next fact) or (B) new timestamp and json for retry (step 2)
 
         return new Promise(async (resolve, reject) => {
-            console.log(fact);
+            //console.log(fact);
             let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs+",'', null)";  //no json = get request
             //todo: change root to sec to go live for timeseries and frames S3 writes
             let S3key = 'test/frames/'+fact.tag+'/'+fact.uom.label+'/'+fact.ccp+'.json';
             let needsUpdate = false;
             let frameRecord = await common.runQuery(getCommand);
+            let frame, frameDataArray;
             try{
-                let frame = JSON.parse(frameRecord.data[0].json);
+                frame = frameRecord.data[0][0];
+                frameDataArray = JSON.parse(frame.json.replace(/\\/g,'\\\\'));
             } catch(e){
-                console.log('ERROR PARSING FRAME FOR '+S3key);
+                console.log('ERROR PARSING FRAME FOR ' + S3key);
+                console.log(getCommand);
                 console.log(frameRecord.data);
             }
             let newPoint = {"accn": submission.filing.adsh,
                 "cik": submission.dei.EntityCentralIndexKey.value || submission.filing.cik,
-                "entityName": submission.dei.EntityRegistrantName||submission.filing.entityName,
+                "entityName": submission.dei.EntityRegistrantName.value||submission.filing.entityName,
                 "sic": submission.filing.sic,
                 "loc": (submission.filing.businessAddress.country || submission.filing.businessAddress.country || 'US') + '-' + (submission.filing.businessAddress.state || submission.filing.businessAddress.state),
                 "start": fact.start,
@@ -217,36 +220,61 @@ exports.handler = async (event, context) => {
                 "val": fact.value,
                 "rev": 1};
             let i;
-            for(i=0;i<frame.data[0].length;i++){
-                let point = frame.data[0][i];
+            for(i=0;i<frameDataArray.length;i++){
+                let point = frameDataArray[i];
                 if(point.cik==submission.dei.EntityCentralIndexKey.value){
                     if((point.start!=newPoint.start && (point.start || newPoint.start)) || point.end!=newPoint.end)
-                        throw("parsed tag "+fact.tag+" has different dates them the frame for "+ S3key);
+                        //TODO: THROW THE FOLLOWING ERROR WHEN DERA DATE ROUNDED DATA IS REPLACED WITH CORRECTLY PARSED DATA throw("parsed tag "+fact.tag+" has different dates then frame "+ S3key);
+                        console.log("parsed tag "+fact.tag+" has different dates then frame "+ S3key + ' existing: ('+point.start+','+point.end+'), new: ('+newPoint.start+','+newPoint.end+')');
                     if(point.value!=newPoint.value) newPoint.rev = point.rev+1;
                     if(point.value!=newPoint.value  || point.sic!=newPoint.sic  || point.entityName!=newPoint.entityName  || point.loc!=newPoint.loc){
-                        frame.data.splice(i,1,newPoint);
+                        frameDataArray.splice(i,1,newPoint);
                         needsUpdate = true;
                         break;
                     }
                 }
             }
-            if(i==frame.data.length){
+            if(i==frameDataArray.length){
                 needsUpdate = true;
-                frame.data.push(newPoint);
+                frameDataArray.push(newPoint);
             }
             if(needsUpdate){
-                console.log(JSON.stringify(frame));
-                console.log(frameRecord);
-                getCommand  = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs+','+common.q(JSON.stringify(frame))+common.q(frameRecord.data[0].timestamp, true)+")";  //no json = get request
-                let response = await await common.runQuery(getCommand);
-                if(response.date[0].processed){
-                    await common.writeS3(S3key, JSON.stringify(frame));
-                    resolve(S3key);
-                } else {
-                    if(depth<3)
-                        resolve(await updateFrame(fact, submissionObject, depth+1));  //retry up to 3 times
-                    else
-                        reject(S3key);
+                //console.log(JSON.stringify(frameDataArray));
+                //console.log(frameRecord);
+                let response;
+                let writeCall  = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs
+                    +','+common.q(JSON.stringify(frameDataArray))+common.q(frameRecord.data[0][0].tstamp, true)+")";  //no json = get request
+                try {
+                    response = await common.runQuery(writeCall);
+                    if(response.data[0][0].processed){
+                        await common.writeS3(S3key, JSON.stringify(
+                            {
+                                tag: frame.tag,
+                                ccp: frame.ccp,
+                                uom: frame.uom,
+                                qtrs: frame.qtrs,
+                                label: frame.label,
+                                description: frame.description,
+                                data: frameDataArray
+                            }));
+                        console.log('wrote '+ S3key);
+                        resolve(S3key);
+                    } else {
+                        console.log(JSON.stringify(response.data[0], null, 2));
+                        if(depth<3){
+                            console.log('retry depth='+depth+'for '+ writeCall);
+                            resolve(await updateFrame(fact, submissionObject, depth+1));  //retry up to 3 times
+                        }
+                        else
+                            console.log('stroke out processing'+S3key);
+                            reject(S3key);
+                    }
+                } catch(e){
+                    console.write(writeCall);
+                    console.write('updateFrame depth: ' + depth);
+                    console.write(response);
+                    throw e;
+
                 }
             } else {
                 resolve(true);
@@ -313,7 +341,7 @@ function parseXBRL($, submission){
             }
         }
     });
-    //console.log(submission);
+    console.log(submission.dei);
     return submission;
 
     function getElements(namespace, tagName){
@@ -555,7 +583,7 @@ async function saveXBRLSubmission(s){
     }
     if(i%1000!=0) await common.runQuery(numSQL);  // execute multi-row insert
     let endProcess = new Date();
-    console.log('saveXBRLSubmission wrote ' + i + ' facts from '+s.dei.EntityRegistrantName+' ' + s.filing.form + ' for ' + s.filing.period + ' ('+ s.filing.adsh +') in ' + (endProcess-startProcess) + ' ms');
+    console.log('saveXBRLSubmission wrote ' + i + ' facts from '+s.dei.EntityRegistrantName.value+' ' + s.filing.form + ' for ' + s.filing.period + ' ('+ s.filing.adsh +') in ' + (endProcess-startProcess) + ' ms');
 }
 
 /*//////////////////// TEST CARDS  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
