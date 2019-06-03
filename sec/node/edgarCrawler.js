@@ -27,18 +27,18 @@ const s3 = new AWS.S3();
 const targetFormTypes= {
     //'S-1': 'noProcessing',
     //'S-1/A': 'noProcessing',
-    'D': 'syncProcessing',
-    'D/A': 'syncProcessing',
+    //'D': 'syncProcessing',
+    //'D/A': 'syncProcessing',
     //'3': 'asyncProcessing',
     //'3/A': 'asyncProcessing',
     //'4': 'asyncProcessing',
     //'4/A': 'asyncProcessing',
     //'5': 'asyncProcessing',
     //'5/A': 'asyncProcessing',
-    //'10-Q': 'asyncProcessing',
-    //'10-Q/A': 'asyncProcessing',
-    //'10-K': 'asyncProcessing',
-    //'10-K/A': 'asyncProcessing'
+    '10-Q': 'asyncProcessing',
+    '10-Q/A': 'asyncProcessing',
+    '10-K': 'asyncProcessing',
+    '10-K/A': 'asyncProcessing'
 };
 const indexLineFields = {CIK: 0, CompanyName: 1, FormType: 2, DateFiled: 3, Filename: 4};
 
@@ -127,9 +127,10 @@ async function processQuarterlyIndex(processControl, callback) {
                 if(updateProcess != 'noProcessing'){
                     if(updateProcess == 'syncProcessing') {
                         await processIndexHeader(lineParts);
-                        await wait(4000);  //about 3.5 seconds
+                        await wait(4000);  //about 4.5 seconds total
                     } else {
-                        processIndexHeader(lineParts);
+                        await processIndexHeader(lineParts);
+                        await wait(4000);  //about 4.5 seconds total
                     }
                 }
             }

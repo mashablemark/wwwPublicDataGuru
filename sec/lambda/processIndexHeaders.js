@@ -208,7 +208,7 @@ exports.handler = async (event, context) => {
                 resolve(data);
             });
         });
-        console.log(JSON.stringify(payload));
+        console.log(payload);
         console.log(lambdaResult);
     }
 

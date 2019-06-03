@@ -104,7 +104,7 @@ exports.handler = async (event, context) => {
             console.log(submission.counts);
         }
     }
-    console.log(JSON.stringify(submission.dei));
+    console.log(JSON.stringify(submission));
     if(submission.dei.EntityCentralIndexKey.value!=submission.filing.cik)
         await common.logEvent('ERROR: header and DEI CIK mismatch', submission.filing.path);
     //save parsed submission object into DB and update APIs
@@ -137,7 +137,7 @@ exports.handler = async (event, context) => {
             s3Key,
             i,
             timeSeriesFileCount = 0;
-        //note:  stroed procedures return select results dat[0] and the status date [1] as a 2-element array
+        //note:  stored procedures return select results (data[0]) and the status (data[1]) as a 2-element array
         console.log('count of TS to update: '+updatedTimeSeriesAPIDataset.data[0].length);
         for(i=0; i<updatedTimeSeriesAPIDataset.data[0].length;i++) {
             let ts = updatedTimeSeriesAPIDataset.data[0][i];
@@ -181,13 +181,17 @@ exports.handler = async (event, context) => {
 
         //promise collection
         for(let i=0;i<updateAPIPromises.length;i++){
-            console.log('collecting updateAPIPromises #'+i);
+            //console.log('collecting updateAPIPromises #'+i);
             await updateAPIPromises[i];
         }
+        console.log('processed and made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' frames from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+
     } else {
         console.log('no iXBRL/XBRL found: end of updateXBRL lambda event handler!');
     }
     console.log('end of updateXBRL lambda event handler!');
+
+
     function updateFrame(fact, submissionObject, depth=1){
         // 1. read JSON and timestamp from DB
         // 2. update JSON if needed
@@ -209,6 +213,7 @@ exports.handler = async (event, context) => {
                 console.log('ERROR PARSING FRAME FOR ' + S3key);
                 console.log(getCommand);
                 console.log(frameRecord.data);
+                throw e;
             }
             let newPoint = {"accn": submission.filing.adsh,
                 "cik": submission.dei.EntityCentralIndexKey.value || submission.filing.cik,
@@ -223,9 +228,10 @@ exports.handler = async (event, context) => {
             for(i=0;i<frameDataArray.length;i++){
                 let point = frameDataArray[i];
                 if(point.cik==submission.dei.EntityCentralIndexKey.value){
-                    if((point.start!=newPoint.start && (point.start || newPoint.start)) || point.end!=newPoint.end)
+                    if((point.start!=newPoint.start && (point.start || newPoint.start)) || point.end!=newPoint.end){
                         //TODO: THROW THE FOLLOWING ERROR WHEN DERA DATE ROUNDED DATA IS REPLACED WITH CORRECTLY PARSED DATA throw("parsed tag "+fact.tag+" has different dates then frame "+ S3key);
-                        console.log("parsed tag "+fact.tag+" has different dates then frame "+ S3key + ' existing: ('+point.start+','+point.end+'), new: ('+newPoint.start+','+newPoint.end+')');
+                        //throw("parsed tag "+fact.tag+" has different dates then frame "+ S3key + ' existing: ('+point.start+','+point.end+'), new: ('+newPoint.start+','+newPoint.end+')');
+                    }
                     if(point.value!=newPoint.value) newPoint.rev = point.rev+1;
                     if(point.value!=newPoint.value  || point.sic!=newPoint.sic  || point.entityName!=newPoint.entityName  || point.loc!=newPoint.loc){
                         frameDataArray.splice(i,1,newPoint);
@@ -262,17 +268,17 @@ exports.handler = async (event, context) => {
                     } else {
                         console.log(JSON.stringify(response.data[0], null, 2));
                         if(depth<3){
-                            console.log('retry depth='+depth+'for '+ writeCall);
+                            console.log('retry depth='+depth+' for '+ writeCall);
                             resolve(await updateFrame(fact, submissionObject, depth+1));  //retry up to 3 times
                         }
                         else
-                            console.log('stroke out processing'+S3key);
+                            console.log('struck out trying to process '+S3key);
                             reject(S3key);
                     }
                 } catch(e){
-                    console.write(writeCall);
-                    console.write('updateFrame depth: ' + depth);
-                    console.write(response);
+                    console.log(writeCall);
+                    console.log('updateFrame depth: ' + depth);
+                    console.log(response);
                     throw e;
 
                 }
@@ -356,16 +362,21 @@ function parseIXBRL($, parsedFacts){
     //read all dei namespace tags
     let $deiTags = $('ix\\:nonnumeric[name^="dei:"]');
     if($deiTags.length==0) return;  //this html doc does not contain SEC compliant inline XBRL
-    if(!parsedFacts.dei) parsedFacts.dei = {};
     $deiTags.each((i, elem)=> {
         let deiTag = elem.attribs.name.split(':').pop();
         parsedFacts.dei[deiTag] = {
-            val: $(elem).text(),
-            contextRef:  elem.attribs.contextref || elem.attribs.contextRef
-        }.text();
+            text: $(elem).text(),
+            contextRef:  elem.attribs.contextref || elem.attribs.contextRef,
+            format: elem.attribs.format,
+        };
         if (!elem.attribs.contextref) common.logEvent("missing DEI contextRef for "+deiTag, parsedFacts.filing.adsh);
-        //problematic date formats all contain the string 'daymonth': http://www.xbrl.org/inlineXBRL/transformation/
-        if(elem.attribs.format && elem.attribs.format.indexOf('daymonth')!=-1) common.logEvent("unhandled data form", elem.attribs.format + ' in iXBRL of ' + parsedFacts.filing.adsh);
+        if(parsedFacts.dei[deiTag].format){
+            //problematic date formats all contain the string 'daymonth': http://www.xbrl.org/inlineXBRL/transformation/
+            if(elem.attribs.format && elem.attribs.format.indexOf('daymonth')!=-1) common.logEvent("unhandled data form", elem.attribs.format + ' in iXBRL of ' + parsedFacts.filing.adsh);
+            parsedFacts.dei[deiTag].value = translateXBRLFormat(parsedFacts.dei[deiTag].text, parsedFacts.dei[deiTag].format);
+        } else {
+            parsedFacts.dei[deiTag].value = parsedFacts.dei[deiTag].text;
+        }
     });
     /*  parsedFacts.dei =>  { EntityRegistrantName: 'DOVER Corp',
             CurrentFiscalYearEndDate: '--12-31',
@@ -410,7 +421,7 @@ function parseIXBRL($, parsedFacts){
             }
             parsedFacts.counts.facts++;
         } catch (e) {
-            common.logEvent('ERROR: updateXBRLAPI extracting nonfraction from iXBRL in '+ parsedFacts.filing.adsh, e.message, true); //log error and continue parsing
+            common.logEvent('ERROR: updateXBRLAPI extracting nonfraction from iXBRL in '+ parsedFacts.filing.adsh, e, true); //log error and continue parsing
         }
     });
     return parsedFacts;
@@ -439,6 +450,7 @@ function parseContextElement($, element, submissionObject){
         if(!$instant.length) $instant = $element.find('instant');
         if($instant.length){
             end = $instant.text().trim();
+            dtEnd = new Date(end);
             newContext = {
                 start: null,
                 end: end,
@@ -448,7 +460,7 @@ function parseContextElement($, element, submissionObject){
             console.log('ERROR: parsing context '+contextID+' in XBRL doc of ' + submissionObject.filing.adsh);
         }
     }
-    if(standardQuarters.indexOf(newContext.qtrs)) newContext.ccp = common.closestCalendricalPeriod(dtStart, dtEnd);
+    if(standardQuarters.indexOf(newContext.qtrs)!==-1) newContext.ccp = common.closestCalendricalPeriod(dtStart, dtEnd);
     $member = $element.find('xbrldi\\:explicitMember');
     if(!$member.length) $member = $element.find('explicitMember');
     if($member.length && $member.attr('dimension')){
@@ -502,7 +514,7 @@ function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
             isStandard: standardNumericalTaxonomies.indexOf(nameParts[0])!==-1,
             text: $ix.text().trim()
         };
-    xbrl.value = xbrlToNumber(xbrl.text, xbrl.format||'standard', xbrl.scale);
+    xbrl.value = translateXBRLFormat(xbrl.text, xbrl.format||'standard', xbrl.scale);
     if(objParsedSubmission.contextTree[contextRef]){
         let context = objParsedSubmission.contextTree[contextRef];
         xbrl.qtrs = context.qtrs;
@@ -517,7 +529,7 @@ function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
     }
     return xbrl;
 }
-function xbrlToNumber(text, format, scale){
+function translateXBRLFormat(text, format, scale = 0){
     switch(format){
         case "ixt:zerodash":
             if(text=='—') return 0;  //falls through to numdotdecimal
@@ -526,6 +538,11 @@ function xbrlToNumber(text, format, scale){
             return parseFloat(text.replace(/,/g, ''))*10**(scale||0);
         case "ixt:numcommadecimal":
             return parseFloat(text.replace(/\./g, '').replace(/,/,'.'))*10**(scale||0);
+        case "ixt:datemonthdayyear":
+            let localDate = new Date(text);
+            return localDate.getFullYear()+'-'+(localDate.getMonth()+1)+'-'+localDate.getDate();
+        case "ixt:booleanfalse":
+            return text;  //MySQL can translate "TRUE" and "FALSE"
         case "ixt-sec:numtexten":
         //todo:  adapt regex to convert english to numbers
         default:
@@ -557,7 +574,7 @@ async function saveXBRLSubmission(s){
     //save numerical fact records into fin_num
     console.log('saving facts...');
     let i=0, fact, numSQL, version, coreg;
-    const numInsertHeader = 'insert into fin_num (adsh, tag, version, coreg, start, end, qtrs, ccp, uom, value) values ';
+    const numInsertHeader = 'insert into fin_num (adsh, tag, version, coreg, startdate, enddate, qtrs, ccp, uom, value) values ';
     numSQL = numInsertHeader;
     for(let factKey in s.facts){
         //console.log(JSON.stringify(fact));  //todo: DEBUG ONLY!!
@@ -589,108 +606,121 @@ async function saveXBRLSubmission(s){
 /*//////////////////// TEST CARDS  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 // TEST Card A: iXBRL 10Q:  https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index.htm
 const event = 	{
-  "path": "sec/edgar/29905/000002990519000029/",
-  "adsh": "0000029905-19-000029",
-  "cik": "0000029905",
-  "fileNum": "001-04018",
-  "form": "10-Q",
-  "filingDate": "20190418",
-  "period": "20190331",
-  "acceptanceDateTime": "20190418072005",
-  "indexHeaderFileName": "sec/edgar/29905/000002990519000029/0000029905-19-000029-index-headers.html",
-  "files": [
-    {
-      "name": "dov-20190331.htm",
-      "description": "10-Q"
+    "path": "sec/edgar/data/29905/000002990519000029/",
+    "adsh": "0000029905-19-000029",
+    "cik": "0000029905",
+    "fileNum": "001-04018",
+    "form": "10-Q",
+    "filingDate": "20190418",
+    "period": "20190331",
+    "acceptanceDateTime": "20190418072005",
+    "indexHeaderFileName": "sec/edgar/data/29905/000002990519000029/0000029905-19-000029-index-headers.html",
+    "files": [
+        {
+            "name": "dov-20190331.htm",
+            "description": "10-Q",
+            "type": "10-Q"
+        },
+        {
+            "name": "a2019033110-qex101.htm",
+            "description": "EX - 10.1",
+            "type": "EX-10.1"
+        },
+        {
+            "name": "a2019033110-qexhibit102.htm",
+            "description": "EX - 10.2",
+            "type": "EX-10.2"
+        },
+        {
+            "name": "a2019033110-qexhibit103.htm",
+            "description": "EX - 10.3",
+            "type": "EX-10.3"
+        },
+        {
+            "name": "a2019033110-qex104.htm",
+            "description": "EX - 10.4",
+            "type": "EX-10.4"
+        },
+        {
+            "name": "a2019033110-qexhibit311.htm",
+            "description": "EX - 31.1",
+            "type": "EX-31.1"
+        },
+        {
+            "name": "a2019033110-qexhibit312.htm",
+            "description": "EX - 31.2",
+            "type": "EX-31.2"
+        },
+        {
+            "name": "a2019033110-qexhibit32.htm",
+            "description": "EX - 32",
+            "type": "EX-32"
+        },
+        {
+            "name": "dov-20190331.xsd",
+            "description": "XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT",
+            "type": "EX-101.SCH"
+        },
+        {
+            "name": "dov-20190331_cal.xml",
+            "description": "XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT",
+            "type": "EX-101.CAL"
+        },
+        {
+            "name": "dov-20190331_def.xml",
+            "description": "XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT",
+            "type": "EX-101.DEF"
+        },
+        {
+            "name": "dov-20190331_lab.xml",
+            "description": "XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT",
+            "type": "EX-101.LAB"
+        },
+        {
+            "name": "dov-20190331_pre.xml",
+            "description": "XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT",
+            "type": "EX-101.PRE"
+        },
+        {
+            "name": "dov-20190331_g1.jpg",
+            "type": "GRAPHIC"
+        },
+        {
+            "name": "image1.jpg",
+            "type": "GRAPHIC"
+        },
+        {
+            "name": "image2.jpg",
+            "type": "GRAPHIC"
+        },
+        {
+            "name": "image3.jpg",
+            "type": "GRAPHIC"
+        }
+    ],
+    "bucket": "restapi.publicdata.guru",
+    "sic": "3530",
+    "ein": "530257888",
+    "incorporation": {
+        "state": "DE",
+        "country": false
     },
-    {
-      "name": "a2019033110-qex101.htm",
-      "description": "EX-10.1"
+    "businessAddress": {
+        "street1": "3005 HIGHLAND PARKWAY",
+        "street2": "SUITE 200",
+        "city": "DOWNERS GROVE",
+        "state": "IL",
+        "zip": "60515",
+        "phone": "(630) 541-1540"
     },
-    {
-      "name": "a2019033110-qexhibit102.htm",
-      "description": "EX-10.2"
-    },
-    {
-      "name": "a2019033110-qexhibit103.htm",
-      "description": "EX-10.3"
-    },
-    {
-      "name": "a2019033110-qex104.htm",
-      "description": "EX-10.4"
-    },
-    {
-      "name": "a2019033110-qexhibit311.htm",
-      "description": "EX-31.1"
-    },
-    {
-      "name": "a2019033110-qexhibit312.htm",
-      "description": "EX-31.2"
-    },
-    {
-      "name": "a2019033110-qexhibit32.htm",
-      "description": "EX-32"
-    },
-    {
-      "name": "dov-20190331.xsd",
-      "description": "EX-101.SCH"
-    },
-    {
-      "name": "dov-20190331_cal.xml",
-      "description": "EX-101.CAL"
-    },
-    {
-      "name": "dov-20190331_def.xml",
-      "description": "EX-101.DEF"
-    },
-    {
-      "name": "dov-20190331_lab.xml",
-      "description": "EX-101.LAB"
-    },
-    {
-      "name": "dov-20190331_pre.xml",
-      "description": "EX-101.PRE"
-    },
-    {
-      "name": "dov-20190331_g1.jpg",
-      "description": "GRAPHIC"
-    },
-    {
-      "name": "image1.jpg",
-      "description": "GRAPHIC"
-    },
-    {
-      "name": "image2.jpg",
-      "description": "GRAPHIC"
-    },
-    {
-      "name": "image3.jpg",
-      "description": "GRAPHIC"
+    "mailingAddress": {
+        "street1": "3005 HIGHLAND PARKWAY",
+        "street2": "SUITE 200",
+        "city": "DOWNERS GROVE",
+        "state": "IL",
+        "zip": "60515",
+        "phone": false
     }
-  ],
-  "bucket": "restapi.publicdata.guru",
-  "sic": "3530",
-  "ein": "530257888",
-  "incorporation": {
-    "state": "DE",
-    "country": false
-  },
-  "businessAddress": {
-    "street1": "3005 HIGHLAND PARKWAY",
-    "street2": "SUITE 200",
-    "city": "DOWNERS GROVE",
-    "state": "IL",
-    "zip": "60515",
-    "phone": "(630) 541-1540"
-  },
-  "mailingAddress": {
-    "street1": "3005 HIGHLAND PARKWAY",
-    "street2": "SUITE 200",
-    "city": "DOWNERS GROVE",
-    "state": "IL",
-    "zip": "60515",
-    "phone": false
-  }
 };
 exports.handler(event);
 ///////////////////////////////////////////////////////////////////////////////////////////////*/
