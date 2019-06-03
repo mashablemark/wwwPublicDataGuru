@@ -105,10 +105,10 @@ exports.handler = async (event, context) => {
         }
     }
     console.log(JSON.stringify(submission));
-    if(submission.dei.EntityCentralIndexKey.value!=submission.filing.cik)
-        await common.logEvent('ERROR: header and DEI CIK mismatch', submission.filing.path);
     //save parsed submission object into DB and update APIs
     if(submission.counts.standardFacts) {
+        if(submission.dei.EntityCentralIndexKey.value!=submission.filing.cik)
+            await common.logEvent('ERROR updateXBRLAPI: header and DEI CIK mismatch', submission.filing.path);
         let existingRecords = await dbCheckPromise;
         if(existingRecords.data.length){
             await common.logEvent('WARNING: existing XBRL records', event.adsh + ' has '+existingRecords.data[0].records+' fin_sub and fin_num records');
@@ -187,7 +187,7 @@ exports.handler = async (event, context) => {
         console.log('processed and made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' frames from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
     } else {
-        console.log('no iXBRL/XBRL found: end of updateXBRL lambda event handler!');
+        await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
     }
     console.log('end of updateXBRL lambda event handler!');
 
@@ -236,8 +236,8 @@ exports.handler = async (event, context) => {
                     if(point.value!=newPoint.value  || point.sic!=newPoint.sic  || point.entityName!=newPoint.entityName  || point.loc!=newPoint.loc){
                         frameDataArray.splice(i,1,newPoint);
                         needsUpdate = true;
-                        break;
                     }
+                    break;
                 }
             }
             if(i==frameDataArray.length){
@@ -326,8 +326,8 @@ function parseXBRL($, submission){
                         if(standardNumericalTaxonomies.indexOf(tax)!=-1){
                             let xbrl = extractFactInfo(submission, $, elem);
                             if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
-                                if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
-                                    let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom+':'+xbrl.end;
+                                if(!xbrl.dim && xbrl.uom) {
+                                    let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom.label+':'+xbrl.end;
                                     if(!submission.facts[factKey]){
                                         submission.facts[factKey] = xbrl;
                                         submission.hasXBRL = true;
@@ -405,7 +405,7 @@ function parseIXBRL($, parsedFacts){
         try{
             let xbrl = extractFactInfo(parsedFacts, $, elem);
             if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
-                if(!xbrl.dim && standardQuarters.indexOf(xbrl.qtrs)!== -1) {
+                if(!xbrl.dim && xbrl.uom) { //don't process footnotes either
                     let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom.label+':'+xbrl.end;
                     if(!parsedFacts.facts[factKey]){
                         parsedFacts.facts[factKey] = xbrl;
@@ -590,7 +590,7 @@ async function saveXBRLSubmission(s){
             numSQL += (i%1000==0?'':', ') + "(" + q(s.filing.adsh) + q(fact.tag) + q(version) + "''," + q(fact.start)+ q(fact.end)  + fact.qtrs+','
                 + q(fact.ccp) + q(fact.uom.label) + fact.value + ")";
             i++;
-            if(i%1000==0){ //but don't let the query get too long.... max packet size 2MB
+            if(i%1000==0){ //but don't let the query get too long.... default max packet size 2MB  <-  INCREASE TO 160 MB!!!!
                 await common.runQuery(numSQL);
                 numSQL = numInsertHeader;
             }

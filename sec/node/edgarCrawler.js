@@ -175,7 +175,7 @@ async function processQuarterlyIndex(processControl, callback) {
                 logEvent('ERROR edgarCrawl: copying link files', lineParts[indexLineFields.DateFiled] + ' i=' + i + ' in ' + links.join('|'), true)
             }
         } else {
-            logEvent('ERROR edgarCrawl: links not find in index-headers', lineParts.join('|') + ' ' + indexHeaderFilename, true)
+            logEvent('ERROR edgarCrawl: links not found in index-headers', lineParts.join('|') + ' ' + indexHeaderFilename, true)
         }
     }
 }
