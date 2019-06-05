@@ -65,6 +65,7 @@ const XBRLDocuments= {
 const bucket = "restapi.publicdata.guru";
 
 exports.handler = async (event, context) => {
+    process.on('unhandledRejection', (reason, promise) => { console.log('Unhandled rejection at: ', reason.stack|| reason)});
     let dbCheckPromise = common.runQuery("select sum(recs) as records from ("
         + "select count(*) as recs from fin_sub where adsh='"+event.adsh+"' "
         + "   UNION ALL "
@@ -179,7 +180,12 @@ exports.handler = async (event, context) => {
         for(let factKey in submission.facts){
             let fact = submission.facts[factKey];
             if(fact.isStandard && fact.ccp && fact.uom){  //no uom = text block tag such as footnotes -> not a frame!
-                updateAPIPromises.push(updateFrame(fact));
+                updateAPIPromises.push(
+                    updateFrame(fact).catch(error => {
+                        console.log(error);
+                        process.exit();
+                    })
+                );
                 frameCount++;
             }
         }
@@ -271,7 +277,7 @@ exports.handler = async (event, context) => {
                         }));
                     resolve(S3key);
                 } else {
-                    reject(S3key);
+                    reject(new Error('unable to write to DB for object '+ S3key));
                 }
 
                 async function writeFrameToDB(responseFromUpdateFrameWithTStamp, depth){
@@ -285,11 +291,12 @@ exports.handler = async (event, context) => {
                             if(depth<3){
                                 console.log('retry depth='+depth+' for '+ S3key);
                                 depth++;
-                                resolve(await writeFrameToDB(response, depth));  //retry up to 3 times
+                                return await writeFrameToDB(response, depth);  //retry up to 3 times
                             }
-                            else
+                            else {
                                 console.log('struck out trying to process '+S3key);
-                            return(false);
+                                return(false);
+                            }
                         }
                     } catch(e){
                         console.log(e);
