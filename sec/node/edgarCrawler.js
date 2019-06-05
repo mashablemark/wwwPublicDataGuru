@@ -2,6 +2,8 @@
 //node crawler.js
 
 /*
+This crawler fetches EDGAR quarterly indexes and copies the files of targeted submissions (targetFormTypes) to this account's S3 (restapi.publicdata.guru/sec/edgar/data/)
+
 Problem: sec.gov limits request to 10 per second.  To ingest a quarter, we need to copy down:
   a. 60 daily indexes
   b. 60,000 ownership filings * (1 index-headers.html + 1 XML file) = 120,000 GETs
@@ -134,11 +136,14 @@ async function processQuarterlyIndex(processControl, callback) {
                     }
                 }
             }
-            if(lineNum%100 == 0) console.log(processControl);  //240 per quarterly ingest (over 5+ hours) = 1 per minute
+            if(lineNum%1000 == 0) console.log(processControl);  //240 per quarterly ingest (over 5+ hours) = 1 per minute
         }
     }
 
     console.log(processControl);
+    //terminate here
+
+
     async function getSubmission(lineParts, lineNum) {
         let submissionPathParts = lineParts[indexLineFields.Filename].split('/');
         let adsh = submissionPathParts.pop().split('.')[0];
@@ -150,8 +155,8 @@ async function processQuarterlyIndex(processControl, callback) {
         let fetchedIndexHeader = oldFetchCount != processControl.fetchCount;
         let links = indexHeaderBody.match(/<a href="\S+\.(html|htm|xml)"/g);
         let i;
+        let promisesToCollect = [];
         if (links) {
-            let promisesToCollect = [];
             try {
                 for (i = 0; i < links.length; i++) {
                     let fileName = links[i].substring(9, links[i].length - 1);
@@ -164,18 +169,19 @@ async function processQuarterlyIndex(processControl, callback) {
                         promisesToCollect.push(fetch(processControl, submissionPath + fileName, true));  //allow simultaneously fetches
                     }
                 }
-                if (processControl.retrigger || fetchedIndexHeader) {
-                    for (let p = 0; p < promisesToCollect.length; p++) {
-                        //console.log('collecting promisesToCollect['+p+']');
-                        await promisesToCollect[p];
-                    }  //simultanteous fetches must all complete before putting the index-header file
-                    put(processControl, indexHeaderBody, indexHeaderFilename); //save or resave = trigger lambda function and API updates asyncrhonously (no await)
-                }
+
             } catch {
                 logEvent('ERROR edgarCrawl: copying link files', lineParts[indexLineFields.DateFiled] + ' i=' + i + ' in ' + links.join('|'), true)
             }
         } else {
             logEvent('ERROR edgarCrawl: links not found in index-headers', lineParts.join('|') + ' ' + indexHeaderFilename, true)
+        }
+        if (processControl.retrigger || fetchedIndexHeader) {
+            for (let p = 0; p < promisesToCollect.length; p++) {
+                //console.log('collecting promisesToCollect['+p+']');
+                await promisesToCollect[p];
+            }  //all submission file's fetches must all complete before putting the index-header file
+            put(processControl, indexHeaderBody, indexHeaderFilename); //save or resave = trigger lambda function and API updates asyncrhonously (no await)
         }
     }
 }
@@ -305,7 +311,10 @@ async function processIndexHeader(lineParts){
                         object: {key: "sec/"+indexHeaderFilename}
                     }
                 }
-            ]
+            ],
+            crawlerOverrides: {
+                noLatestIndexProcessing: true
+            }
         };
 
         let payload = JSON.stringify(fakeS3Event, null, 2); // include all props with 2 spaces (not sure if truly required)

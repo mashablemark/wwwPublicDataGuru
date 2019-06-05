@@ -9,26 +9,41 @@ var AWS = require('aws-sdk');
 var dailyIndex = false;  //daily index as parsed object needs initiation than can be reused as long as day is same
 
 exports.handler = async (event, context) => {
-    var s3 = new AWS.S3();
-    //event object description https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html
+    //event object description documation @ https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html
+    //optional event controls can be added by crawlers that explicitly call Lambda (instead of normal S3 PUT trigger):
+    //  event.crawlerOverrides.body (allows body of -index-headers.html file to be passed in eliminating S3 fetch)
+    //  event.crawlerOverrides.noDailyIndexProcessing
+    //  event.crawlerOverrides.noLatestIndexProcessing
+    let s3 = new AWS.S3();
     const firstS3record = event.Records[0].s3;
     let bucket = firstS3record.bucket.name;
     let key = firstS3record.object.key;
-    const size = firstS3record.object.bytes;
+    //const size = firstS3record.object.bytes;
     const folder = key.substr(0, key.lastIndexOf('/')+1);
-
+    const processDailyIndex = !(event.crawlerOverrides && event.crawlerOverrides.noDailyIndexProcessing);
+    const processLatestIndex = !(event.crawlerOverrides && event.crawlerOverrides.noLatestIndexProcessing);
     //1. read the index.hear.html file contents
     const params = {
         Bucket: bucket,
         Key: key
     };
-    const indexHeaderObject = new Promise((resolve, reject) => {
-        s3.getObject(params, (err, data) => {
-            if (err) console.log(err, err.stack); // an error occurred
-            else     resolve(data.Body.toString('utf-8'));   // successful response  (alt method = createreadstreeam)
+    let indexHeaderBody;
+    if(event.crawlerOverrides && event.crawlerOverrides.body){
+        indexHeaderBody = event.crawlerOverrides.body;
+    } else {
+        const indexHeaderReadPromise = new Promise((resolve, reject) => {
+            s3.getObject(params, (err, data) => {
+                if (err) {
+                    console.log(err, err.stack);
+                    reject(err);
+                } // an error occurred
+                else     resolve(data.Body.toString('utf-8'));   // successful response  (alt method = createreadstreeam)
+            });
         });
-    });
-    const indexHeaderBody = await indexHeaderObject;
+        console.log('getting ' + JSON.stringify(params));
+        indexHeaderBody = await indexHeaderReadPromise;
+    }
+
 
     //2. parse header info and create submission object
     const thisSubmission = {
@@ -51,24 +66,28 @@ exports.handler = async (event, context) => {
     acceptanceDate.setUTCHours(acceptanceDate.getUTCHours()+6);  //submission accepted after 5:30P are disseminated the next day
     acceptanceDate.setUTCMinutes(acceptanceDate.getUTCMinutes()+30);
     const indexDate = acceptanceDate.toISOString().substr(0,10);
-    let dailyIndexObject = false;
-    if(!dailyIndex || dailyIndex.date != indexDate) {
-        dailyIndexObject = new Promise((resolve, reject) => {
-            s3.getObject({
-                Bucket: "restapi.publicdata.guru",
-                Key: "sec/indexes/EDGARDailyFileIndex_"+ indexDate + ".json"
-            }, (err, data) => {
-                if (err) // not found = return new empty archive for today
-                    resolve({
-                        "title": "daily EDGAR file index for "+indexDate,
-                        "format": "JSON",
-                        "date": indexDate,
-                        "submissions": []
-                    });
-                else
-                    resolve(JSON.parse(data.Body.toString('utf-8')));   // successful response  (alt method = createReadStream)
+    const qtr = Math.floor(acceptanceDate.getUTCMonth()/3)+1;
+    let dailyIndexPromise = false;
+    if(processDailyIndex){
+        if(!dailyIndex || dailyIndex.date != indexDate) {
+            dailyIndexPromise = new Promise((resolve, reject) => {
+                s3.getObject({
+                    Bucket: "restapi.publicdata.guru",
+                    Key: "sec/indexes/daily-index/"+ acceptanceDate.getUTCFullYear()+"/QTR"+qtr+"/detailed."+ indexDate + ".json"
+                }, (err, data) => {
+                    if (err) { // not found = return new empty archive for today
+                        resolve({
+                            "title": "daily EDGAR file index with file manifest for " + indexDate,
+                            "format": "JSON",
+                            "date": indexDate,
+                            "submissions": []
+                        });
+                    }
+                    else
+                        resolve(JSON.parse(data.Body.toString('utf-8')));   // successful response  (alt method = createReadStream)
+                });
             });
-        });
+        }
     }
 
     //4. parse and add hyperlinks to submission object
@@ -76,8 +95,6 @@ exports.handler = async (event, context) => {
     for(let i=0; i<links.length;i++){
         let firstQuote = links[i].indexOf('"');
         let relativeKey = links[i].substr(firstQuote+1, links[i].indexOf('"',firstQuote+1)-firstQuote-1);
-        let firstCloseCarrot = links[i].indexOf('>');
-        let description = links[i].substr(firstCloseCarrot+1, links[i].indexOf('<',firstCloseCarrot+1)-firstCloseCarrot-1);
         let linkLocation = indexHeaderBody.indexOf(links[i]);
         let linkSection = indexHeaderBody.substring(indexHeaderBody.substr(0, linkLocation).lastIndexOf('&lt;DOCUMENT&gt;'), linkLocation);
         let fileType = headerInfo(linkSection, '&lt;TYPE&gt;');
@@ -95,59 +112,63 @@ exports.handler = async (event, context) => {
     }
     //5. IF NEEDED: finish reading daily archive (create new archive if not found)
     if(!dailyIndex || dailyIndex.date != indexDate) {
-        dailyIndex = await dailyIndexObject;
+        dailyIndex = await dailyIndexPromise;
     }
 
     //6. add new submission
     dailyIndex.submissions.push(thisSubmission);
 
     //7. async write out last10Index.json (complete in step 9
-    const now = new Date();
-    const last10IndexBody = {
-        "lastUpdated": now.toISOString(),
-        "title": "last 10 EDGAR submissions micro-index of submission date (updated prior to full indexes)",
-        "format": "JSON",
-        "indexDate": indexDate,
-        "last10Submissions": dailyIndex.submissions.slice(-10)
-    };
-    const last10Index = new Promise((resolve, reject) => {
-        s3.putObject({
-            Body: JSON.stringify(last10IndexBody),
-            Bucket: "restapi.publicdata.guru",
-            Key: "sec/indexes/last10EDGARSubmissionsFastIndex.json"
-        }, (err, data) => {
-            if (err) {
-                console.log('S3 write error');
-                console.log(err, err.stack); // an error occurred
-                reject(err);
-            }
-            else {
-                resolve(data); // successful response
-            }
+    if(processLatestIndex) {
+        const now = new Date();
+        const last10IndexBody = {
+            "lastUpdated": now.toISOString(),
+            "title": "last 10 EDGAR submissions micro-index of submission date (updated prior to full indexes)",
+            "format": "JSON",
+            "indexDate": indexDate,
+            "last10Submissions": dailyIndex.submissions.slice(-10)
+        };
+        var last10IndexPromise = new Promise((resolve, reject) => {
+            s3.putObject({
+                Body: JSON.stringify(last10IndexBody),
+                Bucket: "restapi.publicdata.guru",
+                Key: "sec/indexes/last10EDGARSubmissionsFastIndex.json"
+            }, (err, data) => {
+                if (err) {
+                    console.log('S3 write error');
+                    console.log(err, err.stack); // an error occurred
+                    reject(err);
+                }
+                else {
+                    resolve(data); // successful response
+                }
+            });
         });
-    });
+    }
 
     //8. sync write out full dailyindex.json (complete in step 9)
-    const revisedIndex = new Promise((resolve, reject) => {
-        s3.putObject({
-            Body: JSON.stringify(dailyIndex),
-            Bucket: "restapi.publicdata.guru",
-            Key: "sec/indexes/EDGARDailyFileIndex_"+ indexDate + ".json"
-        }, (err, data) => {
-            if (err) {
-                console.log('S3 write error');
-                console.log(err, err.stack); // an error occurred
-                reject(err);
-            }
-            else {
-                resolve('successful s3 write'); // data); // successful response
-            }
+    if(processDailyIndex){
+        var revisedIndex = new Promise((resolve, reject) => {
+            s3.putObject({
+                Body: JSON.stringify(dailyIndex),
+                Bucket: "restapi.publicdata.guru",
+                Key: "sec/indexes/EDGARDailyFileIndex_"+ indexDate + ".json"
+            }, (err, data) => {
+                if (err) {
+                    console.log('S3 write error');
+                    console.log(err, err.stack); // an error occurred
+                    reject(err);
+                }
+                else {
+                    resolve('successful s3 write'); // data); // successful response
+                }
+            });
         });
-    });
+    }
 
     //9.ensure writes are completed before letting this Lambda function terminate
-    await last10Index;
-    await revisedIndex;
+    if(processDailyIndex) await revisedIndex;
+    if(processDailyIndex && processLatestIndex) await last10IndexPromise;
 
     //10.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
     // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
@@ -187,7 +208,7 @@ exports.handler = async (event, context) => {
         let lambda = await new AWS.Lambda({
             region: 'us-east-1'
         });
-        console.log('invoking '+ processor);
+
         let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
         //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
         let lambdaResult = await new Promise((resolve, reject)=> { lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
@@ -198,17 +219,17 @@ exports.handler = async (event, context) => {
             },
             function(error, data) {
                 if (error) {
+                    console.log('error invoking ' + processor);
                     console.log(error);
                     reject(error);
                 }
                 if(data.Payload){
                     context.succeed(data.Payload);
                 }
-                console.log('successfully invoked ' + processor);
+                console.log('invoked ' + processor);
                 resolve(data);
             });
         });
-        console.log(payload);
         console.log(lambdaResult);
     }
 

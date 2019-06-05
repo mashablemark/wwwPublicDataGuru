@@ -88,13 +88,17 @@ exports.handler = async (event, context) => {
     //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
     for (let i = 0; i < event.files.length; i++) {
         if(XBRLDocuments.iXBRL[event.files[i].type]) {
-            console.log('primary '+event.files[i].type + ' HTML doc found: '+ event.path + event.files[i].name);
-            let fileBody = await common.readS3(event.path + event.files[i].name);
-            console.log('html length: '+ fileBody.length);
-            await parseIXBRL(cheerio.load(fileBody), submission);
-            if(submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
-            submission.primaryHTML = event.files[i].name;
-            console.log(submission.counts);
+            if(event.files[i].name.substr(-4)!='.txt'){
+                console.log('primary '+event.files[i].type + ' HTML doc found: '+ event.path + event.files[i].name);
+                let fileBody = await common.readS3(event.path + event.files[i].name);
+                console.log('html length: '+ fileBody.length);
+                await parseIXBRL(cheerio.load(fileBody), submission);
+                if(submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
+                submission.primaryHTML = event.files[i].name;
+                console.log(submission.counts);
+            } else {
+                console.log('WARNING: primary doc is .txt file -> skip');
+            }
         }
         if(XBRLDocuments.XBRL[event.files[i].type]) {
             console.log('XBRL '+event.files[i].type + ' doc found: '+ event.path + event.files[i].name);
@@ -104,7 +108,7 @@ exports.handler = async (event, context) => {
             console.log(submission.counts);
         }
     }
-    console.log(JSON.stringify(submission));
+    //console.log(JSON.stringify(submission));
     //save parsed submission object into DB and update APIs
     if(submission.counts.standardFacts) {
         if(submission.dei.EntityCentralIndexKey.value!=submission.filing.cik)
@@ -115,7 +119,6 @@ exports.handler = async (event, context) => {
             await common.runQuery("delete from fin_sub where adsh='"+ event.adsh+"'");
             await common.runQuery("delete from fin_num where adsh='"+ event.adsh+"'");
         }
-        console.log('saving submission...');
         await saveXBRLSubmission(submission);
         console.log('submission saved');
 
@@ -172,19 +175,20 @@ exports.handler = async (event, context) => {
         console.log('processed and made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
         //write to frame REST API in S3 by looping through list of parsed facts and updating the DB's JSON object rather than recreating = too DB intensive
+        let frameCount = 0;
         for(let factKey in submission.facts){
             let fact = submission.facts[factKey];
             if(fact.isStandard && fact.ccp && fact.uom){  //no uom = text block tag such as footnotes -> not a frame!
                 updateAPIPromises.push(updateFrame(fact));
+                frameCount++;
             }
         }
 
         //promise collection
         for(let i=0;i<updateAPIPromises.length;i++){
-            //console.log('collecting updateAPIPromises #'+i);
             await updateAPIPromises[i];
         }
-        console.log('processed and made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' frames from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        console.log('processed and made write promises for DB and S3 object write(s) for ' + frameCount + ' frames from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
     } else {
         await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
@@ -192,14 +196,14 @@ exports.handler = async (event, context) => {
     console.log('end of updateXBRL lambda event handler!');
 
 
-    function updateFrame(fact, submissionObject, depth=1){
+    function updateFrame(fact){
         // 1. read JSON and timestamp from DB
         // 2. update JSON if needed
         // 3. if updated write to DB via stored procedure (updateFrame) that checks for timestamp constancy:
         //     returns (A) confirmation -> next fact) or (B) new timestamp and json for retry (step 2)
 
         return new Promise(async (resolve, reject) => {
-            //console.log(fact);
+            //initial call to updateFrame fetches frame data and tstamp to prevent collisions
             let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs+",'', null)";  //no json = get request
             //todo: change root to sec to go live for timeseries and frames S3 writes
             let S3key = 'test/frames/'+fact.tag+'/'+fact.uom.label+'/'+fact.ccp+'.json';
@@ -208,7 +212,8 @@ exports.handler = async (event, context) => {
             let frame, frameDataArray;
             try{
                 frame = frameRecord.data[0][0];
-                frameDataArray = JSON.parse(frame.json.replace(/\\/g,'\\\\'));
+                frameDataArray = JSON.parse(frame.json);  //note:  apiWriteFramesAPI.py does this replace too before writing to S3
+                frameDataArray.sort((a,b)=>{return a.cik-b.cik}); //this should not be necessary = insurance against some process misordering the array
             } catch(e){
                 console.log('ERROR PARSING FRAME FOR ' + S3key);
                 console.log(getCommand);
@@ -216,27 +221,32 @@ exports.handler = async (event, context) => {
                 throw e;
             }
             let newPoint = {"accn": submission.filing.adsh,
-                "cik": submission.dei.EntityCentralIndexKey.value || submission.filing.cik,
-                "entityName": submission.dei.EntityRegistrantName.value||submission.filing.entityName,
-                "sic": submission.filing.sic,
-                "loc": (submission.filing.businessAddress.country || submission.filing.businessAddress.country || 'US') + '-' + (submission.filing.businessAddress.state || submission.filing.businessAddress.state),
+                "cik": parseInt(submission.dei.EntityCentralIndexKey ? submission.dei.EntityCentralIndexKey.value : submission.filing.cik),
+                "entityName": submission.dei.EntityRegistrantName ? submission.dei.EntityRegistrantName.value : submission.filing.entityName,
+                "sic": parseInt(submission.filing.sic),
+                "loc": (submission.filing.businessAddress.country || submission.filing.mailingAddress.country || 'US') + '-' + (submission.filing.businessAddress.state || submission.filing.mailingAddress.state || ''),
                 "start": fact.start,
                 "end": fact.end,
                 "val": fact.value,
                 "rev": 1};
             let i;
-            for(i=0;i<frameDataArray.length;i++){
+            for(i=0;i<frameDataArray.length;i++) {  //frame data is ordered by cik ascending
                 let point = frameDataArray[i];
-                if(point.cik==submission.dei.EntityCentralIndexKey.value){
-                    if((point.start!=newPoint.start && (point.start || newPoint.start)) || point.end!=newPoint.end){
-                        //TODO: THROW THE FOLLOWING ERROR WHEN DERA DATE ROUNDED DATA IS REPLACED WITH CORRECTLY PARSED DATA throw("parsed tag "+fact.tag+" has different dates then frame "+ S3key);
+                if (newPoint.cik == point.cik) {
+                    if ((point.start != newPoint.start && (point.start || newPoint.start)) || point.end != newPoint.end) {
+                        //TODO: THROW THE FOLLOWING ERROR ONCE DERA DATE ROUNDED DATA IS REPLACED WITH CORRECTLY PARSED DATA
                         //throw("parsed tag "+fact.tag+" has different dates then frame "+ S3key + ' existing: ('+point.start+','+point.end+'), new: ('+newPoint.start+','+newPoint.end+')');
                     }
-                    if(point.value!=newPoint.value) newPoint.rev = point.rev+1;
-                    if(point.value!=newPoint.value  || point.sic!=newPoint.sic  || point.entityName!=newPoint.entityName  || point.loc!=newPoint.loc){
-                        frameDataArray.splice(i,1,newPoint);
+                    if (point.value != newPoint.value) newPoint.rev = point.rev + 1;
+                    if (point.value != newPoint.value || point.sic != newPoint.sic || point.entityName != newPoint.entityName || point.loc != newPoint.loc) {
+                        frameDataArray.splice(i, 1, newPoint);
                         needsUpdate = true;
                     }
+                    break;
+                }
+                if (newPoint.cik < point.cik) {
+                    frameDataArray.splice(i, 0, newPoint);
+                    needsUpdate = true;
                     break;
                 }
             }
@@ -244,43 +254,48 @@ exports.handler = async (event, context) => {
                 needsUpdate = true;
                 frameDataArray.push(newPoint);
             }
-            if(needsUpdate){
-                //console.log(JSON.stringify(frameDataArray));
-                //console.log(frameRecord);
-                let response;
-                let writeCall  = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs
-                    +','+common.q(JSON.stringify(frameDataArray))+common.q(frameRecord.data[0][0].tstamp, true)+")";  //no json = get request
-                try {
-                    response = await common.runQuery(writeCall);
-                    if(response.data[0][0].processed){
-                        await common.writeS3(S3key, JSON.stringify(
-                            {
-                                tag: frame.tag,
-                                ccp: frame.ccp,
-                                uom: frame.uom,
-                                qtrs: frame.qtrs,
-                                label: frame.label,
-                                description: frame.description,
-                                data: frameDataArray
-                            }));
-                        console.log('wrote '+ S3key);
-                        resolve(S3key);
-                    } else {
-                        console.log(JSON.stringify(response.data[0], null, 2));
-                        if(depth<3){
-                            console.log('retry depth='+depth+' for '+ writeCall);
-                            resolve(await updateFrame(fact, submissionObject, depth+1));  //retry up to 3 times
-                        }
-                        else
-                            console.log('struck out trying to process '+S3key);
-                            reject(S3key);
-                    }
-                } catch(e){
-                    console.log(writeCall);
-                    console.log('updateFrame depth: ' + depth);
-                    console.log(response);
-                    throw e;
 
+            if(needsUpdate){
+                let response;
+                let success = await writeFrameToDB(frameRecord,1);
+                if(success) {
+                    await common.writeS3(S3key, JSON.stringify(
+                        {
+                            tag: frame.tag,
+                            ccp: frame.ccp,
+                            uom: frame.uom,
+                            qtrs: frame.qtrs,
+                            label: frame.label,
+                            description: frame.description,
+                            data: frameDataArray
+                        }));
+                    resolve(S3key);
+                } else {
+                    reject(S3key);
+                }
+
+                async function writeFrameToDB(responseFromUpdateFrameWithTStamp, depth){
+                    let writeCall  = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs
+                        +','+common.q(JSON.stringify(frameDataArray))+common.q(responseFromUpdateFrameWithTStamp.data[0][0].tstamp, true)+")";  //json = write request
+                    try {
+                        response = await common.runQuery(writeCall);
+                        if(response.data[0][0].processed) {
+                            return true;
+                        } else {
+                            if(depth<3){
+                                console.log('retry depth='+depth+' for '+ S3key);
+                                depth++;
+                                resolve(await writeFrameToDB(response, depth));  //retry up to 3 times
+                            }
+                            else
+                                console.log('struck out trying to process '+S3key);
+                            return(false);
+                        }
+                    } catch(e){
+                        console.log(e);
+                        console.log('updateFrame error at depth: ' + depth + ' processing '+S3key);
+                        return(false);
+                    }
                 }
             } else {
                 resolve(true);
@@ -347,7 +362,7 @@ function parseXBRL($, submission){
             }
         }
     });
-    console.log(submission.dei);
+    //console.log(submission.dei);
     return submission;
 
     function getElements(namespace, tagName){
@@ -562,10 +577,10 @@ async function saveXBRLSubmission(s){
             + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey.value+","+q(s.dei.EntityRegistrantName.value)+(s.filing.sic||0)+','
             + q(s.dei.CurrentFiscalYearEndDate.value.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType.value)+q(s.dei.DocumentPeriodEndDate.value)
             + q(s.dei.DocumentFiscalYearFocus.value)+q(s.dei.DocumentFiscalPeriodFocus.value)+q(s.filing.filingDate)
-            + q(s.filing.businessAddress.country)+q(s.filing.businessAddress.state)+q(s.filing.businessAddress.city)+q(s.filing.businessAddress.zip)
-            + q(s.filing.businessAddress.street1)+q(s.filing.businessAddress.street2)+q(s.filing.businessAddress.phone)
-            + q(s.filing.mailingAddress.country)+q(s.filing.mailingAddress.state)+q(s.filing.mailingAddress.city)+q(s.filing.mailingAddress.zip)
-            + q(s.filing.mailingAddress.street1)+q(s.filing.mailingAddress.street2)
+            + q(s.filing.businessAddress&&s.filing.businessAddress.country)+q(s.filing.businessAddress&&s.filing.businessAddress.state)+q(s.filing.businessAddress&&s.filing.businessAddress.city)+q(s.filing.businessAddress&&s.filing.businessAddress.zip)
+            + q(s.filing.businessAddress&&s.filing.businessAddress.street1)+q(s.filing.businessAddress&&s.filing.businessAddress.street2)+q(s.filing.businessAddress&&s.filing.businessAddress.phone)
+            + q(s.filing.mailingAddress&&s.filing.mailingAddress.country)+q(s.filing.mailingAddress&&s.filing.mailingAddress.state)+q(s.filing.mailingAddress&&s.filing.mailingAddress.city)+q(s.filing.mailingAddress&&s.filing.mailingAddress.zip)
+            + q(s.filing.mailingAddress&&s.filing.mailingAddress.street1)+q(s.filing.mailingAddress&&s.filing.mailingAddress.street2)
             + q(s.filing.incorporation?s.filing.incorporation.country:null)+q(s.filing.incorporation?s.filing.incorporation.state:null)+q(s.filing.ein)
             + q('former')+q('changed')+q(s.dei.EntityFilerCategory.value)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
             + q(s.hasIXBRL||s.hasXBRL)+"1,"+q(s.dei.EntityCentralIndexKey.value, true)+")";
