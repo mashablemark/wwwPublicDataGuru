@@ -72,7 +72,7 @@ let me = {
         });
     },
     runQuery: async (sql) => {
-        console.log(sql);
+        //console.log(sql);
         if(!me.con) me.con = await me.createDbConnection();
         if(sql.indexOf("''fatal MySQL error")===-1){
             try{

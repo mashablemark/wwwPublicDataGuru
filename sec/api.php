@@ -396,6 +396,7 @@ EOL;
         //echo($edgar_root . $submission_path  . $header_filename);
         $files = preg_match_all('/<a href="\S+\.(xml|html|htm)"/', $header_contents, $matches);
         $searches = [];
+        $returnString = '';
         for($i = 0; $i < count($matches[0]); ++$i) {
             $filename_pos = strpos($header_contents, $matches[0][$i]);
             $desc_pos = strrpos($header_contents, "&lt;DOCUMENT&gt;", -strlen($header_contents)+$filename_pos);
@@ -411,18 +412,20 @@ EOL;
                 $filename = substr($matches[0][$i], 9, strlen($matches[0][$i])-9-1);
                 //downloadToS3($edgar_root . $submission_path . $filename, $submission_path . $filename);
                 //downloadToS3 created in case CURL did not work.  Problem was S3 credentials and config files needed in /usr/share/httpd/.aws (from ~/.aws)
-                $cmd = 'curl "'. $edgar_root . $submission_path . $filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/' . $submission_path . $filename;
+                $cmd = 'curl "'. $edgar_root . $submission_path . $filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/data/' . $submission_path . $filename;
                 logEvent("getSubmissionFilesToTestS3", $cmd);
                 shell_exec($cmd);
+                $returnString .= $edgar_root . $submission_path . $filename . ' to  s3://restapi.publicdata.guru/sec/edgar/' . $submission_path . $filename.'<br>';
             }
 
         }
         //downloadToS3($edgar_root . $submission_path . $header_filename, $submission_path . $header_filename);
-        $cmd = 'curl "'. $edgar_root . $submission_path . $header_filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/' . $submission_path . $header_filename;
+        $cmd = 'curl "'. $edgar_root . $submission_path . $header_filename . '" | aws s3 cp - s3://restapi.publicdata.guru/sec/edgar/data/' . $submission_path . $header_filename;
         shell_exec($cmd);
+        $returnString .= $cmd;
         $output = [
             "status" => "ok",
-            "headerbody" => $header_contents
+            "headerbody" => $returnString
         ];
         break;
     default:

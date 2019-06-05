@@ -609,7 +609,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
             for(t=0; t<frameTableOptions.tags.length; t++) {
                 for (d = 0; d<frameTableOptions.cdates.length; d++) {
                     var url = 'https://restapi.publicdata.guru/sec/frames/' + frameTableOptions.tags[t].tag + '/'
-                        + frameTableOptions.tags[t].uom + '/DQ' + frameTableOptions.tags[t].qtrs + '/'
+                        + frameTableOptions.tags[t].uom + '/'
                         + frameTableOptions.cdates[d] + '.json';
                     urlsToFetch[url] = {
                         order: requestCount++,
@@ -1021,7 +1021,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
         } else {
             var dbUrl = false;
             if(window.location.href.indexOf('maker.publicdata')!=-1){ //use database for maker.publicdata.guru
-                var uParts = url.split('/');  //e.g. 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+'/DQ'+oVars.qtrs +'/'+this.closestCalendricalPeriod(oVars.end, oVars.qtrs),
+                var uParts = url.split('/');  //e.g. 'https://restapi.publicdata.guru/sec/frames/'+oVars.tag+'/'+oVars.uom+ +'/'+this.closestCalendricalPeriod(oVars.end, oVars.qtrs),
                 switch(uParts[4]){
                     case 'frames':
                         dbUrl = 'http://maker.publicdata.guru/sec/api.php?process='+uParts[4]+'&t='+uParts[5]+'&u='+encodeURIComponent(uParts[6]) +'&q='+uParts[7]+'&d='+uParts[8];
