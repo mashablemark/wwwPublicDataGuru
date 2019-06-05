@@ -24,13 +24,10 @@
 // ownership submissions per year = 210,000
 // Lambda execution costs for updateOwnershipAPI per year = $1.27
 // CloudFront Ownership invalidation costs per year = 210,000 * (1 issuer path + 1 reporter path) = $2,100 per year
-var cheerio = require('cheerio');
-var mysql2 = require('mysql2/promise');
-var AWS = require('aws-sdk');
-var secure = require('./secure');  //must not be committed
+const cheerio = require('cheerio');
+const common = require('./common');
 
-var con;  //global db connection
-var ownershipForms= {
+const ownershipForms= {
     '3': 'xml',
     '3/A': 'xml',
     '4': 'xml',
@@ -38,7 +35,7 @@ var ownershipForms= {
     '5': 'xml',
     '5/A': 'xml'
 };
-var form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pdf
+const form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pdf
     K: 'Equity swaps and similar hedging transactions',
     P: 'Purchase of securities on an exchange or from another person',
     S: 'Sale of securities on an exchange or to another person',
@@ -50,51 +47,10 @@ var form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pdf
     J: 'Other (accompanied by a footnote describing the transaction)'
 };
 
-var s3 = new AWS.S3();
 const bucket = "restapi.publicdata.guru";
-async function readS3(file){
-    return new Promise((resolve, reject) => {
-        let params = {
-            Bucket: bucket,
-            Key: file
-        };
-        s3.getObject(params, (err, data) => {
-            if (err) {  // an error occurred
-                console.log(err, err.stack);
-                reject(err, err.stack);
-            }
-            else { // successful response  (alt method = createreadstreeam)
-                resolve(data.Body.toString('utf-8'));
-            }
-        });
-    });
-}
-function writeS3(fileKey, text) {
-    return new Promise((resolve, reject) => {
-        s3.putObject({
-            Body: text,
-            Bucket: bucket,
-            Key: fileKey
-        }, (err, data) => {
-            if (err) {
-                console.log(err, err.stack);
-                reject(err, err.stack);
-            } // an error occurred
-            else  resolve(data);           // successful response
-        });
-    });
-}
-
 
 exports.handler = async (event, context) => {
-    const db_info = secure.publicdataguru_dbinfo();
-    con = await mysql2.createConnection({ //global db connection
-        host: db_info.host, //'localhost',  //,
-        user: db_info.user,
-        password: db_info.password,
-        database: db_info.database
-    });
-    await logEvent('updateOwnerShip API invoked', JSON.stringify(event));
+    await common.logEvent('updateOwnerShip API invoked', JSON.stringify(event));
 
     let filing = {
         path: event.path,
@@ -111,7 +67,7 @@ exports.handler = async (event, context) => {
     for (let i = 1; i < filing.files.length; i++) {
         if (filing.files[i].title.indexOf('Document 1 - RAW XML') !== -1) {
             filing.primaryDocumentName = filing.files[i].file.substr(0, 4) == "sec/" ? filing.files[i].file.substr(4) : filing.files[i].file;
-            filing.xmlBody = await readS3(filing.path + filing.primaryDocumentName);
+            filing.xmlBody = await common.readS3(filing.path + filing.primaryDocumentName);
         }
     }
 
@@ -280,7 +236,7 @@ async function process345Submission(filing, remainsChecking){
         body.transactions = JSON.parse(body.transactions);
         console.log(body);
         //await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
-        s3WritePromises.push(writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
+        s3WritePromises.push(common.writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
         invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/reporter/cik'+parseInt(body.cik));
     }
     let updatedIssuerAPIDataset = await runQuery(
@@ -316,7 +272,7 @@ async function process345Submission(filing, remainsChecking){
     delete body.bazip;
     body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
     body.transactions = JSON.parse(body.transactions);
-    s3WritePromises.push(writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
+    s3WritePromises.push(common.writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
     invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik));
 
     for(let i=0; i<s3WritePromises.length;i++){
@@ -352,12 +308,13 @@ function rowToObject(row, fields){
 
 async function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
+    const q = common.q;
     var sql = 'INSERT INTO ownership_submission (adsh, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
         + ' remarks, signatures, txtfilesize, tries) '
         + " VALUES (" +q(s.adsh) + q(s.documentType) + q(s.schemaVersion) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
         + q(s.issuer.cik) + q(s.issuer.name)+q(s.issuer.tradingSymbol)+q(s.remarks)+q(s.signatures) + s.fileSize +',1)'
             + ' on duplicate key update tries = tries + 1';
-    await runQuery(sql);
+    await common.runQuery(sql);
 
     //save reporting owner records
     for(var ro=0; ro<s.reportingOwners.length;ro++){
@@ -368,7 +325,7 @@ async function save345Submission(s){
         + q(owner.state) + q(owner.stateDescription) +  q(owner.zip) + q(owner.isDirector)+q(owner.isOfficer)
         + q(owner.isTenPercentOwner)+ q(owner.isOther )+ q(owner.otherText, true) + ')'
             + ' on duplicate key update ownernum = ownernum';
-        await runQuery(sql);
+        await common.runQuery(sql);
     }
     //save any footnote records
     for(var f=0; f<s.footnotes.length;f++){
@@ -376,7 +333,7 @@ async function save345Submission(s){
         sql ='INSERT INTO ownership_footnote (adsh, fnum, footnote) '
             + ' value ('+q(s.adsh)+foot.id.substr(1)+','+q(foot.text, true) + ')'
             + ' on duplicate key update adsh = adsh';
-        await runQuery(sql);
+        await common.runQuery(sql);
     }
 
     //save transaction records
@@ -391,37 +348,15 @@ async function save345Submission(s){
         + q(trans.underlyingSecurityShares)+ q(trans.underlyingSecurityValue) + q(trans.sharesOwnedFollowingTransaction)+ q(trans.valueOwnedFollowingTransaction)
         + q(trans.directOrIndirectOwnership) + q(trans.natureOfOwnership, true) + ')'
             + ' on duplicate key update transnum = transnum';
-        await runQuery(sql);
+        await common.runQuery(sql);
         for(var tf=0; tf<trans.footnotes.length;tf++){
-            await runQuery('INSERT INTO ownership_transaction_footnote (adsh, tnum, fnum) values ('+q(s.adsh)+(t+1)+','+trans.footnotes[tf].substr(1)+')'
+            await common.runQuery('INSERT INTO ownership_transaction_footnote (adsh, tnum, fnum) values ('+q(s.adsh)+(t+1)+','+trans.footnotes[tf].substr(1)+')'
              + ' on duplicate key update tnum = '+(t+1));
         }
     }
 }
 
-function q(value, isLast){
-    if(typeof value !== 'undefined' && value !== ''){
-        return "'" + value.replace(/'/g, "''").replace(/\\/g, '\\\\') + "'" + (isLast?'':',');
-    } else {
-        return ' null'+ (isLast?'':',');
-    }
-}
 
-async function runQuery(sql){
-    try{
-        let [result, fields] = await con.execute(sql);
-        return {data: result, fields: fields}
-    } catch(err) {
-        console.log(sql);
-        await logEvent("fatal MySQL error", sql, true);
-        throw err;
-    }
-}
-
-async function logEvent(type, msg, display){
-    await runQuery("insert into eventlog (event, data) values ("+q(type)+q(msg, true)+")");
-    if(display) console.log(type, msg);
-}
 
 
 

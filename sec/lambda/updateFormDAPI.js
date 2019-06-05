@@ -18,18 +18,14 @@
 
 //GLOBAL SCOPE = SHARED BETWEEN LAMBDA CALLS!
 const cheerio = require('cheerio');
-const mysql2 = require('mysql2/promise');
-const AWS = require('aws-sdk');
-const secure = require('./secure');  //must not be committed
+const common = require('./common');
 
 var con = false;  //global db connection reused as long as container is reused;
 //WARNING:  this approach of treating the API object as a datastore to be updated requires reservice concurrency = 1 (singleton)
 var exemptOfferingAPIObject = false; //global object eliminates need to reread and parse object when container is reused;
-const s3 = new AWS.S3();
-const bucket = "restapi.publicdata.guru";
 
 exports.handler = async (formDevent, context) => {
-    console.log(JSON.stringify(formDevent));
+    //console.log(JSON.stringify(formDevent));
     if(!con) con = await createDbConnection(); //global db connection reused as long as container is reused;
     let exemptOfferingsForms= {
         'D': 'xml',
@@ -38,7 +34,7 @@ exports.handler = async (formDevent, context) => {
     for (let i = 0; i < formDevent.files.length; i++) {
         if (exemptOfferingsForms[formDevent.files[i].type] && formDevent.files[i].name.indexOf('/')===-1) {
             formDevent.primaryDocumentName = formDevent.files[i].name.substr(0, 4) == "sec/" ? formDevent.files[i].name.substr(4) : formDevent.files[i].name;
-            formDevent.xmlBody = await readS3(formDevent.path + formDevent.primaryDocumentName);
+            formDevent.xmlBody = await common.readS3(formDevent.path + formDevent.primaryDocumentName);
             break;
         }
     }
@@ -49,7 +45,7 @@ exports.handler = async (formDevent, context) => {
         };
         await processFormDSubmission(submission, true);
     } else {
-        await logEvent('Form D read error', JSON.stringify(formDevent), true);
+        await common.logEvent('Form D read error', JSON.stringify(formDevent), true);
     }
     console.log('end of lambda event handler!');
 };
@@ -112,7 +108,7 @@ async function processFormDSubmission(submission, remainsChecking){
     submission.schemaVersion = get($xml, 'schemaVersion');
     submission.submissionType = get($xml, 'submissionType');
     submission.testOrLive = get($xml, 'testOrLive');
-    if(submission.testOrLive != 'LIVE') logEvent('ERROR updateFormDAPI','testOrLive='+submission.testOrLive,true);
+    if(submission.testOrLive != 'LIVE') common.logEvent('ERROR updateFormDAPI','testOrLive='+submission.testOrLive,true);
 
     function getIssuer($){
         let issuer = {
@@ -213,7 +209,7 @@ async function processFormDSubmission(submission, remainsChecking){
     if(remainsChecking){
         let remains = $xml.text().trim();
         if(remains.length>0) {
-            await logEvent('WARNING updateFormDAPI unparsed remains', submission.filing.adsh + ': '+ $xml.html(), true);
+            await common.logEvent('WARNING updateFormDAPI unparsed remains', submission.filing.adsh + ': '+ $xml.html(), true);
         } else {
             console.log('no unparsed remains');
         }
@@ -221,7 +217,7 @@ async function processFormDSubmission(submission, remainsChecking){
 
     //update and write out RESTful API as annual API file (~24,000 rows * 4k = 80MB)
     const dbSavePromise =  saveFormDSubmission(submission);
-    //await runQuery("call updateFormDAPI('"+submission.filing.adsh+"');");
+    //await common.runQuery("call updateFormDAPI('"+submission.filing.adsh+"');");
     const exemptOfferingSummary = {
         adsh: submission.filing.adsh,
         accepted: submission.filing.acceptanceDateTime,
@@ -281,10 +277,10 @@ async function processFormDSubmission(submission, remainsChecking){
                 break;
             }
             if(offeringInFile.isAmendment && offeringInFile.previousAccessionNumber==submission.adsh) { //leave unchanged since API offering is the replacement of what was just ingested
-                logEvent('WARNING updateFormDAPI older exempt offering ingested', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
+                common.logEvent('WARNING updateFormDAPI older exempt offering ingested', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
                 break;
             }
-            logEvent('WARNING updateFormDAPI multiple offerings', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
+            common.logEvent('WARNING updateFormDAPI multiple offerings', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
         }
     }
     if(i==exemptOfferingAPIObject.exemptOfferings.length) {
@@ -296,12 +292,12 @@ async function processFormDSubmission(submission, remainsChecking){
     let writeAPIPromise;
     if(updateAPIFile){
         exemptOfferingAPIObject.exemptOfferings = exemptOfferingAPIObject.exemptOfferings.sort((a,b)=>{return b.accepted-a.accepted});  //sort newest first
-        writeAPIPromise = writeS3(fileKey, JSON.stringify(exemptOfferingAPIObject));
+        writeAPIPromise = common.writeS3(fileKey, JSON.stringify(exemptOfferingAPIObject));
     }
 
 //   5. collect promise from step 3b and call addExemptOfferingPersons(adsh) to update the persons table (for people search)
     await dbSavePromise;
-    await runQuery(`call addExemptOfferingPersons('${exemptOfferingSummary.adsh}');`);
+    await common.runQuery(`call addExemptOfferingPersons('${exemptOfferingSummary.adsh}');`);
 //   7. collect promises from steps 3a, 5 and 6 then exit (without closing con to allow reuse)
     await writeAPIPromise;
 
@@ -310,12 +306,13 @@ async function processFormDSubmission(submission, remainsChecking){
 }
 
 async function saveFormDSubmission(s){
+   const q = common.q;
    /* try {*/
         //save main submission record (on duplicate handling in case of retries)
         delete s.filing.xmlBody;
         //console.log(JSON.stringify(s));  //debugging only
 
-        const dbOfferingExists = await runQuery("select count(*) as recordcount from exemptOffering where adsh=" + q(s.filing.adsh, true));
+        const dbOfferingExists = await common.runQuery("select count(*) as recordcount from exemptOffering where adsh=" + q(s.filing.adsh, true));
         console.log(JSON.stringify(s));
         if(dbOfferingExists.data[0].recordcount==0){
             if(s.totalRemaining=="Indefinite") s.totalRemaining = null;
@@ -330,7 +327,7 @@ async function saveFormDSubmission(s){
                 + q(s.dateOfFirstSale)+q(s.durationMoreThenOneYear)+q(s.typesOfSecuritiesOffered)+q(s.isBusinessCombinationTransaction)+q(s.businessCombinationTransactionClarification)
                 + q(s.minimumInvestmentAccepted)+q(s.salesCompensationList, false, 4000)+q(s.totalOfferingAmount)+q(s.totalAmountSold)+q(s.totalRemaining)+q(s.salesAmountsClarification)+q(s.hasNonAccreditedInvestors)+q(s.numberAlreadyInvested)
                 + q(s.salesCommissions)+q(s.findersFees)+q(s.commissionsAndFeesClarification)+q(s.grossProceedsUsed)+q(s.grossProceedsUsedClarification)+q(s.authorizedRepresentativeSignature)+q(s.signature, true, 1024) +')';
-            const offeringPromise =  runQuery(sql);  //just collect a promise for now allowing the person to be inserted simultaneously
+            const offeringPromise =  common.runQuery(sql);  //just collect a promise for now allowing the person to be inserted simultaneously
 
             //save issuers (note: first is the primaryIssuer)
             sql = 'insert into exemptOfferingIssuers '
@@ -346,7 +343,7 @@ async function saveFormDSubmission(s){
                     + q(issuer.previousIssuerNames)+q(issuer.previousEdgarNames)
                     + q(issuer.entityType, false, 200)+q(issuer.yearOfInc, true) + ')';
             }
-            const issuersPromise =  runQuery(sql);
+            const issuersPromise =  common.runQuery(sql);
 
             //save related persons
             if(s.relatedPersons){
@@ -359,18 +356,18 @@ async function saveFormDSubmission(s){
                         + q(person.address.street1)  + q(person.address.street2)  + q(person.address.city)  + q(person.address.stateOrCountry)
                         + q(person.address.stateOrCountryDescription, false, 200) + q(person.address.zipCode)  + q(person.phone)  + q(person.relationships, true) +')';
                 }
-                await runQuery(sql);
+                await common.runQuery(sql);
             } else {
-                await logEvent('WARNING updateFormDAPI no related persons', s.filing.indexHeaderFileName, true);
+                await common.logEvent('WARNING updateFormDAPI no related persons', s.filing.indexHeaderFileName, true);
             }
             await offeringPromise;
             await issuersPromise;
         } else {
-            await logEvent('WARNING updateFormDAPI record already exists', s.filing.indexHeaderFileName, true);
+            await common.logEvent('WARNING updateFormDAPI record already exists', s.filing.indexHeaderFileName, true);
         }
         return true
    /* } catch (e) {
-        await logEvent('ERROR updateFormDAPI db write failure ' + s.filing.indexHeaderFileName, JSON.stringify(e),true);
+        await common.logEvent('ERROR updateFormDAPI db write failure ' + s.filing.indexHeaderFileName, JSON.stringify(e),true);
     }*/
 }
 
@@ -381,106 +378,6 @@ function readAndRemoveTag($xml, tagPath, remainsChecking){
     let value = $tag.text().replace(rgxTrim, '');
     if(remainsChecking) $tag.remove();
     return value;
-}
-
-function q(value, isLast, maxCharLength){
-    if(typeof value !== 'undefined' && value !== '' && value != null){
-        if(maxCharLength && typeof value == 'string' &&  value.length>maxCharLength){
-            console.log("maxCharLength of "+maxCharLength+" exceeded.  Actual length = "+value.length+" for: "+value);
-            value = value.substr(0,maxCharLength);
-        }
-        if(value==='true' || value==='false') return value +  (isLast?'':',');
-        return "'" + value.replace(/'/g, "''").replace(/\\/g, '\\\\') + "'" + (isLast?'':',');
-    } else {
-        return ' null'+ (isLast?'':',');
-    }
-}
-
-async function createDbConnection() {
-    let myConn = await mysql2.createConnection(secure.publicdataguru_dbinfo()); // (Re)created global connection
-    myConn.connect(function(err) {              // The server is either down
-        if(err) {                            // or restarting (takes a while sometimes).
-            console.log('error when connecting to db:', err);
-            setTimeout(() => {
-                con = createDbConnection();
-            }, 100); // We introduce a delay before attempting to reconnect, to avoid a hot loop
-        }
-    });
-
-    myConn.on('error', async function(err) {
-        console.log('db error', err);
-        if(err.code === 'PROTOCOL_CONNECTION_LOST') { // Connection to the MySQL server is usually
-            con = await createDbConnection();
-        } else {                                      // connnection idle timeout (the wait_timeout
-            throw err;                                  // server variable configures this)
-        }
-    });
-    return myConn
-}
-
-function wait(ms) {
-    return new Promise(resolve => {
-        setTimeout(resolve, ms);
-    })
-}
-
-async function runQuery(sql){
-    if(sql.indexOf("''fatal MySQL error")===-1){
-        try{
-            let [result, fields] = await con.query(sql);
-            return {data: result, fields: fields};
-        } catch(err) {
-            console.log("fatal MySQL error: "+ err.message);
-            try{
-                await logEvent("fatal MySQL error: "+err.message, sql);
-            } catch(err2){
-                console.log("fatal MySQL error: "+err.message);
-            }
-            throw err;
-        }
-    } else {
-        console.log('endless loop detected in runQuery');
-        process.exit();
-    }
-}
-
-async function logEvent(type, msg, display){
-    await runQuery("insert into eventlog (event, data) values ("+q(type)+q(msg, true)+")");
-    if(display) console.log(type, msg);
-}
-
-async function readS3(file){
-    return new Promise((resolve, reject) => {
-        let params = {
-            Bucket: bucket,
-            Key: file
-        };
-        s3.getObject(params, (err, data) => {
-            if (err) {  // an error occurred
-                console.log(err, err.stack);
-                reject(err, err.stack);
-            }
-            else { // successful response  (alt method = createreadstreeam)
-                resolve(data.Body.toString('utf-8'));
-            }
-        });
-    });
-}
-
-function writeS3(fileKey, text) {
-    return new Promise((resolve, reject) => {
-        s3.putObject({
-            Body: text,
-            Bucket: bucket,
-            Key: fileKey
-        }, (err, data) => {
-            if (err) {
-                console.log(err, err.stack);
-                reject(err, err.stack);
-            } // an error occurred
-            else  resolve(data);           // successful response
-        });
-    });
 }
 
 
