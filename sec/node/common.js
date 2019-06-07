@@ -1,10 +1,13 @@
 //module vars that are not exported
-const mysql2 = require('mysql2/promise');
+const mysql = require('mysql');
 const AWS = require('aws-sdk');
 const secure = require('./secure');  //DO NOT COMMIT!
 let s3 = false,  //error can occur if s3 object created from AWS SDK is old & unused
     s3Age = false;
 const s3MaxAge = 10000; //todo:  research raising this from 10s to ??
+
+process.on('unhandledRejection', (reason, promise) => { console.log('Unhandled rejection at: ', reason.stack|| reason)});  //outside of handler = run once
+
 let me = {
     con: false,  //global db connection
     bucket: "restapi.publicdata.guru",  //default bucket
@@ -21,26 +24,26 @@ let me = {
         }
     },
     createDbConnection: async (dbInfo) => {
-        let myConn = await mysql2.createConnection(dbInfo || secure.publicdataguru_dbinfo()); // (Re)created global connection
-        let self = this;
-        myConn.connect(function(err) {              // The server is either down
-            if(err) {                            // or restarting (takes a while sometimes).
-                console.log('error when connecting to db:', err);
-                setTimeout(() => {
-                    me.con = self.createDbConnection();
-                }, 100); // We introduce a delay before attempting to reconnect, to avoid a hot loop
-            }
+        return new Promise((resolve, reject) => {
+            let newConn = mysql.createConnection(dbInfo || secure.publicdataguru_dbinfo()); // (Re)create reusable connection for this Lambda
+            newConn.connect(err => {
+                if(err){
+                    console.log('error when connecting to db:', JSON.stringify(err));
+                    reject(new Error(err.message));
+                } else {
+                    newConn.on('error', async function(err) {
+                        console.log('db error', JSON.stringify(err));
+                        if (err.code === 'PROTOCOL_CONNECTION_LOST') { // Connection to the MySQL server is usually
+                            me.con = await me.createDbConnection(dbInfo);
+                            me.logEvent('db connection lost and recovered', JSON.stringify(err))
+                        } else {
+                            throw new Error(err.message);
+                        }
+                    });
+                    resolve(newConn);
+                }
+            });
         });
-
-        myConn.on('error', async function(err) {
-            console.log('db error', err);
-            if(err.code === 'PROTOCOL_CONNECTION_LOST') { // Connection to the MySQL server is usually
-                me.con = await self.createDbConnection(dbInfo);
-            } else {                                      // connnection idle timeout (the wait_timeout
-                throw err;                                  // server variable configures this)
-            }
-        });
-        return myConn;
     },
     getDisseminationDate: (acceptanceDateTime) => { //submissions accepted after 5:30PM are disseminated the next day
         const acceptanceDate = new Date(acceptanceDateTime.substr(0,4) + "-" + acceptanceDateTime.substr(4,2) + "-" + acceptanceDateTime.substr(6,2) + ' ' + acceptanceDateTime.substr(8,2)+':'+acceptanceDateTime.substr(10,2)+':'+acceptanceDateTime.substr(12,2));
@@ -71,26 +74,29 @@ let me = {
             setTimeout(resolve, ms);
         });
     },
-    runQuery: async (sql) => {
-        //console.log(sql);
-        if(!me.con) me.con = await me.createDbConnection();
-        if(sql.indexOf("''fatal MySQL error")===-1){
-            try{
-                let [result, fields] = await me.con.query(sql);  //note: con.execute prepares a statement and will run into max_prepared_stmt_count limit
-                return {data: result, fields: fields};
-            } catch(err) {
-                console.log("fatal MySQL error: "+ err.message);
+    runQuery: (sql) => {
+        return new Promise(async (resolve,reject) =>  {
+            if(!me.con) me.con = await me.createDbConnection();
+            if(sql.indexOf("''fatal MySQL error")===-1){
                 try{
-                    await me.logEvent("fatal MySQL error: "+err.message, sql);
-                } catch(err2){
-                    console.log("fatal MySQL error: "+err.message);
+                    me.con.query(sql, (err, result, fields) => {
+                        if(err) throw err;
+                        resolve({data: result, fields: fields});
+                    });  //note: con.execute prepares a statement and will run into max_prepared_stmt_count limit
+                } catch(err) {
+                    console.log("fatal MySQL error: "+ err.message);
+                    try{
+                        await me.logEvent("fatal MySQL error: "+err.message, sql);
+                    } catch(err2){
+                        console.log("unable to log fatal MySQL error: "+err2.message);
+                    }
+                    reject(err);
                 }
-                throw err;
+            } else {
+                console.log('endless loop detected in runQuery');
+                process.exit();
             }
-        } else {
-            console.log('endless loop detected in runQuery');
-            process.exit();
-        }
+        });
     },
     logEvent: async (type, msg, display) => {
         await me.runQuery("insert into eventlog (event, data) values ("+me.q(type)+me.q(msg.substr(0,59999), true)+")");  //data field is varchar 60,000
@@ -100,6 +106,7 @@ let me = {
         let now = new Date();
         if(!s3 || !s3Age || (s3Age - now>s3MaxAge)){
             s3 = new AWS.S3;
+            console.log('created new S3 object from SDK');
             s3Age = now;
         }
         return new Promise((resolve, reject) => {

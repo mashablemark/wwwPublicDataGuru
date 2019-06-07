@@ -27,7 +27,10 @@
 //     - write to S3: restdata.publicdata.guru/sec/
 //     - tell cloudFront to refresh the cache for the updated issuer API file
 
-// to compile:  zip -r updateXBRLAPI.zip updateXBRLAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js common.js
+// TO COMPILE (hint use "npm list" to discover dependencies)
+// using mysql:  zip -r updateXBRLAPI.zip updateXBRLAPI.js node_modules/mysql node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/bignumber.js node_modules/readable-stream node_modules/core-util-is node_modules/inherits node_modules/isarray node_modules/process-nextick-args node_modules/safe-buffer node_modules/string_decoder node_modules/safe-buffer node_modules/util-deprecate node_modules/safe-buffer sqlstring secure.js common.js
+// using mysql2: zip -r updateXBRLAPI.zip updateXBRLAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js common2.js
+
 // lambda execution time = 10s using a 512MB container
 // executions per year = 26,000
 // Lambda execution costs for updateXBRLAPI per year = $0.000000834 * 100 payment units of 100ms * 26,000 = $2.16 per year
@@ -62,10 +65,10 @@ const XBRLDocuments= {
         'EX-101.INS': 'xml'
     }
 };
-const bucket = "restapi.publicdata.guru";
+const debugMode = false;  //set false in production or when running at scale to avoid large CloudWatch log & costs
+const rootS3Folder = "test";  //todo: change root directory to "sec" from "test" to go live for S3 writes of financial statement lists, timeseries and frames APIs
 
 exports.handler = async (event, context) => {
-    process.on('unhandledRejection', (reason, promise) => { console.log('Unhandled rejection at: ', reason.stack|| reason)});
     let dbCheckPromise = common.runQuery("select sum(recs) as records from ("
         + "select count(*) as recs from fin_sub where adsh='"+event.adsh+"' "
         + "   UNION ALL "
@@ -89,21 +92,21 @@ exports.handler = async (event, context) => {
     //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
     for (let i = 0; i < event.files.length; i++) {
         if(XBRLDocuments.iXBRL[event.files[i].type]) {
-            if(event.files[i].name.substr(-4)!='.txt'){
+            if(['.txt','.pdf'].indexOf(event.files[i].name.substr(-4).toLowerCase())===-1){
                 console.log('primary '+event.files[i].type + ' HTML doc found: '+ event.path + event.files[i].name);
-                let fileBody = await common.readS3(event.path + event.files[i].name);
+                let fileBody = await common.readS3(event.path + event.files[i].name).catch(()=>{throw new Error('unable to read ' + event.path + event.files[i].name)});
                 console.log('html length: '+ fileBody.length);
                 await parseIXBRL(cheerio.load(fileBody), submission);
                 if(submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
                 submission.primaryHTML = event.files[i].name;
                 console.log(submission.counts);
             } else {
-                console.log('WARNING: primary doc is .txt file -> skip');
+                console.log('WARNING: primary doc is .txt or .pdf file -> skip');
             }
         }
         if(XBRLDocuments.XBRL[event.files[i].type]) {
             console.log('XBRL '+event.files[i].type + ' doc found: '+ event.path + event.files[i].name);
-            let fileBody = await common.readS3(event.path + event.files[i].name);
+            let fileBody = await common.readS3(event.path + event.files[i].name).catch(()=>{throw new Error('unable to read ' + event.path + event.files[i].name)});
             await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
             if(submission.hasXBRL) submission.hasXBRL = event.files[i].name;
             console.log(submission.counts);
@@ -115,6 +118,7 @@ exports.handler = async (event, context) => {
         if(submission.dei.EntityCentralIndexKey.value!=submission.filing.cik)
             await common.logEvent('ERROR updateXBRLAPI: header and DEI CIK mismatch', submission.filing.path);
         let existingRecords = await dbCheckPromise;
+        if(debugMode) console.log(existingRecords);
         if(existingRecords.data.length){
             await common.logEvent('WARNING: existing XBRL records', event.adsh + ' has '+existingRecords.data[0].records+' fin_sub and fin_num records');
             await common.runQuery("delete from fin_sub where adsh='"+ event.adsh+"'");
@@ -129,7 +133,7 @@ exports.handler = async (event, context) => {
         let updateAPIPromises = [];
         const financialStatementsList = await common.runQuery("call listFinancialStatements('"+submission.dei.EntityCentralIndexKey.value+"');");
         //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
-        updateAPIPromises.push(common.writeS3('sec/financialStatementsByCompany/cik'+parseInt(submission.dei.EntityCentralIndexKey.value), JSON.stringify(financialStatementsList.data)));
+        updateAPIPromises.push(common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(submission.dei.EntityCentralIndexKey.value)+'.json', financialStatementsList.data[0][0].jsonList));
 
         //write to time series REST API in S3
 
@@ -153,7 +157,7 @@ exports.handler = async (event, context) => {
             lastCik = ts.cik;
             lastTag = ts.tag;
             let cikKey = 'cik' + parseInt(ts.cik, 10).toString();
-            s3Key = 'test/timeseries/' + ts.tag + '/' + cikKey + '.json';  //todo: change root to sec to go live
+            s3Key = rootS3Folder + '/timeseries/' + ts.tag + '/' + cikKey + '.json';
             let qtrs = "DQ" + ts.qtrs;  //DQ prefix = duration in quarters
             if (!oTimeSeries[ts.tag]) {
                 oTimeSeries[ts.tag] = {
@@ -210,11 +214,11 @@ exports.handler = async (event, context) => {
 
         return new Promise(async (resolve, reject) => {
             //initial call to updateFrame fetches frame data and tstamp to prevent collisions
-            let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs+",'', null)";  //no json = get request
-            //todo: change root to sec to go live for timeseries and frames S3 writes
-            let S3key = 'test/frames/'+fact.tag+'/'+fact.uom.label+'/'+fact.ccp+'.json';
+            let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs+",'', null);";  //no json = get request
+            let S3key = rootS3Folder + '/frames/'+fact.tag+'/'+fact.uom.label+'/'+fact.ccp+'.json';
             let needsUpdate = false;
             let frameRecord = await common.runQuery(getCommand);
+            if(debugMode) console.log('bytes used over return for '+S3key+": " + JSON.stringify(frameRecord).length + '/' + JSON.stringify(frameRecord.data[0][0]).length);
             let frame, frameDataArray;
             try{
                 frame = frameRecord.data[0][0];
@@ -230,7 +234,7 @@ exports.handler = async (event, context) => {
                 "cik": parseInt(submission.dei.EntityCentralIndexKey ? submission.dei.EntityCentralIndexKey.value : submission.filing.cik),
                 "entityName": submission.dei.EntityRegistrantName ? submission.dei.EntityRegistrantName.value : submission.filing.entityName,
                 "sic": parseInt(submission.filing.sic),
-                "loc": (submission.filing.businessAddress.country || submission.filing.mailingAddress.country || 'US') + '-' + (submission.filing.businessAddress.state || submission.filing.mailingAddress.state || ''),
+                "loc": ((submission.filing.businessAddress && submission.filing.businessAddress.country) || (submission.filing.mailingAddress && submission.filing.mailingAddress.country) || 'US') + '-' + ((submission.filing.businessAddress && submission.filing.businessAddress.state) || ( submission.filing.mailingAddress && submission.filing.mailingAddress.state) || ''),
                 "start": fact.start,
                 "end": fact.end,
                 "val": fact.value,
@@ -346,18 +350,29 @@ function parseXBRL($, submission){
                         if (!submission.dei[tag].contextRef) common.logEvent("missing DEI contextRef for "+tag, submission.filing.adsh);
                     } else {
                         if(standardNumericalTaxonomies.indexOf(tax)!=-1){
-                            let xbrl = extractFactInfo(submission, $, elem);
-                            if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
-                                if(!xbrl.dim && xbrl.uom) {
-                                    let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom.label+':'+xbrl.end;
+                            let factInfo = extractFactInfo(submission, $, elem);
+                            if(factInfo.isStandard){  //todo:  process facts with dimensions & axes (members)
+                                if(!factInfo.dim && factInfo.uom) {
+                                    let factKey = factInfo.tag+':'+factInfo.qtrs+':'+factInfo.uom.label+':'+factInfo.end;
                                     if(!submission.facts[factKey]){
-                                        submission.facts[factKey] = xbrl;
-                                        submission.hasXBRL = true;
+                                        submission.facts[factKey] = factInfo;
                                     } else {
-                                        if(submission.facts[factKey].value != xbrl.value)
-                                            common.logEvent('ERROR: XBRL value conflict in '+submission.filing.adsh, '['+JSON.stringify(xbrl)+','
-                                                +JSON.stringify(submission.facts[factKey])+']');
+                                        let storedFact = submission.facts[factKey];
+                                        if(storedFact.value != factInfo.value){
+                                            let storedDecimal = parseInt(storedFact.decimals || 0),
+                                                factDecimal = parseInt(factInfo.decimals || 0),
+                                                minDecimal = Math.min(storedDecimal, factDecimal),
+                                                power = Math.pow(10, minDecimal);
+                                            if(Math.round(factInfo.value*power)!=Math.round(storedFact.value*power) && Math.floor(factInfo.value*power)!=Math.floor(storedFact.value*power)) {
+                                                common.logEvent('ERROR: XBRL value conflict in '+submission.filing.adsh, '['+JSON.stringify(factInfo)+','
+                                                    +JSON.stringify(storedFact)+']');
+                                            }
+                                            if(factDecimal>storedDecimal){
+                                                submission.facts[factKey] = factInfo;
+                                            }
+                                        }
                                     }
+                                    submission.hasXBRL = true;
                                     submission.counts.standardFacts++;
                                 }
                             }
@@ -425,19 +440,30 @@ function parseIXBRL($, parsedFacts){
 
     $('ix\\:nonfraction').each(function(i, elem){
         try{
-            let xbrl = extractFactInfo(parsedFacts, $, elem);
-            if(xbrl.isStandard){  //todo:  process facts with dimensions & axes (members)
-                if(!xbrl.dim && xbrl.uom) { //don't process footnotes either
-                    let factKey = xbrl.tag+':'+xbrl.qtrs+':'+xbrl.uom.label+':'+xbrl.end;
+            let factInfo = extractFactInfo(parsedFacts, $, elem);
+            if(factInfo.isStandard){  //todo:  process facts with dimensions & axes (members)
+                if(!factInfo.dim && factInfo.uom) { //don't process footnotes either
+                    let factKey = factInfo.tag+':'+factInfo.qtrs+':'+factInfo.uom.label+':'+factInfo.end;
                     if(!parsedFacts.facts[factKey]){
-                        parsedFacts.facts[factKey] = xbrl;
-                        parsedFacts.hasIXBRL = true;
+                        parsedFacts.facts[factKey] = factInfo;
                     } else {
-                        if(parsedFacts.facts[factKey].value != xbrl.value){
-                            common.logEvent('ERROR: XBRL value conflict in '+parsedFacts.filing.adsh, '['+JSON.stringify(xbrl)+','
-                                +JSON.stringify(parsedFacts.facts[factKey])+']');
+                        let storedFact = parsedFacts.facts[factKey];
+                        if(storedFact.value != factInfo.value){
+                            //todo:  do same check using scale for iXBRL
+                            let storedDecimal = parseInt(storedFact.decimals || 0),
+                                factDecimal = parseInt(factInfo.decimals || 0),
+                                minDecimal = Math.min(storedDecimal, factDecimal),
+                                power = Math.pow(10, minDecimal);
+                            if(Math.round(factInfo.value*power)!=Math.round(storedFact.value*power) && Math.floor(factInfo.value*power)!=Math.floor(storedFact.value*power)) {
+                                common.logEvent('ERROR: XBRL value conflict in '+parsedFacts.filing.adsh, '['+JSON.stringify(factInfo)+','
+                                    +JSON.stringify(storedFact)+']');
+                            }
+                            if(factDecimal>storedDecimal){
+                                parsedFacts.facts[factKey] = factInfo;
+                            }
                         }
                     }
+                    parsedFacts.hasIXBRL = true;
                     parsedFacts.counts.standardFacts++;
                 }
             }
@@ -525,7 +551,7 @@ function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
         nameParts = name.split(':'),
         contextRef = $ix.attr('contextref') || $ix.attr('contextRef'),
         unitRef = $ix.attr('unitref') || $ix.attr('unitRef'),
-        xbrl = {
+        factInfo = {
             uom: objParsedSubmission.unitTree[unitRef],
             taxonomy: nameParts[0],
             tag: nameParts[1],
@@ -536,20 +562,20 @@ function extractFactInfo(objParsedSubmission, $, ix){  //contextRef and unitRef
             isStandard: standardNumericalTaxonomies.indexOf(nameParts[0])!==-1,
             text: $ix.text().trim()
         };
-    xbrl.value = translateXBRLFormat(xbrl.text, xbrl.format||'standard', xbrl.scale);
+    factInfo.value = translateXBRLFormat(factInfo.text, factInfo.format||'standard', factInfo.scale);
     if(objParsedSubmission.contextTree[contextRef]){
         let context = objParsedSubmission.contextTree[contextRef];
-        xbrl.qtrs = context.qtrs;
-        xbrl.end = context.end;
-        if(context.start) xbrl.start = context.start;
-        if(context.scale) xbrl.scale = context.scale;
-        if(context.member) xbrl.member = context.member;
-        if(context.dim) xbrl.dim = context.dim;
-        if(context.ccp) xbrl.ccp = context.ccp;
+        factInfo.qtrs = context.qtrs;
+        factInfo.end = context.end;
+        if(context.start) factInfo.start = context.start;
+        if(context.scale) factInfo.scale = context.scale;
+        if(context.member) factInfo.member = context.member;
+        if(context.dim) factInfo.dim = context.dim;
+        if(context.ccp) factInfo.ccp = context.ccp;
     } else {
-        throw('missing contextRef for ' + xbrl.tag);
+        throw('missing contextRef for ' + factInfo.tag);
     }
-    return xbrl;
+    return factInfo;
 }
 function translateXBRLFormat(text, format, scale = 0){
     switch(format){
@@ -580,7 +606,7 @@ async function saveXBRLSubmission(s){
         sql = 'INSERT INTO fin_sub(adsh, cik, name, sic, fye, form, period, fy, fp, filed'
             + ', countryba, stprba, cityba, zipba, bas1, bas2, baph, '
             + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, filercategory, '
-            +' accepted, prevrpt, detail, instance, nciks, aciks '
+            +' accepted, prevrpt, detail, htmlfile, instance, nciks, aciks '
             + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey.value+","+q(s.dei.EntityRegistrantName.value)+(s.filing.sic||0)+','
             + q(s.dei.CurrentFiscalYearEndDate.value.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType.value)+q(s.dei.DocumentPeriodEndDate.value)
             + q(s.dei.DocumentFiscalYearFocus.value)+q(s.dei.DocumentFiscalPeriodFocus.value)+q(s.filing.filingDate)
@@ -590,7 +616,7 @@ async function saveXBRLSubmission(s){
             + q(s.filing.mailingAddress&&s.filing.mailingAddress.street1)+q(s.filing.mailingAddress&&s.filing.mailingAddress.street2)
             + q(s.filing.incorporation?s.filing.incorporation.country:null)+q(s.filing.incorporation?s.filing.incorporation.state:null)+q(s.filing.ein)
             + q('former')+q('changed')+q(s.dei.EntityFilerCategory.value)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
-            + q(s.hasIXBRL||s.hasXBRL)+"1,"+q(s.dei.EntityCentralIndexKey.value, true)+")";
+            + q(s.primaryHTML) + q(s.hasIXBRL||s.hasXBRL)+"1,"+q(s.dei.EntityCentralIndexKey.value, true)+")";
     await common.runQuery(sql);
 
     //save numerical fact records into fin_num

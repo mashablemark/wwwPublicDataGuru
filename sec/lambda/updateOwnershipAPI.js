@@ -19,7 +19,10 @@
 //     - write to S3: restdata.publicdata.guru/sec/
 //     - tell cloudFront to refresh the cache for the updated issuer API file
 
-// to compile:  zip -r updateOwnershipAPI.zip updateOwnershipAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js
+// TO COMPILE (hint use "npm list" to discover dependencies)
+// using mysql:  zip -r updateOwnershipAPI.zip updateOwnershipAPI.js node_modules/mysql node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/bignumber.js node_modules/readable-stream node_modules/core-util-is node_modules/inherits node_modules/isarray node_modules/process-nextick-args node_modules/safe-buffer node_modules/string_decoder node_modules/safe-buffer node_modules/util-deprecate node_modules/safe-buffer sqlstring secure.js common.js
+// using mysql2: zip -r updateOwnershipAPI.zip updateOwnershipAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js common2.js
+
 // execution time = 2.9s
 // ownership submissions per year = 210,000
 // Lambda execution costs for updateOwnershipAPI per year = $1.27
@@ -47,7 +50,6 @@ const form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pd
     J: 'Other (accompanied by a footnote describing the transaction)'
 };
 
-const bucket = "restapi.publicdata.guru";
 
 exports.handler = async (event, context) => {
     await common.logEvent('updateOwnerShip API invoked', JSON.stringify(event));
@@ -67,16 +69,16 @@ exports.handler = async (event, context) => {
     for (let i = 1; i < filing.files.length; i++) {
         if (filing.files[i].title.indexOf('Document 1 - RAW XML') !== -1) {
             filing.primaryDocumentName = filing.files[i].file.substr(0, 4) == "sec/" ? filing.files[i].file.substr(4) : filing.files[i].file;
-            filing.xmlBody = await common.readS3(filing.path + filing.primaryDocumentName);
+            filing.xmlBody = await common.readS3(filing.path + filing.primaryDocumentName).catch(()=>{throw new Error('unable to read ' + filing.path + filing.primaryDocumentName)});
         }
     }
 
     if (filing.xmlBody) {
         await process345Submission(filing, false);
     } else {
-        await logEvent('ownership read error', JSON.stringify(filing), true);
+        await common.logEvent('ownership read error', JSON.stringify(filing), true);
     }
-    console.log('end of lambda event handler!');
+    console.log('end of updateOwnershipAPI lambda function execution!');
 };
 
 
@@ -131,7 +133,7 @@ async function process345Submission(filing, remainsChecking){
         //check to see if data or values were not read (and subsequently removed)
         if(remainsChecking){
             var remains = $owner.text().trim();
-            if(remains.length>0) await logEvent('reporter remains', submission.fileName + ': '+ $owner.html())
+            if(remains.length>0) await common.logEvent('reporter remains', submission.fileName + ': '+ $owner.html())
         }
     });
 
@@ -189,7 +191,7 @@ async function process345Submission(filing, remainsChecking){
                 $trans.find('footnoteId').remove();
                 var remains = $trans.text().trim();
                 if(remains.length>0) {
-                    await logEvent(transactionRecordType.path + ' remains', submission.fileName + ': '+ $trans.html());
+                    await common.logEvent(transactionRecordType.path + ' remains', submission.fileName + ': '+ $trans.html());
                 }
                 delete $trans;
             }
@@ -199,7 +201,7 @@ async function process345Submission(filing, remainsChecking){
     if(transactions.length) submission.transactions = transactions;
     //console.log(submission);
     await save345Submission(submission);
-    await runQuery("call updateOwnershipAPI('"+filing.adsh+"');");
+    await common.runQuery("call updateOwnershipAPI('"+filing.adsh+"');");
 
     let invalidationParams = {
         DistributionId: 'EJG0KMRDV8F9E',
@@ -211,7 +213,7 @@ async function process345Submission(filing, remainsChecking){
             }
         }
     };
-    let updatedReporterAPIDataset = await runQuery(
+    let updatedReporterAPIDataset = await common.runQuery(
         "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip "
         + " from ownership_api_reporter where cik in ('"+reporterCiks.join("','")+"')"
     );
@@ -234,12 +236,12 @@ async function process345Submission(filing, remainsChecking){
         delete body.mazip;
         body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
         body.transactions = JSON.parse(body.transactions);
-        console.log(body);
+        //console.log(body);
         //await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
         s3WritePromises.push(common.writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
         invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/reporter/cik'+parseInt(body.cik));
     }
-    let updatedIssuerAPIDataset = await runQuery(
+    let updatedIssuerAPIDataset = await common.runQuery(
         "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip, bastreet1, bastreet2, bacity, bastate, bazip "
         + " from ownership_api_issuer where cik = '" + submission.issuer.cik+"'"
     );
@@ -278,7 +280,7 @@ async function process345Submission(filing, remainsChecking){
     for(let i=0; i<s3WritePromises.length;i++){
         await s3WritePromises[i];  //collect the S3 writer promises
     }
-    console.log('promises collected');
+    console.log(s3WritePromises.length + ' s3WritePromises promises collected');
 
     /*invalidation takes 5 - 15 minutes.  No SLA.  Better to set TTL for APIs to 60s
     //let cloudFront = new AWS.CloudFront(); //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#createInvalidation-property
@@ -286,7 +288,6 @@ async function process345Submission(filing, remainsChecking){
     //await cloudFront.createInvalidation(invalidationParams); */
 
     //close connection and terminate lambda function by ending handler function
-    await con.end();
 
     return {status: 'ok'};
 
@@ -313,17 +314,17 @@ async function save345Submission(s){
         + ' remarks, signatures, txtfilesize, tries) '
         + " VALUES (" +q(s.adsh) + q(s.documentType) + q(s.schemaVersion) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
         + q(s.issuer.cik) + q(s.issuer.name)+q(s.issuer.tradingSymbol)+q(s.remarks)+q(s.signatures) + s.fileSize +',1)'
-            + ' on duplicate key update tries = tries + 1';
+        + ' on duplicate key update tries = tries + 1';
     await common.runQuery(sql);
 
     //save reporting owner records
     for(var ro=0; ro<s.reportingOwners.length;ro++){
         var owner = s.reportingOwners[ro];
         sql ='INSERT INTO ownership_reporter (adsh, ownernum, ownercik, ownername, ownerstreet1, ownerstreet2, ownercity, '
-        + ' ownerstate, ownerstatedescript, ownerzip, isdirector, isofficer, istenpercentowner, isother, other)'
-        + ' value (' +q(s.adsh) + (ro+1)+',' +q(owner.cik) +q(owner.name) + q(owner.street1)+q(owner.street2)+q(owner.city)
-        + q(owner.state) + q(owner.stateDescription) +  q(owner.zip) + q(owner.isDirector)+q(owner.isOfficer)
-        + q(owner.isTenPercentOwner)+ q(owner.isOther )+ q(owner.otherText, true) + ')'
+            + ' ownerstate, ownerstatedescript, ownerzip, isdirector, isofficer, istenpercentowner, isother, other)'
+            + ' value (' +q(s.adsh) + (ro+1)+',' +q(owner.cik) +q(owner.name) + q(owner.street1)+q(owner.street2)+q(owner.city)
+            + q(owner.state) + q(owner.stateDescription) +  q(owner.zip) + q(owner.isDirector)+q(owner.isOfficer)
+            + q(owner.isTenPercentOwner)+ q(owner.isOther )+ q(owner.otherText, true) + ')'
             + ' on duplicate key update ownernum = ownernum';
         await common.runQuery(sql);
     }
@@ -340,18 +341,18 @@ async function save345Submission(s){
     for(var t=0; t<s.transactions.length;t++){
         var trans = s.transactions[t];
         sql ='INSERT INTO ownership_transaction (adsh, transnum, isderivative, transtype, expirationdt, exercisedt, formtype, security, price, transdt, deemeddt, transcode, equityswap, timeliness, shares, '
-        + ' pricepershare, totalvalue, acquiredisposed, underlyingsecurity, underlyingshares, underlyingsecurityvalue, sharesownedafter,  valueownedafter, directindirect, ownershipnature)'
-        + ' value ('+q(s.adsh)+(t+1)+','+trans.derivative+','+q(trans.transOrHold)+q(trans.expirationDate)+q(trans.exerciseDate)
-        + q(trans.formType)+ q(trans.securityTitle)+q(trans.conversionOrExercisePrice) + q(trans.transactionDate)
-        + q(trans.deemedExecutionDate) + q(trans.transactionCode)+q(trans.equitySwap)+ q(trans.timeliness) + q(trans.transactionShares)
-        + q(trans.transactionPricePerShare)+ q(trans.transactionTotalValue)+ q(trans.transactionAcquiredDisposedCode)+ q(trans.underlyingSecurityTitle)
-        + q(trans.underlyingSecurityShares)+ q(trans.underlyingSecurityValue) + q(trans.sharesOwnedFollowingTransaction)+ q(trans.valueOwnedFollowingTransaction)
-        + q(trans.directOrIndirectOwnership) + q(trans.natureOfOwnership, true) + ')'
+            + ' pricepershare, totalvalue, acquiredisposed, underlyingsecurity, underlyingshares, underlyingsecurityvalue, sharesownedafter,  valueownedafter, directindirect, ownershipnature)'
+            + ' value ('+q(s.adsh)+(t+1)+','+trans.derivative+','+q(trans.transOrHold)+q(trans.expirationDate)+q(trans.exerciseDate)
+            + q(trans.formType)+ q(trans.securityTitle)+q(trans.conversionOrExercisePrice) + q(trans.transactionDate)
+            + q(trans.deemedExecutionDate) + q(trans.transactionCode)+q(trans.equitySwap)+ q(trans.timeliness) + q(trans.transactionShares)
+            + q(trans.transactionPricePerShare)+ q(trans.transactionTotalValue)+ q(trans.transactionAcquiredDisposedCode)+ q(trans.underlyingSecurityTitle)
+            + q(trans.underlyingSecurityShares)+ q(trans.underlyingSecurityValue) + q(trans.sharesOwnedFollowingTransaction)+ q(trans.valueOwnedFollowingTransaction)
+            + q(trans.directOrIndirectOwnership) + q(trans.natureOfOwnership, true) + ')'
             + ' on duplicate key update transnum = transnum';
         await common.runQuery(sql);
         for(var tf=0; tf<trans.footnotes.length;tf++){
             await common.runQuery('INSERT INTO ownership_transaction_footnote (adsh, tnum, fnum) values ('+q(s.adsh)+(t+1)+','+trans.footnotes[tf].substr(1)+')'
-             + ' on duplicate key update tnum = '+(t+1));
+                + ' on duplicate key update tnum = '+(t+1));
         }
     }
 }
@@ -362,7 +363,7 @@ async function save345Submission(s){
 
 /*////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 const event = {
-    "path":"sec/edgar/27996/000002799619000051/",
+    "path":"sec/edgar/data/27996/000002799619000051/",
     "adsh":"0000027996-19-000051",
     "cik":"0001770249",
     "fileNum":"001-07945",

@@ -4,7 +4,7 @@
 //note: 128MB container has no spare memory when run hard
 //todo: consider using DB with a transaction  to S3 read = faster + possibly allow for concurrent lambdas of processIndexHeadrs
 
-//module variables (persist between handler calls when ctainers are reused = prevalent during high usage periods)
+//module level variables (note: these persist between handler calls when containers are reused = prevalent during high usage periods)
 var AWS = require('aws-sdk');
 var dailyIndex = false;  //daily index as parsed object needs initiation than can be reused as long as day is same
 
