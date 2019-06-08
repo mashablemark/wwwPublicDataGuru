@@ -29,14 +29,14 @@ const s3 = new AWS.S3();
 const targetFormTypes= {
     //'S-1': 'noProcessing',
     //'S-1/A': 'noProcessing',
-    //'D': 'syncProcessing',
-    //'D/A': 'syncProcessing',
-    //'3': 'asyncProcessing',
-    //'3/A': 'asyncProcessing',
-    //'4': 'asyncProcessing',
-    //'4/A': 'asyncProcessing',
-    //'5': 'asyncProcessing',
-    //'5/A': 'asyncProcessing',
+    'D': 'syncProcessing',
+    'D/A': 'syncProcessing',
+    '3': 'asyncProcessing',
+    '3/A': 'asyncProcessing',
+    '4': 'asyncProcessing',
+    '4/A': 'asyncProcessing',
+    '5': 'asyncProcessing',
+    '5/A': 'asyncProcessing',
     '10-Q': 'asyncProcessing',
     '10-Q/A': 'asyncProcessing',
     '10-K': 'asyncProcessing',
@@ -129,10 +129,10 @@ async function processQuarterlyIndex(processControl, callback) {
                 if(updateProcess != 'noProcessing'){
                     if(updateProcess == 'syncProcessing') {
                         await processIndexHeader(lineParts);
-                        await wait(4000);  //about 4.5 seconds total
+                        await wait(1000);  //about 4.5 seconds total
                     } else {
                         await processIndexHeader(lineParts);
-                        await wait(4000);  //about 4.5 seconds total
+                        await wait(1000);  //about 4.5 seconds total
                     }
                 }
             }

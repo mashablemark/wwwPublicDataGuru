@@ -12,7 +12,7 @@
 //   7. collect promises from steps 3a, 5 and 6 then exit (without closing con to allow reuse)
 
 // TO COMPILE (hint use "npm list" to discover dependencies)
-// using mysql:  zip -r updateFormDAPI.zip updateFormDAPI.js node_modules/mysql node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/bignumber.js node_modules/readable-stream node_modules/core-util-is node_modules/inherits node_modules/isarray node_modules/process-nextick-args node_modules/safe-buffer node_modules/string_decoder node_modules/safe-buffer node_modules/util-deprecate node_modules/safe-buffer sqlstring secure.js common.js
+// using mysql:  zip -r updateFormDAPI.zip updateFormDAPI.js node_modules/mysql node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/bignumber.js node_modules/readable-stream node_modules/core-util-is node_modules/inherits node_modules/isarray node_modules/process-nextick-args node_modules/safe-buffer node_modules/string_decoder node_modules/safe-buffer node_modules/util-deprecate node_modules/safe-buffer node_modules/sqlstring secure.js common.js
 // using mysql2: zip -r updateFormDAPI.zip updateFormDAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js common2.js
 
 
@@ -54,38 +54,14 @@ exports.handler = async (formDevent, context) => {
 
 async function processFormDSubmission(submission, remainsChecking){
     //1. determine whether the exempt offering object for this period of is in global memory; if not start read(completed in step 5)
-    const acceptanceDateTime = submission.filing.acceptanceDateTime;
-    const acceptanceDate = new Date(acceptanceDateTime.substr(0,4) + "-" + acceptanceDateTime.substr(4,2) + "-" + acceptanceDateTime.substr(6,2) + ' ' + acceptanceDateTime.substr(8,2)+':'+acceptanceDateTime.substr(10,2)+':'+acceptanceDateTime.substr(12,2));
     //submissions accepted after 5:30PM are disseminated the next day
-    acceptanceDate.setHours(acceptanceDate.getHours()+6);
-    acceptanceDate.setMinutes(acceptanceDate.getMinutes()+30);
+    const acceptanceDate = common.getDisseminationDate(submission.filing.acceptanceDateTime);
     const acceptanceYYYYQq = acceptanceDate.getFullYear() + "Q" + (Math.floor(acceptanceDate.getMonth()/3)+1);
-    const fileKey = "sec/offerings/exempt/exemptOfferingsSummary"+ acceptanceYYYYQq + "Q"+  + ".json";
+    const fileKey = "sec/offerings/exempt/exemptOfferingsSummary"+ acceptanceYYYYQq + ".json";
 
-    let exemptOfferingAPIPromise;
-    if(exemptOfferingAPIObject && exemptOfferingAPIObject.exemptOfferings){
-        exemptOfferingAPIPromise = false;
-    } else {
-        exemptOfferingAPIPromise = new Promise((resolve, reject) => {
-            s3.getObject({
-                Bucket: "restapi.publicdata.guru",
-                Key: fileKey
-            }, (err, data) => {
-                if (err) {
-                    // not found = return new empty archive for today
-                    console.log('creating ' + fileKey);
-                    resolve({
-                        "title": "EDGAR summary of Offerings of Exempt Securities",
-                        "period": acceptanceYYYYQq,
-                        "path": fileKey,
-                        "format": "JSON",
-                        "exemptOfferings": []
-                    });
-                } else {
-                    resolve(JSON.parse(data.Body.toString('utf-8')));   // successful response  (alt method = createReadStream)
-                }
-            });
-        });
+    let exemptOfferingAPIPromise = false;
+    if(!exemptOfferingAPIObject || !exemptOfferingAPIObject.exemptOfferings){
+        exemptOfferingAPIPromise = common.readS3(fileKey);
         console.log('reading ' + fileKey);
     }
 
@@ -219,7 +195,7 @@ async function processFormDSubmission(submission, remainsChecking){
 
     //update and write out RESTful API as annual API file (~24,000 rows * 4k = 80MB)
     const dbSavePromise =  saveFormDSubmission(submission);
-    //await common.runQuery("call updateFormDAPI('"+submission.filing.adsh+"');");
+
     const exemptOfferingSummary = {
         adsh: submission.filing.adsh,
         accepted: submission.filing.acceptanceDateTime,
@@ -258,7 +234,23 @@ async function processFormDSubmission(submission, remainsChecking){
     for(let prop in exemptOfferingSummary) if(parseInt(exemptOfferingSummary[prop], 10).toString()==exemptOfferingSummary[prop]) exemptOfferingSummary[prop] = parseInt(exemptOfferingSummary[prop], 10);  //convert to int from string
 
     // 4. update the ExemptOfferings REST API object in global memory
-    if(exemptOfferingAPIPromise) exemptOfferingAPIObject = await exemptOfferingAPIPromise;  //make sure the read is finished
+    if(exemptOfferingAPIPromise) { //make sure the read is finished
+        console.log('collecting exemptOfferingAPIPromise...');
+        try{
+            exemptOfferingAPIObject = await exemptOfferingAPIPromise;
+        } catch(e){
+            exemptOfferingAPIObject = {
+                "title": "EDGAR summary of Offerings of Exempt Securities",
+                "period": acceptanceYYYYQq,
+                "path": fileKey,
+                "format": "JSON",
+                "exemptOfferings": []
+            }
+        }
+        console.log('collected exemptOfferingAPIPromise!');
+    }
+    console.log(exemptOfferingAPIObject);
+
     const now = new Date();
     exemptOfferingAPIObject.lastUpdated = now.toISOString();
     let updateAPIFile = false;
