@@ -9,6 +9,7 @@ var AWS = require('aws-sdk');
 var dailyIndex = false;  //daily index as parsed object needs initiation than can be reused as long as day is same
 
 exports.handler = async (event, context) => {
+
     //event object description documation @ https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html
     //optional event controls can be added by crawlers that explicitly call Lambda (instead of normal S3 PUT trigger):
     //  event.crawlerOverrides.body (allows body of -index-headers.html file to be passed in eliminating S3 fetch)
@@ -23,6 +24,7 @@ exports.handler = async (event, context) => {
     const processDailyIndex = !(event.crawlerOverrides && event.crawlerOverrides.noDailyIndexProcessing);
     const processLatestIndex = !(event.crawlerOverrides && event.crawlerOverrides.noLatestIndexProcessing);
     //1. read the index.hear.html file contents
+    console.log('step 1');
     const params = {
         Bucket: bucket,
         Key: key
@@ -46,6 +48,7 @@ exports.handler = async (event, context) => {
 
 
     //2. parse header info and create submission object
+    console.log('step 2');
     const thisSubmission = {
         path: folder,
         adsh: headerInfo(indexHeaderBody, '<ACCESSION-NUMBER>'),
@@ -60,11 +63,15 @@ exports.handler = async (event, context) => {
     };
 
     //3. IF NEEDED start async reading of daily index file (completed in step 5)
+    console.log('step 3');
     const acceptanceDate = new Date(thisSubmission.acceptanceDateTime.substr(0,4) + "-" + thisSubmission.acceptanceDateTime.substr(4,2)
         + "-" + thisSubmission.acceptanceDateTime.substr(6,2) + 'T' + thisSubmission.acceptanceDateTime.substr(8,2)+':'
         + thisSubmission.acceptanceDateTime.substr(10,2)+':'+ thisSubmission.acceptanceDateTime.substr(12,2)+'Z');
     acceptanceDate.setUTCHours(acceptanceDate.getUTCHours()+6);  //submission accepted after 5:30P are disseminated the next day
     acceptanceDate.setUTCMinutes(acceptanceDate.getUTCMinutes()+30);
+    if(acceptanceDate.getUTCDay()==6) acceptanceDate.setUTCDate(acceptanceDate.getUTCDate()+2);  //Saturday to Monday
+    if(acceptanceDate.getUTCDay()==0) acceptanceDate.setUTCDate(acceptanceDate.getUTCDate()+1);  //Sunday to Monday
+    //todo: skip national holidays too!
     const indexDate = acceptanceDate.toISOString().substr(0,10);
     const qtr = Math.floor(acceptanceDate.getUTCMonth()/3)+1;
     let dailyIndexPromise = false;
@@ -91,6 +98,7 @@ exports.handler = async (event, context) => {
     }
 
     //4. parse and add hyperlinks to submission object
+    console.log('step 4');
     const links = indexHeaderBody.match(/<a href="[^<]+<\/a>/g); // '/<a href="\S+"/g');
     for(let i=0; i<links.length;i++){
         let firstQuote = links[i].indexOf('"');
@@ -111,14 +119,17 @@ exports.handler = async (event, context) => {
         }
     }
     //5. IF NEEDED: finish reading daily archive (create new archive if not found)
+    console.log('step 5');
     if(!dailyIndex || dailyIndex.date != indexDate) {
         dailyIndex = await dailyIndexPromise;
     }
 
     //6. add new submission
+    console.log('step 6');
     dailyIndex.submissions.push(thisSubmission);
 
     //7. async write out last10Index.json (complete in step 9
+    console.log('step 7');
     if(processLatestIndex) {
         const now = new Date();
         const last10IndexBody = {
@@ -147,12 +158,13 @@ exports.handler = async (event, context) => {
     }
 
     //8. sync write out full dailyindex.json (complete in step 9)
+    console.log('step 8');
     if(processDailyIndex){
         var revisedIndex = new Promise((resolve, reject) => {
             s3.putObject({
                 Body: JSON.stringify(dailyIndex),
                 Bucket: "restapi.publicdata.guru",
-                Key: "sec/indexes/EDGARDailyFileIndex_"+ indexDate + ".json"
+                Key: "sec/indexes/daily-index/"+ acceptanceDate.getUTCFullYear()+"/QTR"+qtr+"/detailed."+ indexDate + ".json"
             }, (err, data) => {
                 if (err) {
                     console.log('S3 write error');
@@ -167,10 +179,12 @@ exports.handler = async (event, context) => {
     }
 
     //9.ensure writes are completed before letting this Lambda function terminate
+    console.log('step 9');
     if(processDailyIndex) await revisedIndex;
     if(processDailyIndex && processLatestIndex) await last10IndexPromise;
 
     //10.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
+    console.log('step 10');
     // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
     const formPostProcesses = {
         //ownership forms   (https://www.sec.gov/Archives/edgar/data/39911/000003991119000048/0000039911-19-000048-index-headers.html)
@@ -230,14 +244,13 @@ exports.handler = async (event, context) => {
                 resolve(data);
             });
         });
-        console.log(lambdaResult);
     }
 
     //11. terminate by returning from handler (node Lamda functions end when REPL loop is empty)
     return {status: 'ok'};
 };
 
-function  getAddresses(thisSubmission, indexHeaderBody, processor){
+function getAddresses(thisSubmission, indexHeaderBody, processor){
     console.log(processor);
     const addressesByType = {
         updateXBRLAPI: {

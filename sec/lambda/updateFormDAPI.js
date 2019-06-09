@@ -28,28 +28,35 @@ const common = require('./common');
 var exemptOfferingAPIObject = false; //global object eliminates need to reread and parse object when container is reused;
 
 exports.handler = async (formDevent, context) => {
-    //console.log(JSON.stringify(formDevent));
+    let logStartPromise =  common.logEvent('updateFormDAPI '+ formDevent.adsh, 'invoked', true);
     let exemptOfferingsForms= {
-        'D': 'xml',
-        'D/A': 'xml'
+        'D': '.xml',
+        'D/A': '.xml'
     };
-    for (let i = 0; i < formDevent.files.length; i++) {
-        if (exemptOfferingsForms[formDevent.files[i].type] && formDevent.files[i].name.indexOf('/')===-1) {
-            formDevent.primaryDocumentName = formDevent.files[i].name.substr(0, 4) == "sec/" ? formDevent.files[i].name.substr(4) : formDevent.files[i].name;
+    let i;
+    for (i = 0; i < formDevent.files.length; i++) {
+        if (exemptOfferingsForms[formDevent.files[i].type] == formDevent.files[i].name.substr(-4).toLowerCase()
+            && formDevent.files[i].name.indexOf('/')===-1) {
+            formDevent.primaryDocumentName = formDevent.files[i].name;
             formDevent.xmlBody = await common.readS3(formDevent.path + formDevent.primaryDocumentName);
             break;
         }
     }
-
+    let submission = {
+        filing: formDevent,
+    };
     if (formDevent.xmlBody) {
-        let submission = {
-            filing: formDevent,
-        };
+
         await processFormDSubmission(submission, true);
     } else {
-        await common.logEvent('Form D read error', JSON.stringify(formDevent), true);
+        formDevent.editable = true;
+        await common.logEvent('Form D read error (i='+i+')', JSON.stringify(formDevent), true);
     }
-    console.log('end of lambda event handler!');
+
+    await logStartPromise;
+    await common.logEvent('updateFormDAPI '+ formDevent.adsh, 'completed with '
+        +(submission.relatedPersons?submission.relatedPersons.length:0)+' relatedPersons and  '
+        +(submission.issuers?submission.issuers.length:0)+' issuers found', true);
 };
 
 async function processFormDSubmission(submission, remainsChecking){
@@ -80,7 +87,6 @@ async function processFormDSubmission(submission, remainsChecking){
             zipCode: get($xmlSection, 'zipCode')
         };
     }
-
 
     submission.filing.fileSize = submission.filing.xmlBody.length;
     submission.schemaVersion = get($xml, 'schemaVersion');
@@ -237,7 +243,7 @@ async function processFormDSubmission(submission, remainsChecking){
     if(exemptOfferingAPIPromise) { //make sure the read is finished
         console.log('collecting exemptOfferingAPIPromise...');
         try{
-            exemptOfferingAPIObject = await exemptOfferingAPIPromise;
+            exemptOfferingAPIObject = JSON.parse(await exemptOfferingAPIPromise);
         } catch(e){
             exemptOfferingAPIObject = {
                 "title": "EDGAR summary of Offerings of Exempt Securities",
@@ -249,7 +255,7 @@ async function processFormDSubmission(submission, remainsChecking){
         }
         console.log('collected exemptOfferingAPIPromise!');
     }
-    console.log(exemptOfferingAPIObject);
+    //console.log(exemptOfferingAPIObject);  //debug only!
 
     const now = new Date();
     exemptOfferingAPIObject.lastUpdated = now.toISOString();
@@ -304,10 +310,8 @@ async function saveFormDSubmission(s){
    /* try {*/
         //save main submission record (on duplicate handling in case of retries)
         delete s.filing.xmlBody;
-        //console.log(JSON.stringify(s));  //debugging only
-
         const dbOfferingExists = await common.runQuery("select count(*) as recordcount from exemptOffering where adsh=" + q(s.filing.adsh, true));
-        console.log(JSON.stringify(s));
+        //console.log(JSON.stringify(s));//debugging only
         if(dbOfferingExists.data[0].recordcount==0){
             if(s.totalRemaining=="Indefinite") s.totalRemaining = null;
             if(s.totalOfferingAmount=="Indefinite") s.totalOfferingAmount = null;

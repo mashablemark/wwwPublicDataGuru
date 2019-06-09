@@ -31,12 +31,12 @@ const cheerio = require('cheerio');
 const common = require('./common');
 
 const ownershipForms= {
-    '3': 'xml',
-    '3/A': 'xml',
-    '4': 'xml',
-    '4/A': 'xml',
-    '5': 'xml',
-    '5/A': 'xml'
+    '3': '.xml',
+    '3/A': '.xml',
+    '4': '.xml',
+    '4/A': '.xml',
+    '5': '.xml',
+    '5/A': '.xml'
 };
 const form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pdf
     K: 'Equity swaps and similar hedging transactions',
@@ -52,7 +52,7 @@ const form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pd
 
 
 exports.handler = async (event, context) => {
-    await common.logEvent('updateOwnerShip API invoked', JSON.stringify(event));
+    let logStartPromise =  common.logEvent('updateOwnershipAPI '+ event.adsh, 'invoked', true);
 
     let filing = {
         path: event.path,
@@ -66,19 +66,20 @@ exports.handler = async (event, context) => {
         files: event.files
     };
     let primaryDoc = false;
-    for (let i = 1; i < filing.files.length; i++) {
-        if (filing.files[i].title.indexOf('Document 1 - RAW XML') !== -1) {
-            filing.primaryDocumentName = filing.files[i].file.substr(0, 4) == "sec/" ? filing.files[i].file.substr(4) : filing.files[i].file;
+    for (let i = 0; i < filing.files.length; i++) {
+        if (ownershipForms[filing.files[i].type]==filing.files[i].name.substr(-4)) {
+            filing.primaryDocumentName = filing.files[i].name;
             filing.xmlBody = await common.readS3(filing.path + filing.primaryDocumentName).catch(()=>{throw new Error('unable to read ' + filing.path + filing.primaryDocumentName)});
         }
     }
-
+    let submission = {transactions: []};
     if (filing.xmlBody) {
-        await process345Submission(filing, false);
+        submission = await process345Submission(filing, false);
     } else {
-        await common.logEvent('ownership read error', JSON.stringify(filing), true);
+        await common.logEvent('no xmlBody for ownership', JSON.stringify(filing), true);
     }
-    console.log('end of updateOwnershipAPI lambda function execution!');
+    await logStartPromise;
+    await common.logEvent('updateOwnershipAPI '+ event.adsh, 'completed with '+(submission.transactions?submission.transactions.length:0)+' transactions found', true);
 };
 
 
@@ -94,6 +95,7 @@ async function process345Submission(filing, remainsChecking){
         documentType: $xml('documentType').text(),
         fileName: filing.fileName,
         filedDate: filing.filedDate,
+        filename: filing.primaryDocumentName,
         periodOfReport: $xml('periodOfReport').text(),
         dateOfOriginalSubmission: $xml('dateOfOriginalSubmission').text(),
         issuer: {
@@ -144,6 +146,7 @@ async function process345Submission(filing, remainsChecking){
 
     var $trans, trans;
     var transactions = [];
+    var hasTransactions = false;
     var transactionRecordTypes = [
         {path: 'nonDerivativeTable nonDerivativeTransaction', derivative: 0, transOrHold: 'T'},
         {path: 'nonDerivativeTable nonDerivativeHolding', derivative: 0, transOrHold: 'H'},
@@ -184,6 +187,7 @@ async function process345Submission(filing, remainsChecking){
             $trans.find('footnoteId').each(function (i, elem) {
                 trans.footnotes.push(elem.attribs.id);
             });
+            if(trans.transOrHold=='T') hasTransactions = true;
             transactions.push(trans);
 
             //check to see if data or values were not read (and subsequently removed)
@@ -201,27 +205,58 @@ async function process345Submission(filing, remainsChecking){
     if(transactions.length) submission.transactions = transactions;
     //console.log(submission);
     await save345Submission(submission);
-    await common.runQuery("call updateOwnershipAPI('"+filing.adsh+"');");
 
-    let invalidationParams = {
-        DistributionId: 'EJG0KMRDV8F9E',
-        InvalidationBatch: {
-            CallerReference: submission.adsh+'_'+ new Date().getTime(),
-            Paths: {
-                Quantity: 0,
-                Items: []
+    //only update the API is this submission has transaction (vs. only reporting holdings)
+    if(hasTransactions){
+        await common.runQuery("call updateOwnershipAPI('"+filing.adsh+"');");
+        let invalidationParams = {
+            DistributionId: 'EJG0KMRDV8F9E',
+            InvalidationBatch: {
+                CallerReference: submission.adsh+'_'+ new Date().getTime(),
+                Paths: {
+                    Quantity: 0,
+                    Items: []
+                }
             }
+        };
+        let updatedReporterAPIDataset = await common.runQuery(
+            "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip "
+            + " from ownership_api_reporter where cik in ('"+reporterCiks.join("','")+"')"
+        );
+        let s3WritePromises = [], body;
+        //reporters (one or more per submission)
+        for(let r=0; r<updatedReporterAPIDataset.data.length;r++){
+            body = updatedReporterAPIDataset.data[r];
+            body.view = 'reporter';
+            body.mailingAddress = {
+                street1: body.mastreet1,
+                street2: body.mastreet2,
+                city: body.macity,
+                state: body.mastate,
+                zip: body.mazip,
+            };
+            delete body.mastreet1;
+            delete body.mastreet2;
+            delete body.macity;
+            delete body.mastate;
+            delete body.mazip;
+            body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
+            body.transactions = JSON.parse(body.transactions);
+            //console.log(body);
+            //await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
+            s3WritePromises.push(common.writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
+            invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/reporter/cik'+parseInt(body.cik));
         }
-    };
-    let updatedReporterAPIDataset = await common.runQuery(
-        "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip "
-        + " from ownership_api_reporter where cik in ('"+reporterCiks.join("','")+"')"
-    );
-    let s3WritePromises = [], body;
-    //reporters (one or more per submission)
-    for(let r=0; r<updatedReporterAPIDataset.data.length;r++){
-        body = updatedReporterAPIDataset.data[r];
-        body.view = 'reporter';
+
+        let updatedIssuerAPIDataset = await common.runQuery(
+            "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip, bastreet1, bastreet2, bacity, bastate, bazip "
+            + " from ownership_api_issuer where cik = '" + submission.issuer.cik+"'"
+        );
+
+        //issuer (only one per submissions
+        //console.log(updatedIssuerAPIDataset);  ///debug only
+        body = updatedIssuerAPIDataset.data[0];
+        body.view = 'issuer';
         body.mailingAddress = {
             street1: body.mastreet1,
             street2: body.mastreet2,
@@ -234,62 +269,37 @@ async function process345Submission(filing, remainsChecking){
         delete body.macity;
         delete body.mastate;
         delete body.mazip;
+        body.businessAddress = {
+            street1: body.bastreet1,
+            street2: body.bastreet2,
+            city: body.bacity,
+            state: body.bastate,
+            zip: body.bazip,
+        };
+        delete body.bastreet1;
+        delete body.bastreet2;
+        delete body.bacity;
+        delete body.bastate;
+        delete body.bazip;
         body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
         body.transactions = JSON.parse(body.transactions);
-        //console.log(body);
-        //await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
-        s3WritePromises.push(common.writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
-        invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/reporter/cik'+parseInt(body.cik));
-    }
-    let updatedIssuerAPIDataset = await common.runQuery(
-        "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip, bastreet1, bastreet2, bacity, bastate, bazip "
-        + " from ownership_api_issuer where cik = '" + submission.issuer.cik+"'"
-    );
-    //issuer (only one per submissions
-    body = updatedIssuerAPIDataset.data[0];
-    body.view = 'issuer';
-    body.mailingAddress = {
-        street1: body.mastreet1,
-        street2: body.mastreet2,
-        city: body.macity,
-        state: body.mastate,
-        zip: body.mazip,
-    };
-    delete body.mastreet1;
-    delete body.mastreet2;
-    delete body.macity;
-    delete body.mastate;
-    delete body.mazip;
-    body.businessAddress = {
-        street1: body.bastreet1,
-        street2: body.bastreet2,
-        city: body.bacity,
-        state: body.bastate,
-        zip: body.bazip,
-    };
-    delete body.bastreet1;
-    delete body.bastreet2;
-    delete body.bacity;
-    delete body.bastate;
-    delete body.bazip;
-    body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
-    body.transactions = JSON.parse(body.transactions);
-    s3WritePromises.push(common.writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
-    invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik));
+        s3WritePromises.push(common.writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
+        invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik));
 
-    for(let i=0; i<s3WritePromises.length;i++){
-        await s3WritePromises[i];  //collect the S3 writer promises
+        for(let i=0; i<s3WritePromises.length;i++){
+            await s3WritePromises[i];  //collect the S3 writer promises
+        }
+        console.log('updateOwnershipAPI: '+s3WritePromises.length + ' s3WritePromises promises collected');
+    } else {
+        console.log((submission.transactions?submission.transactions.length:0)+' holdings and no transactions reported: API update not needed');
     }
-    console.log(s3WritePromises.length + ' s3WritePromises promises collected');
 
-    /*invalidation takes 5 - 15 minutes.  No SLA.  Better to set TTL for APIs to 60s
+    /*invalidation takes 5 - 15 minutes.  VERY EXPENSIVE. No SLA.  Better to set TTL for APIs to 60s
     //let cloudFront = new AWS.CloudFront(); //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#createInvalidation-property
     //invalidationParams.InvalidationBatch.Paths.Quantity = invalidationParams.InvalidationBatch.Paths.Items.length;
     //await cloudFront.createInvalidation(invalidationParams); */
 
-    //close connection and terminate lambda function by ending handler function
-
-    return {status: 'ok'};
+    return submission;
 
     function readAndRemoveTag($xml, tagPath, remainsChecking){
         var $tag = $xml.find(tagPath);
@@ -310,9 +320,9 @@ function rowToObject(row, fields){
 async function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
     const q = common.q;
-    var sql = 'INSERT INTO ownership_submission (adsh, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
+    var sql = 'INSERT INTO ownership_submission (adsh, filename, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
         + ' remarks, signatures, txtfilesize, tries) '
-        + " VALUES (" +q(s.adsh) + q(s.documentType) + q(s.schemaVersion) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
+        + " VALUES (" +q(s.adsh) + q(s.filename) + q(s.documentType) + q(s.schemaVersion) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
         + q(s.issuer.cik) + q(s.issuer.name)+q(s.issuer.tradingSymbol)+q(s.remarks)+q(s.signatures) + s.fileSize +',1)'
         + ' on duplicate key update tries = tries + 1';
     await common.runQuery(sql);
@@ -363,17 +373,21 @@ async function save345Submission(s){
 
 /*////////////////////TEST CARD  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 const event = {
-    "path":"sec/edgar/data/27996/000002799619000051/",
-    "adsh":"0000027996-19-000051",
-    "cik":"0001770249",
-    "fileNum":"001-07945",
-    "form":"4",
-    "filingDate":"20190403",
-    "acceptanceDateTime":"20190403153546",
-    "files":[
-        {"file":"xslF345X03/edgar.xml","title":"Document 1 - file: edgar.html"},
-        {"file":"edgar.xml","title":"Document 1 - RAW XML: edgar.xml"}
+    "path": "sec/edgar/data/1102934/000112760216035352/",
+    "fileNum": "000-30205",
+    "form": "4",
+    "adsh": "0001127602-16-035352",
+    "filerCik": "0001102934",
+    "filingDate": "20160104",
+    "acceptanceDateTime": "20160104154713",
+    "period": "20151231",
+    "files": [
+        {
+            "name": "form4.xml",
+            "description": "PRIMARY DOCUMENT",
+            "type": "4"
+        }
     ]
-};
+ };
   exports.handler(event);
 ///////////////////////////////////////////////////////////////////////////////////////////////*/
