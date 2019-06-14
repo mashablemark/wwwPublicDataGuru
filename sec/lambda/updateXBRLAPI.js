@@ -69,6 +69,7 @@ const debugMode = false;  //set false in production or when running at scale to 
 const rootS3Folder = "test";  //todo: change root directory to "sec" from "test" to go live for S3 writes of financial statement lists, timeseries and frames APIs
 
 exports.handler = async (event, context) => {
+    let logStartPromise =  common.logEvent('updateXBRLAPI '+ event.adsh, 'invoked', true);
     let dbCheckPromise = common.runQuery("select sum(recs) as records from ("
         + "select count(*) as recs from fin_sub where adsh='"+event.adsh+"' "
         + "   UNION ALL "
@@ -203,7 +204,8 @@ exports.handler = async (event, context) => {
     } else {
         await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
     }
-    console.log('end of updateXBRL lambda event handler!');
+    await logStartPromise;
+    await common.logEvent('updateXBRLAPI '+ event.adsh, 'completed with ' + submission.counts.standardFacts + ' standard facts parsed', true);
 
 
     function updateFrame(fact){

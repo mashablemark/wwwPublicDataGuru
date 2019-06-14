@@ -28,7 +28,7 @@ const common = require('./common');
 var exemptOfferingAPIObject = false; //global object eliminates need to reread and parse object when container is reused;
 
 exports.handler = async (formDevent, context) => {
-    let logStartPromise =  common.logEvent('updateFormDAPI '+ formDevent.adsh, 'invoked', true);
+    let logStartPromise =  common.logEvent('updateFormDAPI '+ formDevent.adsh, 'invoked (time stamp = '+formDevent.timeStamp +')', true);
     let exemptOfferingsForms= {
         'D': '.xml',
         'D/A': '.xml'

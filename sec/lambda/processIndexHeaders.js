@@ -1,6 +1,6 @@
 //Lambda function is triggered by S3 PUT event of EDGAR Archives bucket where file suffix = '-index-headers.html'
 //avg execution time 400ms to 2s (peak exec = 4s on db startup and  large index file)
-//cost = 500,000 filings per * $0.000000208 per 100ms (192MB size) * 2s * 10 (100ms to s) = $2.08 per year
+//cost = 1,000,000 filings per * $0.000000208 per 100ms (256MB size) * 0.6s * 10 (100ms to s) = $5.08 per year
 //note: 128MB container has no spare memory when run hard
 //todo: consider using DB with a transaction  to S3 read = faster + possibly allow for concurrent lambdas of processIndexHeadrs
 
@@ -223,6 +223,7 @@ exports.handler = async (event, context) => {
             region: 'us-east-1'
         });
 
+        thisSubmission.timeStamp = (new Date).getTime();
         let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
         //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
         let lambdaResult = await new Promise((resolve, reject)=> { lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html

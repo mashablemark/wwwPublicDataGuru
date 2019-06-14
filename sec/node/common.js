@@ -1,11 +1,12 @@
 //module vars that are not exported
 const mysql = require('mysql');
 const AWS = require('aws-sdk');
+AWS.config.update({region: 'us-east-1'});
 const secure = require('./secure');  //DO NOT COMMIT!
 let s3 = false,  //error can occur if s3 object created from AWS SDK is old & unused
     s3Age = false;
 const s3MaxAge = 10000; //todo:  research raising this from 10s to ??
-
+let dynamodb = false;
 process.on('unhandledRejection', (reason, promise) => { console.log('Unhandled rejection at: ', reason.stack|| reason)});  //outside of handler = run once
 
 let me = {
@@ -49,6 +50,9 @@ let me = {
         const acceptanceDate = new Date(acceptanceDateTime.substr(0,4) + "-" + acceptanceDateTime.substr(4,2) + "-" + acceptanceDateTime.substr(6,2) + ' ' + acceptanceDateTime.substr(8,2)+':'+acceptanceDateTime.substr(10,2)+':'+acceptanceDateTime.substr(12,2));
         acceptanceDate.setHours(acceptanceDate.getHours()+6);
         acceptanceDate.setMinutes(acceptanceDate.getMinutes()+30);
+        if(acceptanceDate.getDay()==6) acceptanceDate.setDate(acceptanceDate.getDate()+2);  //Saturday to Monday
+        if(acceptanceDate.getDay()==0) acceptanceDate.setDate(acceptanceDate.getDate()+1);  //Sunday to Monday
+        //todo: skip national holidays too!
         return acceptanceDate;
     },
     closestCalendricalPeriod: (start, end) => {
@@ -80,7 +84,10 @@ let me = {
             if(sql.indexOf("''fatal MySQL error")===-1){
                 try{
                     me.con.query(sql, (err, result, fields) => {
-                        if(err) throw err;
+                        if(err) {
+                            console.log('throwing error from within reQuery');
+                            throw err;
+                        }
                         resolve({data: result, fields: fields});
                     });  //note: con.execute prepares a statement and will run into max_prepared_stmt_count limit
                 } catch(err) {
@@ -144,6 +151,40 @@ let me = {
                 else  resolve(data);           // successful response
             });
         });
+    },
+    getDDB: async (key, table = 'edgarAPI') => {
+        return new Promise((resolve,reject)=>{
+            if(!dynamodb) dynamodb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
+            let params = {
+                Key: {"restKey": {S: "test"} },
+                TableName: table
+            };
+            dynamodb.getItem(params, function(err, data) {
+                if (err) reject(err); // an error occurred
+                else     resolve(data);           // successful response
+            });
+        });
+    },
+    putDDB: (key, object, table = 'edgarAPI') => {
+        return new Promise((resolve, reject) => {
+            if(typeof object == 'object') object = JSON.stringify(object);
+            if(!dynamodb) dynamodb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
+            let params = {
+                Item: {
+                    restKey: {S: key},
+                    json: {S: object}
+                },
+                TableName: table
+            };
+            dynamodb.putItem(params, function (err, data) {
+                if (err) reject(err); // an error occurred
+                else     resolve(true);           // successful response
+            });
+        });
+    },
+    makeHash: (thing) => {
+        if(typeof thing == 'object') thing = JSON.stringify(thing);
+        return require('crypto').createHash('sha1').update(thing.toString()).digest('base64');
     }
 };
 

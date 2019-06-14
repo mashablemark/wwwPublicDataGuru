@@ -52,7 +52,7 @@ const form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pd
 
 
 exports.handler = async (event, context) => {
-    let logStartPromise =  common.logEvent('updateOwnershipAPI '+ event.adsh, 'invoked', true);
+    let logStartPromise =  common.logEvent('updateOwnershipAPI '+ event.adsh, 'invoked using path '+ event.path + ' (time stamp = ' + event.timeStamp +')', true);
 
     let filing = {
         path: event.path,
