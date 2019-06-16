@@ -1,12 +1,14 @@
 //Lambda function is triggered by S3 PUT event of EDGAR Archives bucket where file suffix = '-index-headers.html'
 //avg execution time 400ms to 2s (peak exec = 4s on db startup and  large index file)
-//cost = 1,000,000 filings per * $0.000000208 per 100ms (256MB size) * 0.6s * 10 (100ms to s) = $5.08 per year
+//cost = 500,000 filings per * $0.000000208 per 100ms (192MB size) * 2s * 10 (100ms to s) = $2.08 per year
 //note: 128MB container has no spare memory when run hard
 //todo: consider using DB with a transaction  to S3 read = faster + possibly allow for concurrent lambdas of processIndexHeadrs
 
 //module level variables (note: these persist between handler calls when containers are reused = prevalent during high usage periods)
 var AWS = require('aws-sdk');
 var dailyIndex = false;  //daily index as parsed object needs initiation than can be reused as long as day is same
+
+const common = require('common');
 
 exports.handler = async (event, context) => {
 
@@ -15,37 +17,21 @@ exports.handler = async (event, context) => {
     //  event.crawlerOverrides.body (allows body of -index-headers.html file to be passed in eliminating S3 fetch)
     //  event.crawlerOverrides.noDailyIndexProcessing
     //  event.crawlerOverrides.noLatestIndexProcessing
-    let s3 = new AWS.S3();
     const firstS3record = event.Records[0].s3;
-    let bucket = firstS3record.bucket.name;
+    common.bucket = firstS3record.bucket.name;
     let key = firstS3record.object.key;
     //const size = firstS3record.object.bytes;
     const folder = key.substr(0, key.lastIndexOf('/')+1);
-    const processDailyIndex = !(event.crawlerOverrides && event.crawlerOverrides.noDailyIndexProcessing);
-    const processLatestIndex = !(event.crawlerOverrides && event.crawlerOverrides.noLatestIndexProcessing);
-    //1. read the index.hear.html file contents
+    //1. read the index-header.html file
     console.log('step 1');
-    const params = {
-        Bucket: bucket,
-        Key: key
-    };
     let indexHeaderBody;
     if(event.crawlerOverrides && event.crawlerOverrides.body){
         indexHeaderBody = event.crawlerOverrides.body;
     } else {
-        const indexHeaderReadPromise = new Promise((resolve, reject) => {
-            s3.getObject(params, (err, data) => {
-                if (err) {
-                    console.log(err, err.stack);
-                    reject(err);
-                } // an error occurred
-                else     resolve(data.Body.toString('utf-8'));   // successful response  (alt method = createreadstreeam)
-            });
-        });
-        console.log('getting ' + JSON.stringify(params));
+        const indexHeaderReadPromise = common.readS3(key);
+        console.log('getting ' + JSON.stringify(key));
         indexHeaderBody = await indexHeaderReadPromise;
     }
-
 
     //2. parse header info and create submission object
     console.log('step 2');
@@ -62,43 +48,9 @@ exports.handler = async (event, context) => {
         files: []
     };
 
-    //3. IF NEEDED start async reading of daily index file (completed in step 5)
-    console.log('step 3');
-    const acceptanceDate = new Date(thisSubmission.acceptanceDateTime.substr(0,4) + "-" + thisSubmission.acceptanceDateTime.substr(4,2)
-        + "-" + thisSubmission.acceptanceDateTime.substr(6,2) + 'T' + thisSubmission.acceptanceDateTime.substr(8,2)+':'
-        + thisSubmission.acceptanceDateTime.substr(10,2)+':'+ thisSubmission.acceptanceDateTime.substr(12,2)+'Z');
-    acceptanceDate.setUTCHours(acceptanceDate.getUTCHours()+6);  //submission accepted after 5:30P are disseminated the next day
-    acceptanceDate.setUTCMinutes(acceptanceDate.getUTCMinutes()+30);
-    if(acceptanceDate.getUTCDay()==6) acceptanceDate.setUTCDate(acceptanceDate.getUTCDate()+2);  //Saturday to Monday
-    if(acceptanceDate.getUTCDay()==0) acceptanceDate.setUTCDate(acceptanceDate.getUTCDate()+1);  //Sunday to Monday
-    //todo: skip national holidays too!
-    const indexDate = acceptanceDate.toISOString().substr(0,10);
-    const qtr = Math.floor(acceptanceDate.getUTCMonth()/3)+1;
-    let dailyIndexPromise = false;
-    if(processDailyIndex){
-        if(!dailyIndex || dailyIndex.date != indexDate) {
-            dailyIndexPromise = new Promise((resolve, reject) => {
-                s3.getObject({
-                    Bucket: "restapi.publicdata.guru",
-                    Key: "sec/indexes/daily-index/"+ acceptanceDate.getUTCFullYear()+"/QTR"+qtr+"/detailed."+ indexDate + ".json"
-                }, (err, data) => {
-                    if (err) { // not found = return new empty archive for today
-                        resolve({
-                            "title": "daily EDGAR file index with file manifest for " + indexDate,
-                            "format": "JSON",
-                            "date": indexDate,
-                            "submissions": []
-                        });
-                    }
-                    else
-                        resolve(JSON.parse(data.Body.toString('utf-8')));   // successful response  (alt method = createReadStream)
-                });
-            });
-        }
-    }
 
-    //4. parse and add hyperlinks to submission object
-    console.log('step 4');
+    //3. parse and add hyperlinks to submission object
+    console.log('step 3');
     const links = indexHeaderBody.match(/<a href="[^<]+<\/a>/g); // '/<a href="\S+"/g');
     for(let i=0; i<links.length;i++){
         let firstQuote = links[i].indexOf('"');
@@ -118,73 +70,17 @@ exports.handler = async (event, context) => {
             thisSubmission.files.push(thisFile);
         }
     }
-    //5. IF NEEDED: finish reading daily archive (create new archive if not found)
+
+    //4. add new submission to database
+    console.log('step 4');
+    let q = common.q;  //shorthandle
+    let shortPath = folder.replace('sec/','').replace('Archives/','').replace('edgar/data/','');
+    let sql = 'call submissionAdd('+q(shortPath)+q(thisSubmission.acceptanceDateTime)+q(JSON.stringify(thisSubmission),true)+')';
+    console.log(sql);
+    const newSubmissionPromise = common.runQuery(sql);
+
+    //5.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
     console.log('step 5');
-    if(!dailyIndex || dailyIndex.date != indexDate) {
-        dailyIndex = await dailyIndexPromise;
-    }
-
-    //6. add new submission
-    console.log('step 6');
-    dailyIndex.submissions.push(thisSubmission);
-
-    //7. async write out last10Index.json (complete in step 9
-    console.log('step 7');
-    if(processLatestIndex) {
-        const now = new Date();
-        const last10IndexBody = {
-            "lastUpdated": now.toISOString(),
-            "title": "last 10 EDGAR submissions micro-index of submission date (updated prior to full indexes)",
-            "format": "JSON",
-            "indexDate": indexDate,
-            "last10Submissions": dailyIndex.submissions.slice(-10)
-        };
-        var last10IndexPromise = new Promise((resolve, reject) => {
-            s3.putObject({
-                Body: JSON.stringify(last10IndexBody),
-                Bucket: "restapi.publicdata.guru",
-                Key: "sec/indexes/last10EDGARSubmissionsFastIndex.json"
-            }, (err, data) => {
-                if (err) {
-                    console.log('S3 write error');
-                    console.log(err, err.stack); // an error occurred
-                    reject(err);
-                }
-                else {
-                    resolve(data); // successful response
-                }
-            });
-        });
-    }
-
-    //8. sync write out full dailyindex.json (complete in step 9)
-    console.log('step 8');
-    if(processDailyIndex){
-        var revisedIndex = new Promise((resolve, reject) => {
-            s3.putObject({
-                Body: JSON.stringify(dailyIndex),
-                Bucket: "restapi.publicdata.guru",
-                Key: "sec/indexes/daily-index/"+ acceptanceDate.getUTCFullYear()+"/QTR"+qtr+"/detailed."+ indexDate + ".json"
-            }, (err, data) => {
-                if (err) {
-                    console.log('S3 write error');
-                    console.log(err, err.stack); // an error occurred
-                    reject(err);
-                }
-                else {
-                    resolve('successful s3 write'); // data); // successful response
-                }
-            });
-        });
-    }
-
-    //9.ensure writes are completed before letting this Lambda function terminate
-    console.log('step 9');
-    if(processDailyIndex) await revisedIndex;
-    if(processDailyIndex && processLatestIndex) await last10IndexPromise;
-
-    //10.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
-    console.log('step 10');
     // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
     const formPostProcesses = {
         //ownership forms   (https://www.sec.gov/Archives/edgar/data/39911/000003991119000048/0000039911-19-000048-index-headers.html)
@@ -226,7 +122,7 @@ exports.handler = async (event, context) => {
         thisSubmission.timeStamp = (new Date).getTime();
         let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
         //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
-        let lambdaResult = await new Promise((resolve, reject)=> { lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+        await new Promise((resolve, reject)=> { lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
             {
                 FunctionName: processor,
                 Payload: payload,
@@ -247,7 +143,53 @@ exports.handler = async (event, context) => {
         });
     }
 
-    //11. terminate by returning from handler (node Lamda functions end when REPL loop is empty)
+    //8. check if new step function needs to be start or if age of existing new submission indicates a failure = fire writeDetailedIndexes immediately
+    const newSubmissionsInfo = await newSubmissionPromise;
+    const batchAgeSeconds = newSubmissionsInfo.data[0][0].age;
+    if(batchAgeSeconds) {
+        if(batchAgeSeconds>12){  //give a 2s buffer for slow starts
+            common.logEvent('ERROR SubmissionsNew batch age requires emergency writeDetailedIndexes','age: ' + batchAgeSeconds + ' s', true);
+            let lambda = await new AWS.Lambda({
+                region: 'us-east-1'
+            });
+            await new Promise((resolve, reject)=> {
+                lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+                {
+                    FunctionName: 'writeDetailedIndexes',
+                    Payload: '{}',
+                    InvocationType: 'Event'
+                },
+                function(error, data) {
+                    if (error) {
+                        common.logEvent('ERROR invoking emergency writeDetailedIndexes',JSON.stringify(error), true);
+                        reject(error);
+                    }
+                    if(data.Payload){
+                        context.succeed(data.Payload);
+                    }
+                    resolve(data);
+                });
+            });
+        }
+    } else {  //null = new submission -> start batch timer
+        await new Promise((resolve, reject)=> {
+            let params = {
+                stateMachineArn: 'arn:aws:states:us-east-1:008161247312:stateMachine:indexBatchTimer', //indexBatchTimer
+                input: '{}'  //requires a JSON not an actual js object
+            };
+            var stepFunctions = new AWS.StepFunctions();
+            stepFunctions.startExecution(params, function (err, data) {
+                if (err) {
+                    common.logEvent('err while executing step function');
+                    reject(err);
+                } else {
+                    console.log('started execution of step function');
+                    resolve(true);
+                }
+            });
+        });
+    }
+    //9. terminate by returning from handler (node Lamda functions end when REPL loop is empty)
     return {status: 'ok'};
 };
 

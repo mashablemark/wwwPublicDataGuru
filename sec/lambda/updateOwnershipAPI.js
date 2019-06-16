@@ -19,16 +19,15 @@
 //     - write to S3: restdata.publicdata.guru/sec/
 //     - tell cloudFront to refresh the cache for the updated issuer API file
 
-// TO COMPILE (hint use "npm list" to discover dependencies)
-// using mysql:  zip -r updateOwnershipAPI.zip updateOwnershipAPI.js node_modules/mysql node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/bignumber.js node_modules/readable-stream node_modules/core-util-is node_modules/inherits node_modules/isarray node_modules/process-nextick-args node_modules/safe-buffer node_modules/string_decoder node_modules/safe-buffer node_modules/util-deprecate node_modules/safe-buffer node_modules/sqlstring secure.js common.js
-// using mysql2: zip -r updateOwnershipAPI.zip updateOwnershipAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js common2.js
-
 // execution time = 2.9s
 // ownership submissions per year = 210,000
 // Lambda execution costs for updateOwnershipAPI per year = $1.27
 // CloudFront Ownership invalidation costs per year = 210,000 * (1 issuer path + 1 reporter path) = $2,100 per year
+
+
+//REQUIRES LAMBDA LAYER "COMMON"
 const cheerio = require('cheerio');
-const common = require('./common');
+const common = require('common');
 
 const ownershipForms= {
     '3': '.xml',
@@ -65,21 +64,33 @@ exports.handler = async (event, context) => {
         period: event.period,
         files: event.files
     };
-    let primaryDoc = false;
+    let sql = 'select bodyhash from ownership_submission where adsh='+ common.q(filing.adsh, true);
+    console.log(sql);
+    let hashPromise = common.runQuery(sql);
+
+    let xmlBody = false;
     for (let i = 0; i < filing.files.length; i++) {
         if (ownershipForms[filing.files[i].type]==filing.files[i].name.substr(-4)) {
             filing.primaryDocumentName = filing.files[i].name;
             filing.xmlBody = await common.readS3(filing.path + filing.primaryDocumentName).catch(()=>{throw new Error('unable to read ' + filing.path + filing.primaryDocumentName)});
+            break;
         }
     }
-    let submission = {transactions: []};
+    let dbFileHash = await hashPromise;
+    var submission = {transactions: []};
     if (filing.xmlBody) {
-        submission = await process345Submission(filing, false);
+        filing.bodyHash = common.makeHash(filing.xmlBody);
+        console.log(JSON.stringify(dbFileHash));
+        if(dbFileHash.data.length && dbFileHash.data[0].bodyhash == filing.bodyHash){
+            await common.logEvent('updateOwnershipAPI duplicate '+ event.adsh, 'identical hash signatures; not processed', true);
+        } else {
+            submission = await process345Submission(filing, false);
+            await common.logEvent('updateOwnershipAPI '+ event.adsh, 'completed with '+(submission.transactions?submission.transactions.length:0)+' transactions found', true);
+        }
     } else {
         await common.logEvent('no xmlBody for ownership', JSON.stringify(filing), true);
     }
     await logStartPromise;
-    await common.logEvent('updateOwnershipAPI '+ event.adsh, 'completed with '+(submission.transactions?submission.transactions.length:0)+' transactions found', true);
 };
 
 
@@ -96,6 +107,7 @@ async function process345Submission(filing, remainsChecking){
         fileName: filing.fileName,
         filedDate: filing.filedDate,
         filename: filing.primaryDocumentName,
+        bodyHash: filing.bodyHash,
         periodOfReport: $xml('periodOfReport').text(),
         dateOfOriginalSubmission: $xml('dateOfOriginalSubmission').text(),
         issuer: {
@@ -320,11 +332,11 @@ function rowToObject(row, fields){
 async function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
     const q = common.q;
-    var sql = 'INSERT INTO ownership_submission (adsh, filename, form, schemaversion, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
+    var sql = 'INSERT INTO ownership_submission (adsh, filename, form, schemaversion, bodyhash, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
         + ' remarks, signatures, txtfilesize, tries) '
-        + " VALUES (" +q(s.adsh) + q(s.filename) + q(s.documentType) + q(s.schemaVersion) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
+        + " VALUES (" +q(s.adsh) + q(s.filename) + q(s.documentType) + q(s.schemaVersion) + q(s.bodyHash) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
         + q(s.issuer.cik) + q(s.issuer.name)+q(s.issuer.tradingSymbol)+q(s.remarks)+q(s.signatures) + s.fileSize +',1)'
-        + ' on duplicate key update tries = tries + 1';
+        + ' on duplicate key update tries = tries + 1, bodyhash = '+ q(s.bodyHash, true);
     await common.runQuery(sql);
 
     //save reporting owner records

@@ -119,19 +119,20 @@ async function processQuarterlyIndex(processControl, callback) {
     for (let lineNum = (processControl.offset||0); lineNum < lines.length; lineNum++) {
         let lineParts = lines[lineNum].split('|');
         if (lineParts.length == 5) {
+            console.log(lineNum + ': ' + lines[lineNum]);
             if (targetFormTypes[lineParts[indexLineFields.FormType]]) {
                 processControl[lineParts[indexLineFields.FormType]] = (processControl[lineParts[indexLineFields.FormType]] || 0) + 1;
                 processControl.progress = Math.round(lineNum/lines.length*1000)/10+'%';
-                await getSubmission(lineParts, lineNum);
+                //await getSubmission(lineParts, lineNum);
 
-                //run through form D
                 let updateProcess = targetFormTypes[lineParts[indexLineFields.FormType]];
                 if(updateProcess != 'noProcessing'){
                     if(updateProcess == 'syncProcessing') {
-                        await processIndexHeader(lineParts);
-                        await wait(1000);  //about 1.5 seconds total
+                        processIndexHeader(lineParts);
+                        await wait(150);  //process 10 submissions / second
                     } else {
-                        await processIndexHeader(lineParts);
+                        processIndexHeader(lineParts);
+                        await wait(150);  //process 10 submissions / second
                     }
                 }
             }
@@ -253,7 +254,7 @@ async function put(processControl, body, fileName) {
 
 function wait(ms) {
     return new Promise(resolve => {
-        setTimeout(resolve, ms);
+        setTimeout(()=>{resolve(true)}, ms);
     })
 }
 

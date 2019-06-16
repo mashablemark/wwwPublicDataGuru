@@ -27,10 +27,6 @@
 //     - write to S3: restdata.publicdata.guru/sec/
 //     - tell cloudFront to refresh the cache for the updated issuer API file
 
-// TO COMPILE (hint use "npm list" to discover dependencies)
-// using mysql:  zip -r updateXBRLAPI.zip updateXBRLAPI.js node_modules/mysql node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/bignumber.js node_modules/readable-stream node_modules/core-util-is node_modules/inherits node_modules/isarray node_modules/process-nextick-args node_modules/safe-buffer node_modules/string_decoder node_modules/safe-buffer node_modules/util-deprecate node_modules/safe-buffer node_modules/sqlstring secure.js common.js
-// using mysql2: zip -r updateXBRLAPI.zip updateXBRLAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js common2.js
-
 // lambda execution time = 10s using a 512MB container
 // executions per year = 26,000
 // Lambda execution costs for updateXBRLAPI per year = $0.000000834 * 100 payment units of 100ms * 26,000 = $2.16 per year
@@ -47,8 +43,10 @@
 // ALTERNATE STRATEGY: set API TTL at 2 minutes for the API and do not invalidate
 
 //GLOBAL VARS (CAN PERSIST BETWEEN LAMBDA CALLS)
+
+//REQUIRES LAMBDA LAYER "COMMON"
 const cheerio = require('cheerio');
-const common = require('./common');
+const common = require('common');
 
 const skipNameSpaces = ['xbrli','xbrldi'];  //already scrapped in parts 1. of this routine, but for "deiNumTags" exceptions
 const standardNumericalTaxonomies = ['us-gaap', 'ifrs', 'invest', 'dei', 'srt'];

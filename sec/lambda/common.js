@@ -1,3 +1,5 @@
+//to package common.js a Lambda layer:
+//zip -r common.zip nodejs/node_modules/common.js nodejs/node_modules/secure.js nodejs/node_modules/mysql nodejs/node_modules/htmlparser2 nodejs/node_modules/entities nodejs/node_modules/cheerio nodejs/node_modules/inherits nodejs/node_modules/domhandler nodejs/node_modules/domelementtype nodejs/node_modules/parse5 nodejs/node_modules/dom-serializer nodejs/node_modules/css-select nodejs/node_modules/domutils nodejs/node_modules/nth-check nodejs/node_modules/boolbase nodejs/node_modules/css-what nodejs/node_modules/bignumber.js nodejs/node_modules/readable-stream nodejs/node_modules/core-util-is nodejs/node_modules/inherits nodejs/node_modules/isarray nodejs/node_modules/process-nextick-args nodejs/node_modules/safe-buffer nodejs/node_modules/string_decoder nodejs/node_modules/safe-buffer nodejs/node_modules/util-deprecate nodejs/node_modules/safe-buffer nodejs/node_modules/sqlstring
 //module vars that are not exported
 const mysql = require('mysql');
 const AWS = require('aws-sdk');
@@ -47,13 +49,13 @@ let me = {
         });
     },
     getDisseminationDate: (acceptanceDateTime) => { //submissions accepted after 5:30PM are disseminated the next day
-        const acceptanceDate = new Date(acceptanceDateTime.substr(0,4) + "-" + acceptanceDateTime.substr(4,2) + "-" + acceptanceDateTime.substr(6,2) + ' ' + acceptanceDateTime.substr(8,2)+':'+acceptanceDateTime.substr(10,2)+':'+acceptanceDateTime.substr(12,2));
-        acceptanceDate.setHours(acceptanceDate.getHours()+6);
-        acceptanceDate.setMinutes(acceptanceDate.getMinutes()+30);
-        if(acceptanceDate.getDay()==6) acceptanceDate.setDate(acceptanceDate.getDate()+2);  //Saturday to Monday
-        if(acceptanceDate.getDay()==0) acceptanceDate.setDate(acceptanceDate.getDate()+1);  //Sunday to Monday
+        const disseminationUTCDate = new Date(acceptanceDateTime.substr(0,4) + "-" + acceptanceDateTime.substr(4,2) + "-" + acceptanceDateTime.substr(6,2) + 'T' + acceptanceDateTime.substr(8,2)+':'+acceptanceDateTime.substr(10,2)+':'+acceptanceDateTime.substr(12,2))+'Z';
+        disseminationUTCDate.setHours(disseminationUTCDate.getUTCHours()+6);
+        disseminationUTCDate.setMinutes(disseminationUTCDate.getUTCMinutes()+30);
+        if(disseminationUTCDate.getUTCDay()==6) disseminationUTCDate.setUTCDate(disseminationUTCDate.getUTCDate()+2);  //Saturday to Monday
+        if(disseminationUTCDate.getUTCDay()==0) disseminationUTCDate.setUTCDate(disseminationUTCDate.getUTCDate()+1);  //Sunday to Monday
         //todo: skip national holidays too!
-        return acceptanceDate;
+        return disseminationUTCDate;
     },
     closestCalendricalPeriod: (start, end) => {
         let workingEnd = new Date(end);
@@ -189,4 +191,5 @@ let me = {
 };
 
 module.exports = me;
+
 

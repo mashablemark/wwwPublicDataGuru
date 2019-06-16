@@ -11,20 +11,15 @@
 //   6. write to  S3: restdata.publicdata.guru/sec/offerings/exempt/exemptOfferingSummaryYYYYQX.json
 //   7. collect promises from steps 3a, 5 and 6 then exit (without closing con to allow reuse)
 
-// TO COMPILE (hint use "npm list" to discover dependencies)
-// using mysql:  zip -r updateFormDAPI.zip updateFormDAPI.js node_modules/mysql node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/bignumber.js node_modules/readable-stream node_modules/core-util-is node_modules/inherits node_modules/isarray node_modules/process-nextick-args node_modules/safe-buffer node_modules/string_decoder node_modules/safe-buffer node_modules/util-deprecate node_modules/safe-buffer node_modules/sqlstring secure.js common.js
-// using mysql2: zip -r updateFormDAPI.zip updateFormDAPI.js node_modules/mysql2 node_modules/htmlparser2 node_modules/entities node_modules/cheerio node_modules/inherits node_modules/domhandler node_modules/domelementtype node_modules/parse5 node_modules/dom-serializer node_modules/css-select node_modules/domutils node_modules/nth-check node_modules/boolbase node_modules/css-what node_modules/sqlstring node_modules/denque node_modules/lru-cache node_modules/pseudomap node_modules/yallist node_modules/long node_modules/iconv-lite node_modules/safer-buffer node_modules/generate-function node_modules/is-property secure.js common2.js
-
-
 // execution time = 1.6s (parse at 600ms, but processing and writing exemptOfferingSummary JSON file = 5.7MB per quarter takes 3.2s by end of Q (USE 256MB CONTAINER!)
 // Form D submissions per year = 48,000
 // Lambda execution costs for updateFormDAPI per year = $0.000000417*16 billing increment of 100ms *48,000 = $0.32 (!)
 
-//GLOBAL SCOPE = SHARED BETWEEN LAMBDA CALLS!
+//REQUIRES LAMBDA LAYER "COMMON"
 const cheerio = require('cheerio');
-const common = require('./common');
+const common = require('common');
 
-//WARNING:  this approach of treating the API object as a datastore to be updated requires reservice concurrency = 1 (singleton)
+//WARNING:  this approach of treating the API object as a datastore to be updated requires service concurrency = 1 (singleton)
 var exemptOfferingAPIObject = false; //global object eliminates need to reread and parse object when container is reused;
 
 exports.handler = async (formDevent, context) => {
