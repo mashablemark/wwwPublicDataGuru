@@ -120,7 +120,7 @@ exports.handler = async (event, context) => {
         let existingRecords = await dbCheckPromise;
         if(debugMode) console.log(existingRecords);
         if(existingRecords.data.length){
-            await common.logEvent('WARNING: existing XBRL records', event.adsh + ' has '+existingRecords.data[0].records+' fin_sub and fin_num records');
+            await common.logEvent('WARNING: existing XBRL records', event.adsh + ' has '+existingRecords.data[0].records+' fin_sub and fin_num records', true);
             await common.runQuery("delete from fin_sub where adsh='"+ event.adsh+"'");
             await common.runQuery("delete from fin_num where adsh='"+ event.adsh+"'");
         }

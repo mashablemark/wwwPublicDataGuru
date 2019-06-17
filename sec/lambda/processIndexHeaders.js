@@ -11,7 +11,7 @@
 // updateFormDAPI:      11,905 files * 0.5s * $0.00000834 / s (512MB) = $0.05  (average jumped abruptly 2/3 way through quarter)
 // writeDetailedIndexes: ~5,000 invokes * 2s * $0.00000417 / s (256MB) = $0.04  (average jumped abruptly 2/3 way through quarter)
 
-// S3 costs (driven by XBRL TimeSEries and Frames API writes)
+// S3 costs (S3 costs driven by XBRL TimeSeries write and XBRL Frames API writes)
 // S3 WRITES: $31.00 = ((1 issuer + 1 reporter) * 67,378 Ownership) + (800 TS & Frames * 7,575 XBRL) + 11,909 Form D Indexes) * $0.005/1000
 // S3 READS: $0.12 = (1 index header + 1 XML) * 158,000 * $0.0004/1000
 
@@ -117,25 +117,25 @@ exports.handler = async (event, context) => {
     // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
     const formPostProcesses = {
         //ownership forms   (https://www.sec.gov/Archives/edgar/data/39911/000003991119000048/0000039911-19-000048-index-headers.html)
-        '3': 'updateOwnershipAPI',
-        '3/A': 'updateOwnershipAPI',
-        '4': 'updateOwnershipAPI',
-        '4/A': 'updateOwnershipAPI',
-        '5': 'updateOwnershipAPI',
-        '5/A': 'updateOwnershipAPI',
+        '3': {lambda: 'updateOwnershipAPI'},
+        '3/A': {lambda: 'updateOwnershipAPI'},
+        '4': {lambda: 'updateOwnershipAPI'},
+        '4/A': {lambda: 'updateOwnershipAPI'},
+        '5': {lambda: 'updateOwnershipAPI'},
+        '5/A': {lambda: 'updateOwnershipAPI'},
         //financial statement forms  (https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index-headers.html)
-        '10-Q': 'updateXBRLAPI',
-        '10-Q/A': 'updateXBRLAPI',
-        '10-K': 'updateXBRLAPI',
-        '10-K/A': 'updateXBRLAPI',
+        '10-Q': {lambda: 'updateXBRLAPI', queue: 'queueUpdateXBRLAPI'},
+        '10-Q/A': {lambda: 'updateXBRLAPI', queue: 'queueUpdateXBRLAPI'},
+        '10-K': {lambda: 'updateXBRLAPI', queue: 'queueUpdateXBRLAPI'},
+        '10-K/A': {lambda: 'updateXBRLAPI', queue: 'queueUpdateXBRLAPI'},
         //form D processor
-        'D': 'updateFormDAPI',
-        'D/A': 'updateFormDAPI'
+        'D': {lambda: 'updateFormDAPI', queue: 'queueUpdateFormDAPI'},
+        'D/A': {lambda: 'updateFormDAPI', queue: 'queueUpdateFormDAPI'}
         //registration statement processor?? (published public registration statement; not draft!)
     };
 
     if(formPostProcesses[thisSubmission.form]) {  //post processing required!
-        let processor = formPostProcesses[thisSubmission.form];
+        let processor = formPostProcesses[thisSubmission.form].lambda;
 
         //get additional meta data from header
         thisSubmission.bucket= firstS3record.bucket.name;
@@ -147,33 +147,39 @@ exports.handler = async (event, context) => {
         };
         await getAddresses(thisSubmission, indexHeaderBody, processor);
 
-        //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
-        let lambda = await new AWS.Lambda({
-            region: 'us-east-1'
-        });
+        //some processes are invoked directly; long running or non-concurrent ones may need queues
+        if(formPostProcesses[thisSubmission.form].queue){
 
-        thisSubmission.timeStamp = (new Date).getTime();
-        let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
-        //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
-        await new Promise((resolve, reject)=> { lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
-            {
-                FunctionName: processor,
-                Payload: payload,
-                InvocationType: 'Event'
-            },
-            function(error, data) {
-                if (error) {
-                    console.log('error invoking ' + processor);
-                    console.log(error);
-                    reject(error);
-                }
-                if(data.Payload){
-                    context.succeed(data.Payload);
-                }
-                console.log('invoked ' + processor);
-                resolve(data);
+        } else {
+            //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
+            let lambda = await new AWS.Lambda({
+                region: 'us-east-1'
             });
-        });
+
+            thisSubmission.timeStamp = (new Date).getTime();
+            let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
+            //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
+            await new Promise((resolve, reject)=> { lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
+                {
+                    FunctionName: processor,
+                    Payload: payload,
+                    InvocationType: 'Event'
+                },
+                function(error, data) {
+                    if (error) {
+                        console.log('error invoking ' + processor);
+                        console.log(error);
+                        reject(error);
+                    }
+                    if(data.Payload){
+                        context.succeed(data.Payload);
+                    }
+                    console.log('invoked ' + processor);
+                    resolve(data);
+                });
+            });
+        }
+
     }
 
     //8. check if new step function needs to be start or if age of existing new submission indicates a failure = fire writeDetailedIndexes immediately

@@ -73,7 +73,7 @@ async function processFormDSubmission(submission, remainsChecking){
         if($xml('primaryIssuer cik').length!=1)
             throw 'primaryIssuer cik error in ' + submission.filing.fileName;
     } catch (e) {
-        common.logEvent('FILE ERROR: bad file format detected by updateFormDAPI', submission.filing.path, true);
+        await common.logEvent('FILE ERROR: bad file format detected by updateFormDAPI', submission.filing.path, true);
         return false; //stop further execution w/o causing an error in the monitoring
     }
 

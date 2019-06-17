@@ -99,7 +99,7 @@ async function process345Submission(filing, remainsChecking){
             throw 'issuerCik error in ' + filing.fileName;
         }
     } catch (e) {
-        common.logEvent('FILE ERROR: bad file format detected by updateOwnershipAPI', filing.path, true);
+        await common.logEvent('FILE ERROR: bad file format detected by updateOwnershipAPI', filing.path, true);
         return false;  //stop further execution w/o causing an error in the monitoring
     }
 
@@ -306,7 +306,7 @@ async function process345Submission(filing, remainsChecking){
 
     function readAndRemoveTag($xml, tagPath, remainsChecking){
         var $tag = $xml.find(tagPath);
-        var value = $tag.text().replace(rgxTrim, '');
+        var value = $tag.text().replace(rgxTrim, '').replace('\n',' ');  //newlines are not JSON compatable.  Must be encode or removed
         if(remainsChecking) $tag.remove();
         return value;
     }
