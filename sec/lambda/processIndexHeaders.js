@@ -3,11 +3,11 @@
 //cost = 500,000 filings per * $0.000000208 per 100ms (192MB size) * 2s * 10 (100ms to s) = $2.08 per year
 //note: 128MB container has no spare memory when run hard
 
-//2016Q1 (empty MySQL tables; M5.XL ($0.19/h) instance; 100ms ingest rate)
-// Lambda costs
+//2016Q1 (empty MySQL tables; M5.2XL ($0.38/h) instance; new submission every 200ms)
+// Lambda costs:  $1.94 / quarter
 // processIndexHeaders: 158,372 files * 0.5s * $0.00000417 / s (256MB) = $0.33
 // updateOwnershipAPI: 138,892 files * 0.5s * $0.00000417 / s (256MB) = $0.29  (average peaky towards end)
-// updateXBRLAPI:        7,575 files * 15s * $0.00002501 / s (1.5GB) = $2.84  (average peaky towards end)
+// updateXBRLAPI:        7,575 files * 6.5s * $0.00002501 / s (1.5GB) = $1.23  (average peaky towards end)
 // updateFormDAPI:      11,905 files * 0.5s * $0.00000834 / s (512MB) = $0.05  (average jumped abruptly 2/3 way through quarter)
 // writeDetailedIndexes: ~5,000 invokes * 2s * $0.00000417 / s (256MB) = $0.04  (average jumped abruptly 2/3 way through quarter)
 
@@ -15,15 +15,13 @@
 // S3 WRITES: $31.00 = ((1 issuer + 1 reporter) * 67,378 Ownership) + (800 TS & Frames * 7,575 XBRL) + 11,909 Form D Indexes) * $0.005/1000
 // S3 READS: $0.12 = (1 index header + 1 XML) * 158,000 * $0.0004/1000
 
-//ANALYSIS
-//  The XBRL peak filing dates cause CPU utilization to jump from 25% to 88%, and caused by too many connections)
-//  FormD had virtually no problems as it only reads and writes to S3 and have no DB interactions
-//
-//Recommendations:
-// 1. limit currently unlimited concurrency of XBRL to 50 (same as Ownership & process IndexHeader)
-// 2. double size of EC2 instance to M5.2XL
-// 3. half the ingest rate to 200ms per file
-// 4. consider a migration to Aurora Serverless = 5x throughput of mySQL on same hardware
+// SQS cost $1.30 each per quarter (95% due to polling)
+//Results
+//  M5.XL @ 100ms file rate, XBRL peak filing dates cause CPU utilization to jump from 25% to 88% and caused retries and too many connections
+//  Setting the XBRL concurrency to 40 and bumping the to M5.2XL (@ $0.38/h) keep CPU spikes to 40%
+//  Adding SQS for XBRL and FormD to eliminate throttles
+
+// Future: consider a migration to Aurora Serverless = 5x throughput of mySQL on same hardware
 
 //todo: consider using DB with a transaction  to S3 read = faster + possibly allow for concurrent lambdas of processIndexHeadrs
 
@@ -147,17 +145,32 @@ exports.handler = async (event, context) => {
         };
         await getAddresses(thisSubmission, indexHeaderBody, processor);
 
+        thisSubmission.timeStamp = (new Date).getTime();
+        let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
         //some processes are invoked directly; long running or non-concurrent ones may need queues
         if(formPostProcesses[thisSubmission.form].queue){
-
+            let sqs = AWS.SQS({apiVersion: '2012-11-05'});
+            let params = {
+                MessageBody: payload,
+                QueueURL: 'queueUpdateXBRLAPI'  //not sure if this is correct or whether an arn is needed
+            };
+            await new Promise((resolve, reject)=>{
+                sqs.sendMessage(params, (err, data) => {
+                    if(err){
+                        console.log('failed to add message to queueUpdateXBRLAPI');
+                        reject(err); //stop processing and let CloudWatch log the error
+                    } else {
+                        console.log("Succesfully added MessageId "+data.MessageId + " to queueUpdateXBRLAPI");
+                        resolve()
+                    }
+                });
+            });
         } else {
             //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
             let lambda = await new AWS.Lambda({
                 region: 'us-east-1'
             });
 
-            thisSubmission.timeStamp = (new Date).getTime();
-            let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
             //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
             await new Promise((resolve, reject)=> { lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
                 {
