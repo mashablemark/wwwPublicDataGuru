@@ -1,5 +1,6 @@
-//to package common.js a Lambda layer:
-//zip -r common.zip nodejs/node_modules/common.js nodejs/node_modules/secure.js nodejs/node_modules/mysql nodejs/node_modules/htmlparser2 nodejs/node_modules/entities nodejs/node_modules/cheerio nodejs/node_modules/inherits nodejs/node_modules/domhandler nodejs/node_modules/domelementtype nodejs/node_modules/parse5 nodejs/node_modules/dom-serializer nodejs/node_modules/css-select nodejs/node_modules/domutils nodejs/node_modules/nth-check nodejs/node_modules/boolbase nodejs/node_modules/css-what nodejs/node_modules/bignumber.js nodejs/node_modules/readable-stream nodejs/node_modules/core-util-is nodejs/node_modules/inherits nodejs/node_modules/isarray nodejs/node_modules/process-nextick-args nodejs/node_modules/safe-buffer nodejs/node_modules/string_decoder nodejs/node_modules/safe-buffer nodejs/node_modules/util-deprecate nodejs/node_modules/safe-buffer nodejs/node_modules/sqlstring
+//to package common.js a Lambda layer for node 8.10 (note:  running as node 10.x Lambda layer causes "Error: Cannot find module 'lodash/assign'")
+//zip -r common.zip nodejs/node_modules/common.js nodejs/node_modules/secure.js nodejs/node_modules/mysql nodejs/node_modules/htmlparser2 nodejs/node_modules/entities nodejs/node_modules/cheerio nodejs/node_modules/inherits nodejs/node_modules/domhandler nodejs/node_modules/domelementtype nodejs/node_modules/lodash nodejs/node_modules/parse5 nodejs/node_modules/dom-serializer nodejs/node_modules/css-select nodejs/node_modules/domutils nodejs/node_modules/nth-check nodejs/node_modules/boolbase nodejs/node_modules/css-what nodejs/node_modules/bignumber.js nodejs/node_modules/readable-stream nodejs/node_modules/core-util-is nodejs/node_modules/isarray nodejs/node_modules/process-nextick-args nodejs/node_modules/safe-buffer nodejs/node_modules/string_decoder nodejs/node_modules/safe-buffer nodejs/node_modules/util-deprecate nodejs/node_modules/safe-buffer nodejs/node_modules/sqlstring
+
 //module vars that are not exported
 const mysql = require('mysql');
 const AWS = require('aws-sdk');
@@ -49,9 +50,10 @@ let me = {
         });
     },
     getDisseminationDate: (acceptanceDateTime) => { //submissions accepted after 5:30PM are disseminated the next day
-        const disseminationUTCDate = new Date(acceptanceDateTime.substr(0,4) + "-" + acceptanceDateTime.substr(4,2) + "-" + acceptanceDateTime.substr(6,2) + 'T' + acceptanceDateTime.substr(8,2)+':'+acceptanceDateTime.substr(10,2)+':'+acceptanceDateTime.substr(12,2))+'Z';
-        disseminationUTCDate.setHours(disseminationUTCDate.getUTCHours()+6);
-        disseminationUTCDate.setMinutes(disseminationUTCDate.getUTCMinutes()+30);
+        const disseminationUTCDate = new Date(acceptanceDateTime.substr(0,4) + "-" + acceptanceDateTime.substr(4,2) + "-"
+            + acceptanceDateTime.substr(6,2) + 'T' + acceptanceDateTime.substr(8,2)+':'+acceptanceDateTime.substr(10,2)+':'+acceptanceDateTime.substr(12,2)+'Z');
+        disseminationUTCDate.setUTCHours(disseminationUTCDate.getUTCHours()+6);
+        disseminationUTCDate.setUTCMinutes(disseminationUTCDate.getUTCMinutes()+30);
         if(disseminationUTCDate.getUTCDay()==6) disseminationUTCDate.setUTCDate(disseminationUTCDate.getUTCDate()+2);  //Saturday to Monday
         if(disseminationUTCDate.getUTCDay()==0) disseminationUTCDate.setUTCDate(disseminationUTCDate.getUTCDate()+1);  //Sunday to Monday
         //todo: skip national holidays too!
@@ -84,23 +86,18 @@ let me = {
         return new Promise(async (resolve,reject) =>  {
             if(!me.con) me.con = await me.createDbConnection();
             if(sql.indexOf("''fatal MySQL error")===-1){
-                try{
-                    me.con.query(sql, (err, result, fields) => {
-                        if(err) {
-                            console.log('throwing error from within reQuery');
-                            throw err;
+                //note: con.execute prepares the statement and will run into max_prepared_stmt_count limit
+                me.con.query(sql, async (err, result, fields) => {
+                    if(err) {
+                        try{
+                            await me.logEvent("fatal MySQL error: "+err.message, sql, true);
+                        } catch(err2){
+                            console.log('unable to write to database');
                         }
-                        resolve({data: result, fields: fields});
-                    });  //note: con.execute prepares a statement and will run into max_prepared_stmt_count limit
-                } catch(err) {
-                    console.log("fatal MySQL error: "+ err.message);
-                    try{
-                        await me.logEvent("fatal MySQL error: "+err.message, sql);
-                    } catch(err2){
-                        console.log("unable to log fatal MySQL error: "+err2.message);
+                        reject(err);
                     }
-                    reject(err);
-                }
+                    resolve({data: result, fields: fields});
+                });
             } else {
                 console.log('endless loop detected in runQuery');
                 process.exit();
@@ -108,8 +105,8 @@ let me = {
         });
     },
     logEvent: async (type, msg, display) => {
-        await me.runQuery("insert into eventlog (event, data) values ("+me.q(type)+me.q(msg.substr(0,59999), true)+")");  //data field is varchar 60,000
         if(display) console.log(type, msg);
+        await me.runQuery("insert into eventlog (event, data) values ("+me.q(type)+me.q(msg.substr(0,59999), true)+")");  //data field is varchar 60,000
     },
     readS3: async (file) => {
         let now = new Date();

@@ -21,7 +21,6 @@ exports.handler = async (event, context) => {
         //step 2.  loop through new submission (ordered by accptancedatetime
         let dailyIndexesToWrite = [];  //keep a list of detail indexes to write out micro index is written out (note: routine allows multiple dissemination dates)
         for(let i=0;i<subDS.data[0].length;i++){
-            console.log(i);
             let newSub = JSON.parse(subDS.data[0][i].json);
             let disseminationDate = common.getDisseminationDate(subDS.data[0][i].acceptancedatetime);
             let indexDate = disseminationDate.toISOString().substr(0,10);
@@ -33,7 +32,7 @@ exports.handler = async (event, context) => {
                 try{
                     let json = await common.readS3(root+ "/indexes/daily-index/"+ disseminationDate.getUTCFullYear()+"/QTR"+qtr+"/detailed."+ indexDate + ".json");
                     dailyIndex = JSON.parse(json);
-                    let checkDate = dailyIndex.indexDate;
+                    let checkLength = dailyIndex.submissions.length;
                 } catch (e) {
                     dailyIndex = {
                         "title": "daily EDGAR file index with file manifest for " + indexDate,
@@ -43,8 +42,6 @@ exports.handler = async (event, context) => {
                     };
                 }
             }
-            console.log(JSON.stringify(dailyIndex));
-            console.log(JSON.stringify(newSub));
             dailyIndex.submissions.push(newSub);
         }
         dailyIndexesToWrite.push(dailyIndex);
@@ -70,16 +67,14 @@ exports.handler = async (event, context) => {
             let dailyIndexToWrite = dailyIndexesToWrite[i];
             const indexUTCDate = new Date(dailyIndexToWrite.indexDate);
             const indexQtr = Math.floor(indexUTCDate.getUTCMonth()/3)+1;
-            writePromises.push(
-                common.writeS3(root+ "/indexes/daily-index/"+ indexUTCDate.getUTCFullYear()+"/QTR"+indexQtr+"/detailed."+ dailyIndexToWrite.indexDate + ".json"),
-                JSON.stringify(dailyIndexToWrite)
-            );
+            writePromises.push(common.writeS3(root+ "/indexes/daily-index/"+ indexUTCDate.getUTCFullYear()+"/QTR"+indexQtr+"/detailed."+ dailyIndexToWrite.indexDate + ".json"
+                 , JSON.stringify(dailyIndexToWrite)));
         }
         //collect the write promises
         for(let i=0;i<writePromises.length;i++) {
             await writePromises[i];
         }
-
+        console.log('writeDetailedIndexes wrote '+dailyIndexesToWrite.length+' indexes');
     } else {
         await common.logEvent('WARNING: writeDetailedIndexes ', 'submissionsGetClearNew returned no records', true);
     }

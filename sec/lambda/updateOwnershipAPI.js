@@ -19,15 +19,14 @@
 //     - write to S3: restdata.publicdata.guru/sec/
 //     - tell cloudFront to refresh the cache for the updated issuer API file
 
-// execution time = 2.9s
-// ownership submissions per year = 210,000
-// Lambda execution costs for updateOwnershipAPI per year = $1.27
-// CloudFront Ownership invalidation costs per year = 210,000 * (1 issuer path + 1 reporter path) = $2,100 per year
+// average execution time = 300ms using a 256MB container costing $0.000000417 per 100ms of execution time
+// ownership submissions per year = 250,000 costing $0.31 (!!!)
 
 
 //REQUIRES LAMBDA LAYER "COMMON"
 const cheerio = require('cheerio');
 const common = require('common');
+const root = 'test'; //for S3 writes
 
 const ownershipForms= {
     '3': '.xml',
@@ -65,7 +64,6 @@ exports.handler = async (event, context) => {
         files: event.files
     };
     let sql = 'select bodyhash from ownership_submission where adsh='+ common.q(filing.adsh, true);
-    console.log(sql);
     let hashPromise = common.runQuery(sql);
 
     let xmlBody = false;
@@ -80,7 +78,6 @@ exports.handler = async (event, context) => {
     var submission = {transactions: []};
     if (filing.xmlBody) {
         filing.bodyHash = common.makeHash(filing.xmlBody);
-        console.log(JSON.stringify(dbFileHash));
         if(dbFileHash.data.length && dbFileHash.data[0].bodyhash == filing.bodyHash){
             await common.logEvent('updateOwnershipAPI duplicate '+ event.adsh, 'identical hash signatures; not processed', true);
         } else {
@@ -88,7 +85,8 @@ exports.handler = async (event, context) => {
             await common.logEvent('updateOwnershipAPI '+ event.adsh, 'completed with '+(submission.transactions?submission.transactions.length:0)+' transactions found', true);
         }
     } else {
-        await common.logEvent('no xmlBody for ownership', JSON.stringify(filing), true);
+        await common.logEvent('FILE ERROR: no xmlBody for ownership', event.path, true);
+        return false; //stop further execution w/o causing an error in the monitoring
     }
     await logStartPromise;
 };
@@ -96,8 +94,15 @@ exports.handler = async (event, context) => {
 
 async function process345Submission(filing, remainsChecking){
     var $xml = cheerio.load(filing.xmlBody, {xmlMode: true});
-    if($xml('issuerCik').length!=1)
-        throw 'issuerCik error in ' + filing.fileName;
+    try {
+        if($xml('issuerCik').length!=1){
+            throw 'issuerCik error in ' + filing.fileName;
+        }
+    } catch (e) {
+        common.logEvent('FILE ERROR: bad file format detected by updateOwnershipAPI', filing.path, true);
+        return false;  //stop further execution w/o causing an error in the monitoring
+    }
+
     var rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
     var submission = {
         adsh: filing.adsh,
@@ -221,16 +226,6 @@ async function process345Submission(filing, remainsChecking){
     //only update the API is this submission has transaction (vs. only reporting holdings)
     if(hasTransactions){
         await common.runQuery("call updateOwnershipAPI('"+filing.adsh+"');");
-        let invalidationParams = {
-            DistributionId: 'EJG0KMRDV8F9E',
-            InvalidationBatch: {
-                CallerReference: submission.adsh+'_'+ new Date().getTime(),
-                Paths: {
-                    Quantity: 0,
-                    Items: []
-                }
-            }
-        };
         let updatedReporterAPIDataset = await common.runQuery(
             "select cik, transactions, lastfiledt, name, mastreet1, mastreet2, macity, mastate, mazip "
             + " from ownership_api_reporter where cik in ('"+reporterCiks.join("','")+"')"
@@ -254,10 +249,7 @@ async function process345Submission(filing, remainsChecking){
             delete body.mazip;
             body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
             body.transactions = JSON.parse(body.transactions);
-            //console.log(body);
-            //await writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body));
-            s3WritePromises.push(common.writeS3('sec/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
-            invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/reporter/cik'+parseInt(body.cik));
+            s3WritePromises.push(common.writeS3(root+'/ownership/reporter/cik'+parseInt(body.cik), JSON.stringify(body)));
         }
 
         let updatedIssuerAPIDataset = await common.runQuery(
@@ -295,8 +287,7 @@ async function process345Submission(filing, remainsChecking){
         delete body.bazip;
         body.transactionColumns = "Form|Accession Number|Reported Order|Code|Acquired or Disposed|Direct or Indirect|Transaction Date|File Date|reporter Name|Issuer CIK|Shares|Shares Owned After|Security";
         body.transactions = JSON.parse(body.transactions);
-        s3WritePromises.push(common.writeS3('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
-        invalidationParams.InvalidationBatch.Paths.Items.push('sec/ownership/issuer/cik'+parseInt(submission.issuer.cik));
+        s3WritePromises.push(common.writeS3(root+'/ownership/issuer/cik'+parseInt(submission.issuer.cik), JSON.stringify(body)));
 
         for(let i=0; i<s3WritePromises.length;i++){
             await s3WritePromises[i];  //collect the S3 writer promises
@@ -332,51 +323,72 @@ function rowToObject(row, fields){
 async function save345Submission(s){
     //save main submission record (on duplicate handling in case of retries)
     const q = common.q;
-    var sql = 'INSERT INTO ownership_submission (adsh, filename, form, schemaversion, bodyhash, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
+    var sql = 'REPLACE INTO ownership_submission (adsh, filename, form, schemaversion, bodyhash, reportdt, filedt, originalfiledt, issuercik, issuername, symbol, '
         + ' remarks, signatures, txtfilesize, tries) '
         + " VALUES (" +q(s.adsh) + q(s.filename) + q(s.documentType) + q(s.schemaVersion) + q(s.bodyHash) + q(s.periodOfReport) + q(s.filedDate) + q(s.dateOfOriginalSubmission)
-        + q(s.issuer.cik) + q(s.issuer.name)+q(s.issuer.tradingSymbol)+q(s.remarks)+q(s.signatures) + s.fileSize +',1)'
-        + ' on duplicate key update tries = tries + 1, bodyhash = '+ q(s.bodyHash, true);
-    await common.runQuery(sql);
+        + q(s.issuer.cik) + q(s.issuer.name)+q(s.issuer.tradingSymbol)+q(s.remarks)+q(s.signatures) + s.fileSize +',1)';
+    let submissionPromise =  common.runQuery(sql);
 
     //save reporting owner records
-    for(var ro=0; ro<s.reportingOwners.length;ro++){
-        var owner = s.reportingOwners[ro];
-        sql ='INSERT INTO ownership_reporter (adsh, ownernum, ownercik, ownername, ownerstreet1, ownerstreet2, ownercity, '
+    let ownerRecords = [], reporterPromise = false;
+    if(s.reportingOwners.length){
+        for(var ro=0; ro<s.reportingOwners.length;ro++){
+            var owner = s.reportingOwners[ro];
+            ownerRecords.push(
+                '(' +q(s.adsh) + (ro+1)+',' +q(owner.cik) +q(owner.name) + q(owner.street1)+q(owner.street2)+q(owner.city)
+                + q(owner.state) + q(owner.stateDescription) +  q(owner.zip) + q(owner.isDirector)+q(owner.isOfficer)
+                + q(owner.isTenPercentOwner)+ q(owner.isOther )+ q(owner.otherText, true) + ')');
+        }
+        sql ='REPLACE INTO ownership_reporter (adsh, ownernum, ownercik, ownername, ownerstreet1, ownerstreet2, ownercity, '
             + ' ownerstate, ownerstatedescript, ownerzip, isdirector, isofficer, istenpercentowner, isother, other)'
-            + ' value (' +q(s.adsh) + (ro+1)+',' +q(owner.cik) +q(owner.name) + q(owner.street1)+q(owner.street2)+q(owner.city)
-            + q(owner.state) + q(owner.stateDescription) +  q(owner.zip) + q(owner.isDirector)+q(owner.isOfficer)
-            + q(owner.isTenPercentOwner)+ q(owner.isOther )+ q(owner.otherText, true) + ')'
-            + ' on duplicate key update ownernum = ownernum';
-        await common.runQuery(sql);
+            + ' value ' + ownerRecords.join(',');
+        reporterPromise =  common.runQuery(sql);
     }
+
     //save any footnote records
+    let footnoteRecords = [], footnotePromise = false;
     for(var f=0; f<s.footnotes.length;f++){
         var foot = s.footnotes[f];
-        sql ='INSERT INTO ownership_footnote (adsh, fnum, footnote) '
-            + ' value ('+q(s.adsh)+foot.id.substr(1)+','+q(foot.text, true) + ')'
-            + ' on duplicate key update adsh = adsh';
-        await common.runQuery(sql);
+        footnoteRecords.push(' ('+q(s.adsh)+foot.id.substr(1)+','+q(foot.text, true) + ')');
+    }
+    if(footnoteRecords.length){
+        sql ='REPLACE INTO ownership_footnote (adsh, fnum, footnote) value ' + footnoteRecords.join(',');
+        footnotePromise =  common.runQuery(sql);
     }
 
     //save transaction records
+    let transactionRecords = [], transactionPromise = false;
+    let transactionFootnotesRecords = [], transactionFootnotePromise = false;
     for(var t=0; t<s.transactions.length;t++){
         var trans = s.transactions[t];
-        sql ='INSERT INTO ownership_transaction (adsh, transnum, isderivative, transtype, expirationdt, exercisedt, formtype, security, price, transdt, deemeddt, transcode, equityswap, timeliness, shares, '
-            + ' pricepershare, totalvalue, acquiredisposed, underlyingsecurity, underlyingshares, underlyingsecurityvalue, sharesownedafter,  valueownedafter, directindirect, ownershipnature)'
-            + ' value ('+q(s.adsh)+(t+1)+','+trans.derivative+','+q(trans.transOrHold)+q(trans.expirationDate)+q(trans.exerciseDate)
+        transactionRecords.push('('+q(s.adsh)+(t+1)+','+trans.derivative+','+q(trans.transOrHold)+q(trans.expirationDate)+q(trans.exerciseDate)
             + q(trans.formType)+ q(trans.securityTitle)+q(trans.conversionOrExercisePrice) + q(trans.transactionDate)
             + q(trans.deemedExecutionDate) + q(trans.transactionCode)+q(trans.equitySwap)+ q(trans.timeliness) + q(trans.transactionShares)
             + q(trans.transactionPricePerShare)+ q(trans.transactionTotalValue)+ q(trans.transactionAcquiredDisposedCode)+ q(trans.underlyingSecurityTitle)
             + q(trans.underlyingSecurityShares)+ q(trans.underlyingSecurityValue) + q(trans.sharesOwnedFollowingTransaction)+ q(trans.valueOwnedFollowingTransaction)
-            + q(trans.directOrIndirectOwnership) + q(trans.natureOfOwnership, true) + ')'
-            + ' on duplicate key update transnum = transnum';
+            + q(trans.directOrIndirectOwnership) + q(trans.natureOfOwnership, true) + ')');
         await common.runQuery(sql);
         for(var tf=0; tf<trans.footnotes.length;tf++){
-            await common.runQuery('INSERT INTO ownership_transaction_footnote (adsh, tnum, fnum) values ('+q(s.adsh)+(t+1)+','+trans.footnotes[tf].substr(1)+')'
-                + ' on duplicate key update tnum = '+(t+1));
+            transactionFootnotesRecords.push('('+q(s.adsh)+(t+1)+','+trans.footnotes[tf].substr(1)+')');
         }
     }
+
+    if(transactionRecords.length){  //this should be necessary but there a lot of bad data out there (e.g. https://www.sec.gov/Archives/edgar/data/1252849/000125284916000152/wf-form3_145192430997246.xml)
+        sql ='REPLACE INTO ownership_transaction (adsh, transnum, isderivative, transtype, expirationdt, exercisedt, formtype, security, price, transdt, deemeddt, transcode, equityswap, timeliness, shares, '
+            + ' pricepershare, totalvalue, acquiredisposed, underlyingsecurity, underlyingshares, underlyingsecurityvalue, sharesownedafter,  valueownedafter, directindirect, ownershipnature)'
+            + ' value ' + transactionRecords.join(',');
+        transactionPromise =  common.runQuery(sql);
+    }
+    if(footnoteRecords.length) {
+        sql = 'REPLACE INTO ownership_transaction_footnote (adsh, tnum, fnum) values ' + transactionFootnotesRecords.join(',');
+        transactionFootnotePromise = common.runQuery(sql);
+    }
+
+    await submissionPromise;
+    if(reporterPromise) await reporterPromise;
+    if(transactionPromise) await transactionPromise;
+    if(footnotePromise) await footnotePromise;
+    if(transactionFootnotePromise) await transactionFootnotePromise;
 }
 
 

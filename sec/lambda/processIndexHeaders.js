@@ -2,6 +2,29 @@
 //avg execution time 400ms to 2s (peak exec = 4s on db startup and  large index file)
 //cost = 500,000 filings per * $0.000000208 per 100ms (192MB size) * 2s * 10 (100ms to s) = $2.08 per year
 //note: 128MB container has no spare memory when run hard
+
+//2016Q1 (empty MySQL tables; M5.XL ($0.19/h) instance; 100ms ingest rate)
+// Lambda costs
+// processIndexHeaders: 158,372 files * 0.5s * $0.00000417 / s (256MB) = $0.33
+// updateOwnershipAPI: 138,892 files * 0.5s * $0.00000417 / s (256MB) = $0.29  (average peaky towards end)
+// updateXBRLAPI:        7,575 files * 15s * $0.00002501 / s (1.5GB) = $2.84  (average peaky towards end)
+// updateFormDAPI:      11,905 files * 0.5s * $0.00000834 / s (512MB) = $0.05  (average jumped abruptly 2/3 way through quarter)
+// writeDetailedIndexes: ~5,000 invokes * 2s * $0.00000417 / s (256MB) = $0.04  (average jumped abruptly 2/3 way through quarter)
+
+// S3 costs (driven by XBRL TimeSEries and Frames API writes)
+// S3 WRITES: $31.00 = ((1 issuer + 1 reporter) * 67,378 Ownership) + (800 TS & Frames * 7,575 XBRL) + 11,909 Form D Indexes) * $0.005/1000
+// S3 READS: $0.12 = (1 index header + 1 XML) * 158,000 * $0.0004/1000
+
+//ANALYSIS
+//  The XBRL peak filing dates cause CPU utilization to jump from 25% to 88%, and caused by too many connections)
+//  FormD had virtually no problems as it only reads and writes to S3 and have no DB interactions
+//
+//Recommendations:
+// 1. limit currently unlimited concurrency of XBRL to 50 (same as Ownership & process IndexHeader)
+// 2. double size of EC2 instance to M5.2XL
+// 3. half the ingest rate to 200ms per file
+// 4. consider a migration to Aurora Serverless = 5x throughput of mySQL on same hardware
+
 //todo: consider using DB with a transaction  to S3 read = faster + possibly allow for concurrent lambdas of processIndexHeadrs
 
 //module level variables (note: these persist between handler calls when containers are reused = prevalent during high usage periods)
@@ -28,9 +51,14 @@ exports.handler = async (event, context) => {
     if(event.crawlerOverrides && event.crawlerOverrides.body){
         indexHeaderBody = event.crawlerOverrides.body;
     } else {
-        const indexHeaderReadPromise = common.readS3(key);
-        console.log('getting ' + JSON.stringify(key));
-        indexHeaderBody = await indexHeaderReadPromise;
+        try{
+            const indexHeaderReadPromise = common.readS3(key);
+            console.log('getting ' + JSON.stringify(key));
+            indexHeaderBody = await indexHeaderReadPromise;
+        } catch (e) {
+            await common.logEvent('FILE ERROR: error reading file', key, true);
+            return false; //stop further execution w/o causing an error in the monitoring
+        }
     }
 
     //2. parse header info and create submission object
@@ -48,6 +76,12 @@ exports.handler = async (event, context) => {
         files: []
     };
 
+    try {
+        let acceptanceDateTime = common.getDisseminationDate(thisSubmission.acceptanceDateTime);
+    } catch (e) {
+        await common.logEvent('FILE ERROR: no acceptanceDateTime in index header', key, true);
+        return false; //stop further execution w/o causing an error in the monitoring
+    }
 
     //3. parse and add hyperlinks to submission object
     console.log('step 3');
@@ -76,7 +110,6 @@ exports.handler = async (event, context) => {
     let q = common.q;  //shorthandle
     let shortPath = folder.replace('sec/','').replace('Archives/','').replace('edgar/data/','');
     let sql = 'call submissionAdd('+q(shortPath)+q(thisSubmission.acceptanceDateTime)+q(JSON.stringify(thisSubmission),true)+')';
-    console.log(sql);
     const newSubmissionPromise = common.runQuery(sql);
 
     //5.  check if detect form is past of a form family that is scheduled for additional processing (eg. parse to db and update REST API file)
@@ -146,8 +179,8 @@ exports.handler = async (event, context) => {
     //8. check if new step function needs to be start or if age of existing new submission indicates a failure = fire writeDetailedIndexes immediately
     const newSubmissionsInfo = await newSubmissionPromise;
     const batchAgeSeconds = newSubmissionsInfo.data[0][0].age;
-    if(batchAgeSeconds) {
-        if(batchAgeSeconds>12){  //give a 2s buffer for slow starts
+    if(batchAgeSeconds !== null) {
+        if(batchAgeSeconds>15){  //give a a generous 5s buffer for slow starts
             common.logEvent('ERROR SubmissionsNew batch age requires emergency writeDetailedIndexes','age: ' + batchAgeSeconds + ' s', true);
             let lambda = await new AWS.Lambda({
                 region: 'us-east-1'
@@ -170,6 +203,8 @@ exports.handler = async (event, context) => {
                     resolve(data);
                 });
             });
+        } else {
+            console.log('batchAge of '+batchAgeSeconds+'s is in spec')
         }
     } else {  //null = new submission -> start batch timer
         await new Promise((resolve, reject)=> {

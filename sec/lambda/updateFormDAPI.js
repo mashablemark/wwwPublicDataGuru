@@ -8,7 +8,7 @@
 //     b) exemptOfferingPersons
 //   4. update the ExemptOfferings REST API object in global memory
 //   5. collect promise is step 3b and call addExemptOfferingPersons(adsh) to update the persons table (for people search)
-//   6. write to  S3: restdata.publicdata.guru/sec/offerings/exempt/exemptOfferingSummaryYYYYQX.json
+//   6. write to  S3: restdata.publicdata.guru/{root]/offerings/exempt/exemptOfferingSummaryYYYYQX.json
 //   7. collect promises from steps 3a, 5 and 6 then exit (without closing con to allow reuse)
 
 // execution time = 1.6s (parse at 600ms, but processing and writing exemptOfferingSummary JSON file = 5.7MB per quarter takes 3.2s by end of Q (USE 256MB CONTAINER!)
@@ -16,8 +16,9 @@
 // Lambda execution costs for updateFormDAPI per year = $0.000000417*16 billing increment of 100ms *48,000 = $0.32 (!)
 
 //REQUIRES LAMBDA LAYER "COMMON"
-const cheerio = require('cheerio');
 const common = require('common');
+const cheerio = require('cheerio');
+const root = 'test';   //change for production
 
 //WARNING:  this approach of treating the API object as a datastore to be updated requires service concurrency = 1 (singleton)
 var exemptOfferingAPIObject = false; //global object eliminates need to reread and parse object when container is reused;
@@ -40,15 +41,15 @@ exports.handler = async (formDevent, context) => {
     let submission = {
         filing: formDevent,
     };
+    await logStartPromise;
     if (formDevent.xmlBody) {
-
         await processFormDSubmission(submission, true);
     } else {
         formDevent.editable = true;
-        await common.logEvent('Form D read error (i='+i+')', JSON.stringify(formDevent), true);
+        await common.logEvent('FILE ERROR: Form D read error (i='+i+')', JSON.stringify(formDevent), true);
+        return false; //stop further execution w/o causing an error in the monitoring
     }
 
-    await logStartPromise;
     await common.logEvent('updateFormDAPI '+ formDevent.adsh, 'completed with '
         +(submission.relatedPersons?submission.relatedPersons.length:0)+' relatedPersons and  '
         +(submission.issuers?submission.issuers.length:0)+' issuers found', true);
@@ -59,7 +60,7 @@ async function processFormDSubmission(submission, remainsChecking){
     //submissions accepted after 5:30PM are disseminated the next day
     const acceptanceDate = common.getDisseminationDate(submission.filing.acceptanceDateTime);
     const acceptanceYYYYQq = acceptanceDate.getFullYear() + "Q" + (Math.floor(acceptanceDate.getMonth()/3)+1);
-    const fileKey = "sec/offerings/exempt/exemptOfferingsSummary"+ acceptanceYYYYQq + ".json";
+    const fileKey = root+"/offerings/exempt/exemptOfferingsSummary"+ acceptanceYYYYQq + ".json";
 
     let exemptOfferingAPIPromise = false;
     if(!exemptOfferingAPIObject || !exemptOfferingAPIObject.exemptOfferings){
@@ -68,8 +69,13 @@ async function processFormDSubmission(submission, remainsChecking){
     }
 
     const $xml = cheerio.load(submission.filing.xmlBody, {xmlMode: true});
-    if($xml('primaryIssuer cik').length!=1)
-        throw 'primaryIssuer cik error in ' + submission.filing.fileName;
+    try{
+        if($xml('primaryIssuer cik').length!=1)
+            throw 'primaryIssuer cik error in ' + submission.filing.fileName;
+    } catch (e) {
+        common.logEvent('FILE ERROR: bad file format detected by updateFormDAPI', submission.filing.path, true);
+        return false; //stop further execution w/o causing an error in the monitoring
+    }
 
     function get($xmlSection, path){ return readAndRemoveTag($xmlSection, path, remainsChecking)}
     function getAddress($xmlSection){
@@ -283,7 +289,7 @@ async function processFormDSubmission(submission, remainsChecking){
         updateAPIFile = true;
     }
 
-//   6. write to  S3: restdata.publicdata.guru/sec/offerings/exempt/exemptOfferingSummaryYYYYQX.json
+//   6. write to  S3: restdata.publicdata.guru/{root}/offerings/exempt/exemptOfferingSummaryYYYYQX.json
     let writeAPIPromise;
     if(updateAPIFile){
         exemptOfferingAPIObject.exemptOfferings = exemptOfferingAPIObject.exemptOfferings.sort((a,b)=>{return b.accepted-a.accepted});  //sort newest first

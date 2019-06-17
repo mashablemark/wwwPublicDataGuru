@@ -65,6 +65,7 @@ const XBRLDocuments= {
 };
 const debugMode = false;  //set false in production or when running at scale to avoid large CloudWatch log & costs
 const rootS3Folder = "test";  //todo: change root directory to "sec" from "test" to go live for S3 writes of financial statement lists, timeseries and frames APIs
+const enableS3Writes = false;  //eliminate biggest cost of test runs.  Set true for PRODUCTION
 
 exports.handler = async (event, context) => {
     let logStartPromise =  common.logEvent('updateXBRLAPI '+ event.adsh, 'invoked', true);
@@ -132,7 +133,7 @@ exports.handler = async (event, context) => {
         let updateAPIPromises = [];
         const financialStatementsList = await common.runQuery("call listFinancialStatements('"+submission.dei.EntityCentralIndexKey.value+"');");
         //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
-        updateAPIPromises.push(common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(submission.dei.EntityCentralIndexKey.value)+'.json', financialStatementsList.data[0][0].jsonList));
+        if(enableS3Writes) updateAPIPromises.push(common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(submission.dei.EntityCentralIndexKey.value)+'.json', financialStatementsList.data[0][0].jsonList));
 
         //write to time series REST API in S3
 
@@ -149,7 +150,7 @@ exports.handler = async (event, context) => {
         for(i=0; i<updatedTimeSeriesAPIDataset.data[0].length;i++) {
             let ts = updatedTimeSeriesAPIDataset.data[0][i];
             if (lastCik && lastTag && (lastCik != ts.cik || lastTag != ts.tag)) {
-                updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));
+                if(enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));
                 oTimeSeries = {};
                 timeSeriesFileCount++;
             }
@@ -173,7 +174,7 @@ exports.handler = async (event, context) => {
             }
             oTimeSeries[ts.tag][cikKey]["units"][ts.uom][qtrs] = JSON.parse(ts.json);  //DQ = duration in quarters
         }
-        updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
+        if(enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
         timeSeriesFileCount++;
         let endTSProcess = new Date();
         console.log('processed and made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
@@ -197,7 +198,7 @@ exports.handler = async (event, context) => {
         for(let i=0;i<updateAPIPromises.length;i++){
             await updateAPIPromises[i];
         }
-        console.log('processed and made write promises for DB and S3 object write(s) for ' + frameCount + ' frames from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') created ' + frameCount + ' frames from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
     } else {
         await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);

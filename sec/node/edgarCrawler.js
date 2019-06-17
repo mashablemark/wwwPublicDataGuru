@@ -129,10 +129,10 @@ async function processQuarterlyIndex(processControl, callback) {
                 if(updateProcess != 'noProcessing'){
                     if(updateProcess == 'syncProcessing') {
                         processIndexHeader(lineParts);
-                        await wait(150);  //process 10 submissions / second
+                        await wait(200);  //process 10 submissions / second
                     } else {
                         processIndexHeader(lineParts);
-                        await wait(150);  //process 10 submissions / second
+                        await wait(200);  //process 10 submissions / second
                     }
                 }
             }
