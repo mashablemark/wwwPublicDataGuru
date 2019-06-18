@@ -23,7 +23,8 @@ const root = 'test';   //change for production
 //WARNING:  this approach of treating the API object as a datastore to be updated requires service concurrency = 1 (singleton)
 var exemptOfferingAPIObject = false; //global object eliminates need to reread and parse object when container is reused;
 
-exports.handler = async (formDevent, context) => {
+exports.handler = async (messageBatch, context) => {
+    let formDevent = JSON.parse(messageBatch.Records[0].body);  //batch = 1 by configuration
     let logStartPromise =  common.logEvent('updateFormDAPI '+ formDevent.adsh, 'invoked (time stamp = '+formDevent.timeStamp +')', true);
     let exemptOfferingsForms= {
         'D': '.xml',

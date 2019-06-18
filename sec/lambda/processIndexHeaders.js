@@ -122,13 +122,13 @@ exports.handler = async (event, context) => {
         '5': {lambda: 'updateOwnershipAPI'},
         '5/A': {lambda: 'updateOwnershipAPI'},
         //financial statement forms  (https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index-headers.html)
-        '10-Q': {lambda: 'updateXBRLAPI', queue: 'queueUpdateXBRLAPI'},
-        '10-Q/A': {lambda: 'updateXBRLAPI', queue: 'queueUpdateXBRLAPI'},
-        '10-K': {lambda: 'updateXBRLAPI', queue: 'queueUpdateXBRLAPI'},
-        '10-K/A': {lambda: 'updateXBRLAPI', queue: 'queueUpdateXBRLAPI'},
+        '10-Q': {lambda: 'updateXBRLAPI', queue: 'https://sqs.us-east-1.amazonaws.com/008161247312/queueUpdateXBRLAPI'},
+        '10-Q/A': {lambda: 'updateXBRLAPI', queue: 'https://sqs.us-east-1.amazonaws.com/008161247312/queueUpdateXBRLAPI'},
+        '10-K': {lambda: 'updateXBRLAPI', queue: 'https://sqs.us-east-1.amazonaws.com/008161247312/queueUpdateXBRLAPI'},
+        '10-K/A': {lambda: 'updateXBRLAPI', queue: 'https://sqs.us-east-1.amazonaws.com/008161247312/queueUpdateXBRLAPI'},
         //form D processor
-        'D': {lambda: 'updateFormDAPI', queue: 'queueUpdateFormDAPI'},
-        'D/A': {lambda: 'updateFormDAPI', queue: 'queueUpdateFormDAPI'}
+        'D': {lambda: 'updateFormDAPI', queue: 'https://sqs.us-east-1.amazonaws.com/008161247312/queueUpdateFormDAPI'},
+        'D/A': {lambda: 'updateFormDAPI', queue: 'https://sqs.us-east-1.amazonaws.com/008161247312/queueUpdateFormDAPI'}
         //registration statement processor?? (published public registration statement; not draft!)
     };
 
@@ -149,10 +149,10 @@ exports.handler = async (event, context) => {
         let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
         //some processes are invoked directly; long running or non-concurrent ones may need queues
         if(formPostProcesses[thisSubmission.form].queue){
-            let sqs = AWS.SQS({apiVersion: '2012-11-05'});
+            let sqs = new AWS.SQS({apiVersion: '2012-11-05'});
             let params = {
                 MessageBody: payload,
-                QueueURL: 'queueUpdateXBRLAPI'  //not sure if this is correct or whether an arn is needed
+                QueueUrl: formPostProcesses[thisSubmission.form].queue
             };
             await new Promise((resolve, reject)=>{
                 sqs.sendMessage(params, (err, data) => {

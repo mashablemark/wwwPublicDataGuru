@@ -67,14 +67,14 @@ const debugMode = false;  //set false in production or when running at scale to 
 const rootS3Folder = "test";  //todo: change root directory to "sec" from "test" to go live for S3 writes of financial statement lists, timeseries and frames APIs
 const enableS3Writes = false;  //eliminate biggest cost of test runs.  Set true for PRODUCTION
 
-exports.handler = async (event, context) => {
+exports.handler = async (messageBatch, context) => {
+    let event = JSON.parse(messageBatch.Records[0].body);  //batch = 1 by configuration
     let logStartPromise =  common.logEvent('updateXBRLAPI '+ event.adsh, 'invoked', true);
     let dbCheckPromise = common.runQuery("select sum(recs) as records from ("
         + "select count(*) as recs from fin_sub where adsh='"+event.adsh+"' "
         + "   UNION ALL "
         + "select count(*) as recs from fin_num where adsh='"+event.adsh+"') r"
     );
-
     let submission = {
         filing: event,
         counts: {
