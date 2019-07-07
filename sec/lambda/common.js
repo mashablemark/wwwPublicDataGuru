@@ -39,11 +39,12 @@ let me = {
                         console.log('db error', JSON.stringify(err));
                         if (err.code === 'PROTOCOL_CONNECTION_LOST') { // Connection to the MySQL server is usually
                             me.con = await me.createDbConnection(dbInfo);
-                            me.logEvent('db connection lost and recovered', JSON.stringify(err))
+                            await me.logEvent('db connection lost and recovered', JSON.stringify(err))
                         } else {
                             throw new Error(err.message);
                         }
                     });
+                    me.logEvent('opening a mysql connection','?? currently open');
                     resolve(newConn);
                 }
             });

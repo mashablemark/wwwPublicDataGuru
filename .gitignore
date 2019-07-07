@@ -1,3 +1,16 @@
 secure.*
 *.zip
-.idea
+node_modules/*
+.idea/*
+admin/
+chart_jpgs/
+css/
+embed/
+global/
+graph_data/
+info/
+preview/
+previewdev/
+workbench/
+workbenchdev/
+Thumbs.db
