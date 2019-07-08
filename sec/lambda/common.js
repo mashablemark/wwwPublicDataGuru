@@ -44,7 +44,7 @@ let me = {
                             throw new Error(err.message);
                         }
                     });
-                    me.logEvent('opening a mysql connection','?? currently open');
+                    console.log('createDbConnection opening a mysql connection');
                     resolve(newConn);
                 }
             });
@@ -95,7 +95,20 @@ let me = {
                         } catch(err2){
                             console.log('unable to write to database');
                         }
-                        reject(err);
+                        if(err.code === 'ER_LOCK_DEADLOCK') {
+                            setTimeout(() => {  //try again in 50ms
+                                me.con.query(sql, async (err, result, fields) => {
+                                    if(err){
+                                        await me.logEvent("fatal MySQL error on deadlock retry: "+err.message, sql, true);
+                                        reject(err);
+                                    } else {
+                                        await me.logEvent("resolved deadlock on retry: ", sql, true);
+                                        resolve({data: result, fields: fields});
+                                    }
+                                });
+                            }, 50);
+                        } else
+                            reject(err);
                     }
                     resolve({data: result, fields: fields});
                 });

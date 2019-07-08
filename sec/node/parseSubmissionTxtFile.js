@@ -31,9 +31,16 @@ const OwnershipProcessor = require('./updateOwnershipAPI');
 const common = require('common');
 const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
+const lowChatterMode = true;
+var processNum = false;
 
 process.on('message', async (processInfo) => {
     //console.log('CHILD got message:', processInfo);
+    if(processNum && processNum != processInfo.processNum){
+        console.log('changing process num from '+processNum + ' to ' + processInfo.processNum);
+    }
+    processNum = processInfo.processNum;
+
     var MAX_BUFFER = 250 * 1024;  //read first 250kb
     let fileStats = fs.statSync(processInfo.path + processInfo.name),
         fd = fs.openSync(processInfo.path + processInfo.name, 'r'),
@@ -70,6 +77,7 @@ process.on('message', async (processInfo) => {
             filing.xmlBody = xmlBody[0];
             //console.log(filing.xmlBody);
             filing.noS3Writes = true;
+            filing.lowChatterMode = true;
             result = await OwnershipProcessor.handler(filing);  //big call!!
             result.form = result.documentType;
             result.processNum = processInfo.processNum;
@@ -84,7 +92,7 @@ process.on('message', async (processInfo) => {
         }
     }
     let finished = new Date();
-    console.log('child process '+result.processNum +' processed '+(filing.adsh)+' containing form '+result.form + ' in '+ (finished.getTime()-now.getTime())+'ms');
+    if(!lowChatterMode) ('child process '+result.processNum +' processed '+(filing.adsh)+' containing form '+result.form + ' in '+ (finished.getTime()-now.getTime())+'ms');
     process.send(result);
 });
 
@@ -96,10 +104,15 @@ function headerInfo(fileBody, tag){
 
 process.on('disconnect', async () => {
     if(common.con){
-        await common.logEvent('closing a mysql connection','?? currently open');
-        common.con.end();
-        common.con = false;
+        common.con.end((err)=>{
+            if(err)
+                console.log(err);
+            else {
+                console.log('closed mysql connection held by parseSubmissionTxtFile (processNum ' +processNum+')');
+                common.con = false;
+                OwnershipProcessor.close();
+                console.log('child process disconnected and shutting down');
+            }
+        });
     }
-    OwnershipProcessor.close();
-    console.log('child process disconnected and shutting down');
 });

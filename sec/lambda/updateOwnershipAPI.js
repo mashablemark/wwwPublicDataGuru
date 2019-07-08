@@ -51,13 +51,14 @@ const form4TransactionCodes = {  //from https://www.sec.gov/files/forms-3-4-5.pd
 
 exports.close = () => {
     if(common.con){
+        console.log('closing connection held by updateOwnership');
         common.con.end();
         common.con = false;
     }
 };
 
 exports.handler = async (event, context) => {
-    let logStartPromise =  common.logEvent('updateOwnershipAPI '+ event.adsh, 'invoked using path '+ event.path + ' (time stamp = ' + event.timeStamp +')', true);
+    if(!event.lowChatterMode) var logStartPromise =  common.logEvent('updateOwnershipAPI '+ event.adsh, 'invoked using path '+ event.path + ' (time stamp = ' + event.timeStamp +')', true);
 
     var filing = {
         path: event.path,
@@ -91,17 +92,18 @@ exports.handler = async (event, context) => {
     if (filing.xmlBody) {
         filing.bodyHash = common.makeHash(filing.xmlBody);
         if(dbFileHash.data.length && dbFileHash.data[0].bodyhash == filing.bodyHash){
-            await common.logEvent('updateOwnershipAPI duplicate '+ event.adsh, 'identical hash signatures; not processed', true);
-
+            if(!event.lowChatterMode) await common.logEvent('updateOwnershipAPI duplicate '+ event.adsh, 'identical hash signatures; not processed', true);
+            submission.duplicate = true;
         } else {
             submission = await process345Submission(filing, false);
-            await common.logEvent('updateOwnershipAPI '+ event.adsh, 'completed with '+(submission.transactions?submission.transactions.length:0)+' transactions found', true);
+            submission.proccessedOwnership = true;
+            if(!event.lowChatterMode) await common.logEvent('updateOwnershipAPI '+ event.adsh, 'completed with '+(submission.transactions?submission.transactions.length:0)+' transactions found', true);
         }
     } else {
         await common.logEvent('FILE ERROR: no xmlBody for ownership', event.path, true);
         submission = false; //stop further execution w/o causing an error in the monitoring
     }
-    await logStartPromise;
+    if(!event.lowChatterMode) await logStartPromise;
     return submission;
 };
 

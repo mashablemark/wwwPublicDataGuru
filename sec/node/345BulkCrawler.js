@@ -36,7 +36,7 @@ var util = require('util');
 var fs = require('fs');
 var exec = require('child_process').exec;
 var fork = require('child_process').fork;
-var common = require('./common');
+var common = require('common');
 
 var con,  //global db connection
     secDomain = 'https://www.sec.gov';
@@ -283,7 +283,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
             var ingestOverSeer = setInterval(overseeIngest, 100);  //master event loop kicks off and monitors ingest processes!
         }
 
-        function overseeIngest(){
+        function overseeIngest(directFromProcessNum){
             var filing, p;
             //1. check for available process slots and (and restart dead processes)
             processControl.runningCount = 0;
@@ -317,8 +317,9 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
             }
 
             if(processControl.runningCount == 0) {
-                common.logEvent('Processed ownership files in '+ directory, 'Processed ' + processControl.processes.ownshipsSubmissionsProcessed + ' ownership submissions out of ' + fileNames.length + ' files', true);
+                common.logEvent('Processed ownership files in '+ directory, 'Processed ' + processControl.processes.ownshipsSubmissionsProcessed + ' ownership submissions out of ' + fileNames.length + ' files'+(directFromProcessNum?' (called by processNum '+directFromProcessNum+')':''), true);
                 clearInterval(ingestOverSeer); //finished processing this one-day; turn off overseer
+                ingestOverSeer = false;
                 if(ingestDirectoryCallback) ingestDirectoryCallback(processControl);
             }
         }
@@ -365,14 +366,17 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                 if(result.status=='ok'){
                     //console.log('received results from process p'+result.processNum);
                     processControl.totalFilesRead++;
+                    if(result.proccessedOwnership) { //does not count duplicate submissions
+                        processControl.processes.ownshipsSubmissionsProcessed++;
+                        processControl.total345SubmissionsProcessed++;
+                    }
                     processControl.processes['p'+result.processNum].status = 'finished';
                     if(result.form) processControl.processedCount[result.form] = (processControl.processedCount[result.form]||0)+1;
                 } else {
                     common.logEvent('ERROR parseSubmissionTxtFile', 'processNum ' + (result.processNum ? result.processNum : 'unknown'))
                     if(result.status && result.processNum) processControl.processes['p'+result.processNum].status = result.status;
                 }
-                setTimeout(overseeIngest, 5);
-
+                setTimeout(()=>{overseeIngest(result.processNum)}, 5);  //giv garbage collection a chance
             }
         }
     });
