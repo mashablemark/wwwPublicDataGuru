@@ -32,8 +32,6 @@ const common = require('common');
 const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 const lowChatterMode = true;
-var processNum = false;
-
 process.on('message', async (processInfo) => {
     //console.log('CHILD got message:', processInfo);
     if(processNum && processNum != processInfo.processNum){
@@ -62,39 +60,48 @@ process.on('message', async (processInfo) => {
         result,
         q = common.q;
     fs.closeSync(fd);
-    let sql = 'replace into filings (adsh, cik, form, filedt) values ('+q(filing.adsh)+q(filing.cik)+q(filing.form)+q(filing.filingDate,true)+')';
-    await common.runQuery(sql);
-    if(OwnershipProcessor.ownershipForms[filing.form]){
-        var xmlBody = rgxXML.exec(fileBody);
-        //console.log('fileBody.length='+fileBody.length);
-        if(xmlBody===null){  //something went wrong in parse process:  log it but continue parse job
-            await common.logEvent("unable to find XML in " + filing.fileName,
-                'FIRST 1000 CHARS:  ' + fileBody.substr(0,1000)+ '\nLAST 1000 CHARS: '+ fileBody.substr(-1000,1000), true);
-            filing.status = 'error finding XML';
-            filing.processNum = processInfo.processNum;
-            process.send(filing);
+
+    if(filing.adsh && filing.cik && filing.form && filing.filingDate){
+        let sql = 'replace into filings (adsh, cik, form, filedt) values ('+q(filing.adsh)+q(filing.cik)+q(filing.form)+q(filing.filingDate,true)+')';
+        await common.runQuery(sql);
+        if(OwnershipProcessor.ownershipForms[filing.form]){
+            var xmlBody = rgxXML.exec(fileBody);
+            //console.log('fileBody.length='+fileBody.length);
+            if(xmlBody===null){  //something went wrong in parse process:  log it but continue parse job
+                await common.logEvent("unable to find XML in " + filing.fileName,
+                    'FIRST 1000 CHARS:  ' + fileBody.substr(0,1000)+ '\nLAST 1000 CHARS: '+ fileBody.substr(-1000,1000), true);
+                filing.status = 'error finding XML';
+                filing.processNum = processInfo.processNum;
+                process.send(filing);
+            } else {
+                filing.xmlBody = xmlBody[0];
+                //console.log(filing.xmlBody);
+                filing.noS3Writes = true;
+                filing.lowChatterMode = true;
+                result = await OwnershipProcessor.handler(filing);  //big call!!
+                result.form = result.documentType;
+                result.processNum = processInfo.processNum;
+                result.timeStamp = processInfo.timeStamp;
+                result.status = 'ok';
+            }
         } else {
-            filing.xmlBody = xmlBody[0];
-            //console.log(filing.xmlBody);
-            filing.noS3Writes = true;
-            filing.lowChatterMode = true;
-            result = await OwnershipProcessor.handler(filing);  //big call!!
-            result.form = result.documentType;
-            result.processNum = processInfo.processNum;
-            result.timeStamp = processInfo.timeStamp;
-            result.status = 'ok';
+            result = {
+                status: 'ok',
+                form: filing.form,
+                processNum: processInfo.processNum
+            }
         }
+        let finished = new Date();
+        if(!lowChatterMode) ('child process '+result.processNum +' processed '+(filing.adsh)+' containing form '+result.form + ' in '+ (finished.getTime()-now.getTime())+'ms');
     } else {
-        result = {
-            status: 'ok',
-            form: filing.form,
-            processNum: processInfo.processNum
-        }
+        await common.logEvent('ERROR parseSubmissionTstFile: missing header info', processInfo.path + processInfo.name, true);
+        result = {status: 'data error'};
     }
-    let finished = new Date();
-    if(!lowChatterMode) ('child process '+result.processNum +' processed '+(filing.adsh)+' containing form '+result.form + ' in '+ (finished.getTime()-now.getTime())+'ms');
-    process.send(result);
+
+process.send(result);
 });
+
+var processNum = false;
 
 function headerInfo(fileBody, tag){
     var tagStart = fileBody.indexOf(tag);

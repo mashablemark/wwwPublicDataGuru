@@ -55,8 +55,7 @@ var processControl = {
     maxQueuedDownloads: 4,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
-    //start: new Date("2018-06-06"),  //restart date
-    start:  new Date("2008-01-01"), //earliest ingested filedt
+    //start: new Date("2008-01-01"),  //restart date.  If none, the lesser of the max(filedt) and 2008-01-01 is used
     end: false, // new Date("2008-01-29"), //if false or not set, scrape continues up to today
     days: [
     ], //ingest specific days (also used as retry queue) e.g. ['2013-08-12', '2013-08-14', '2013-11-13', '2013-11-15', '2014-03-04', '2014-08-04', '2014-11-14', '2015-03-31','2015-04-30', '2016-02-18', '2016-02-26', '2016-02-29', '2017-02-24', '2017-02-28', '2017-04-27','2017-05-10', '2017-08-03', '2017-08-04', '2017-08-08', '2017-10-16', '2017-10-23', '2017-10-30', '2017-11-03','2017-11-06', '2017-12-20', '2018-04-26', '2018-04-27', '2018-04-30', '2018-05-01', '2018-11-14']],
@@ -101,9 +100,8 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
     var downloadOverSeer;
     if(!processControl.start){
         var result = await common.runQuery('SELECT max(filedt) as lastfiledt FROM ownership_submission');
-        var lastfiledt = result[0].lastfiledt;
+        var lastfiledt = (result.data&&result.data[0])?result.data[0].lastfiledt:'20080101';
         processControl.start = new Date(lastfiledt.substr(0,4)+'-'+lastfiledt.substr(4,2)+'-'+lastfiledt.substr(6,2));
-        processControl.start.setUTCDate(processControl.start.getUTCDate()+1);
     }
     downloadOverSeer = setInterval(overseeDownloads, 2000);  //master event loop kicks off, queues, and monitors downloads and manages uncompressed and file deletions
 
@@ -295,7 +293,8 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                         processControl.runningCount++;
                     }
                 } else {  //check health
-                    var runTime = Date.now() - processControl.processes["p"+p].timeStamp;
+                    let now = new Date();
+                    var runTime = now.getTime() - processControl.processes["p"+p].timeStamp;
                     if(runTime>20 * 1000){ // > 20 seconds for one file
                         common.logEvent('killing long 345 process', processControl.processes["p"+p].name);
                         let submissionHandler = processControl.processes["p"+p].submissionHandler;
@@ -370,13 +369,16 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                         processControl.processes.ownshipsSubmissionsProcessed++;
                         processControl.total345SubmissionsProcessed++;
                     }
-                    processControl.processes['p'+result.processNum].status = 'finished';
+                    processControl.processes['p'+result.processNum].status = 'finishing';
                     if(result.form) processControl.processedCount[result.form] = (processControl.processedCount[result.form]||0)+1;
                 } else {
                     common.logEvent('ERROR parseSubmissionTxtFile', 'processNum ' + (result.processNum ? result.processNum : 'unknown'))
                     if(result.status && result.processNum) processControl.processes['p'+result.processNum].status = result.status;
                 }
-                setTimeout(()=>{overseeIngest(result.processNum)}, 5);  //giv garbage collection a chance
+                setTimeout(()=>{
+                    processControl.processes['p'+result.processNum].status = 'finished';
+                    overseeIngest(result.processNum);
+                }, 5);  //give garbage collection a chance
             }
         }
     });
