@@ -95,7 +95,10 @@ process.on('message', async (processInfo) => {
         if(!lowChatterMode) ('child process '+result.processNum +' processed '+(filing.adsh)+' containing form '+result.form + ' in '+ (finished.getTime()-now.getTime())+'ms');
     } else {
         await common.logEvent('ERROR parseSubmissionTstFile: missing header info', processInfo.path + processInfo.name, true);
-        result = {status: 'data error'};
+        result = {
+            status: 'data error',
+            processNum: processInfo.processNum
+        };
     }
 
 process.send(result);
