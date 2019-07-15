@@ -69,7 +69,8 @@ const enableS3Writes = false;  //eliminate biggest cost of test runs.  Set true 
 
 exports.handler = async (messageBatch, context) => {
     let event = JSON.parse(messageBatch.Records[0].body);  //batch = 1 by configuration
-    let logStartPromise =  common.logEvent('updateXBRLAPI '+ event.adsh, 'invoked', true);
+
+    await common.logEvent('updateXBRLAPI '+ event.adsh, 'invoked', true); //await first call to get connection; otherwise multiple connections get made
     let dbCheckPromise = common.runQuery("select sum(recs) as records from ("
         + "select count(*) as recs from fin_sub where adsh='"+event.adsh+"' "
         + "   UNION ALL "
@@ -203,7 +204,6 @@ exports.handler = async (messageBatch, context) => {
     } else {
         await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
     }
-    await logStartPromise;
     await common.logEvent('updateXBRLAPI '+ event.adsh, 'completed with ' + submission.counts.standardFacts + ' standard facts parsed', true);
 
 
@@ -655,7 +655,7 @@ async function saveXBRLSubmission(s){
 /*//////////////////// TEST CARDS  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 // TEST Card A: iXBRL 10Q:  https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index.htm
 const event = 	{
-    "path": "sec/edgar/data/29905/000002990519000029/",
+    "path": "sec/edgar/data/29905/000002990519000029\",
     "adsh": "0000029905-19-000029",
     "cik": "0000029905",
     "fileNum": "001-04018",
@@ -777,124 +777,10 @@ exports.handler(event);
 
 /*////////////////////////////////////////////////////////////////////////////////////////////////
 // TEST Card B: XBRL 10K:  https://www.sec.gov/Archives/edgar/data/1000180/000100018016000068/0001000180-16-000068-index.htm
-
 {
-  "path": "sec/edgar/data/1000180/000100018016000068/",
-  "adsh": "0001000180-16-000068",
-  "cik": "0001000180",
-  "fileNum": "000-26734",
-  "form": "10-K",
-  "filingDate": "20160212",
-  "period": "20160103",
-  "acceptanceDateTime": "20160212170356",
-  "indexHeaderFileName": "sec/edgar/data/1000180/000100018016000068/0001000180-16-000068-index-headers.html",
-  "files": [
-    {
-      "name": "sndk201510-k.htm",
-      "description": "FORM 10-K FY15",
-      "type": "10-K"
-    },
-    {
-      "name": "sndkex-1037xnewy2facilitya.htm",
-      "description": "NEW Y2 FACILITY AGREEMENT",
-      "type": "EX-10.37"
-    },
-    {
-      "name": "sndkex-121xratioofearnings.htm",
-      "description": "COMPUTATION OF RATIO TO FIXED CHARGES",
-      "type": "EX-12.1"
-    },
-    {
-      "name": "sndkex-211xsignificantsubs.htm",
-      "description": "SUBSIDIARIES OF THE REGISTRANT",
-      "type": "EX-21.1"
-    },
-    {
-      "name": "sndkex-231xconsentofindepe.htm",
-      "description": "CONSENT OF INDEPENDENT REGISTERED PUBLIC ACCOUNTING FIRM",
-      "type": "EX-23.1"
-    },
-    {
-      "name": "sndkex-311xsoxceocertfy15.htm",
-      "description": "CEO CERTIFICATION TO SECTION 302",
-      "type": "EX-31.1"
-    },
-    {
-      "name": "sndkex-312xsoxcfocertfy15.htm",
-      "description": "CFO CERTIFICATION TO SECTION 302",
-      "type": "EX-31.2"
-    },
-    {
-      "name": "sndkex-321xsec906ceocertfy.htm",
-      "description": "CEO CERTIFICATION TO SECTION 906",
-      "type": "EX-32.1"
-    },
-    {
-      "name": "sndkex-322xsec906cfocertfy.htm",
-      "description": "CFO CERTIFICATION TO SECTION 906",
-      "type": "EX-32.2"
-    },
-    {
-      "name": "sndk-20160103.xml",
-      "description": "XBRL INSTANCE DOCUMENT",
-      "type": "EX-101.INS"
-    },
-    {
-      "name": "sndk-20160103.xsd",
-      "description": "XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT",
-      "type": "EX-101.SCH"
-    },
-    {
-      "name": "sndk-20160103_cal.xml",
-      "description": "XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT",
-      "type": "EX-101.CAL"
-    },
-    {
-      "name": "sndk-20160103_def.xml",
-      "description": "XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT",
-      "type": "EX-101.DEF"
-    },
-    {
-      "name": "sndk-20160103_lab.xml",
-      "description": "XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT",
-      "type": "EX-101.LAB"
-    },
-    {
-      "name": "sndk-20160103_pre.xml",
-      "description": "XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT",
-      "type": "EX-101.PRE"
-    },
-    {
-      "name": "performancegraph2015.jpg",
-      "type": "GRAPHIC"
-    },
-    {
-      "name": "sndk.jpg",
-      "type": "GRAPHIC"
-    }
-  ],
-  "bucket": "restapi.publicdata.guru",
-  "sic": "3572",
-  "ein": "770191793",
-  "incorporation": {
-    "state": "DE",
-    "country": false
-  },
-  "businessAddress": {
-    "street1": "951 SANDISK DRIVE",
-    "street2": false,
-    "city": "MILPITAS",
-    "state": "CA",
-    "zip": "95035",
-    "phone": "408-801-1000"
-  },
-  "mailingAddress": {
-    "street1": "951 SANDISK DRIVE",
-    "street2": false,
-    "city": "MILPITAS",
-    "state": "CA",
-    "zip": "95035",
-    "phone": false
-  }
+    "Records": [
+        {"body": "{\"path\":\"sec/edgar/data/1000180/000100018016000068/\",\"adsh\":\"0001000180-16-000068\",\"cik\":\"0001000180\",\"fileNum\":\"000-26734\",\"form\":\"10-K\",\"filingDate\":\"20160212\",\"period\":\"20160103\",\"acceptanceDateTime\":\"20160212170356\",\"indexHeaderFileName\":\"sec/edgar/data/1000180/000100018016000068/0001000180-16-000068-index-headers.html\",\"files\":[{\"name\":\"sndk201510-k.htm\",\"description\":\"FORM 10-K FY15\",\"type\":\"10-K\"},{\"name\":\"sndkex-1037xnewy2facilitya.htm\",\"description\":\"NEW Y2 FACILITY AGREEMENT\",\"type\":\"EX-10.37\"},{\"name\":\"sndkex-121xratioofearnings.htm\",\"description\":\"COMPUTATION OF RATIO TO FIXED CHARGES\",\"type\":\"EX-12.1\"},{\"name\":\"sndkex-211xsignificantsubs.htm\",\"description\":\"SUBSIDIARIES OF THE REGISTRANT\",\"type\":\"EX-21.1\"},{\"name\":\"sndkex-231xconsentofindepe.htm\",\"description\":\"CONSENT OF INDEPENDENT REGISTERED PUBLIC ACCOUNTING FIRM\",\"type\":\"EX-23.1\"},{\"name\":\"sndkex-311xsoxceocertfy15.htm\",\"description\":\"CEO CERTIFICATION TO SECTION 302\",\"type\":\"EX-31.1\"},{\"name\":\"sndkex-312xsoxcfocertfy15.htm\",\"description\":\"CFO CERTIFICATION TO SECTION 302\",\"type\":\"EX-31.2\"},{\"name\":\"sndkex-321xsec906ceocertfy.htm\",\"description\":\"CEO CERTIFICATION TO SECTION 906\",\"type\":\"EX-32.1\"},{\"name\":\"sndkex-322xsec906cfocertfy.htm\",\"description\":\"CFO CERTIFICATION TO SECTION 906\",\"type\":\"EX-32.2\"},{\"name\":\"sndk-20160103.xml\",\"description\":\"XBRL INSTANCE DOCUMENT\",\"type\":\"EX-101.INS\"},{\"name\":\"sndk-20160103.xsd\",\"description\":\"XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT\",\"type\":\"EX-101.SCH\"},{\"name\":\"sndk-20160103_cal.xml\",\"description\":\"XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT\",\"type\":\"EX-101.CAL\"},{\"name\":\"sndk-20160103_def.xml\",\"description\":\"XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT\",\"type\":\"EX-101.DEF\"},{\"name\":\"sndk-20160103_lab.xml\",\"description\":\"XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT\",\"type\":\"EX-101.LAB\"},{\"name\":\"sndk-20160103_pre.xml\",\"description\":\"XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT\",\"type\":\"EX-101.PRE\"},{\"name\":\"performancegraph2015.jpg\",\"type\":\"GRAPHIC\"},{\"name\":\"sndk.jpg\",\"type\":\"GRAPHIC\"}],\"bucket\":\"restapi.publicdata.guru\",\"sic\":\"3572\",\"ein\":\"770191793\",\"incorporation\":{\"state\":\"DE\",\"country\":false},\"businessAddress\":{\"street1\":\"951 SANDISK DRIVE\",\"street2\":false,\"city\":\"MILPITAS\",\"state\":\"CA\",\"zip\":\"95035\",\"phone\":\"408-801-1000\"},\"mailingAddress\":{\"street1\":\"951 SANDISK DRIVE\",\"street2\":false,\"city\":\"MILPITAS\",\"state\":\"CA\",\"zip\":\"95035\",\"phone\":false}}"
+        }
+    ]
 }
 */

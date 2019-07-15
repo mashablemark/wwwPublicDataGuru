@@ -35,9 +35,10 @@ exports.handler = async (event, context) => {
 
     //event object description documation @ https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html
     //optional event controls can be added by crawlers that explicitly call Lambda (instead of normal S3 PUT trigger):
-    //  event.crawlerOverrides.body (allows body of -index-headers.html file to be passed in eliminating S3 fetch)
+    //  event.crawlerOverrides.body (allows body of -index-headers.html file to be passed in eliminating the S3 fetch)
     //  event.crawlerOverrides.noDailyIndexProcessing
     //  event.crawlerOverrides.noLatestIndexProcessing
+    //  event.crawlerOverrides.tableSuffix: allow for test runs (must be passed to subsequent functions
     const firstS3record = event.Records[0].s3;
     common.bucket = firstS3record.bucket.name;
     let key = firstS3record.object.key;
@@ -134,7 +135,7 @@ exports.handler = async (event, context) => {
 
     if(formPostProcesses[thisSubmission.form]) {  //post processing required!
         let processor = formPostProcesses[thisSubmission.form].lambda;
-
+        thisSubmission.crawlerOverrides = {tableSuffix: event.crawlerOverrides?event.crawlerOverrides.tableSuffix || '':''}; //pass on override(s) here
         //get additional meta data from header
         thisSubmission.bucket= firstS3record.bucket.name;
         thisSubmission.sic = headerInfo(indexHeaderBody, '<ASSIGNED-SIC>');
@@ -150,6 +151,7 @@ exports.handler = async (event, context) => {
         //some processes are invoked directly; long running or non-concurrent ones may need queues
         if(formPostProcesses[thisSubmission.form].queue){
             let sqs = new AWS.SQS({apiVersion: '2012-11-05'});
+            console.log('instantiated sqs');
             let params = {
                 MessageBody: payload,
                 QueueUrl: formPostProcesses[thisSubmission.form].queue
@@ -160,7 +162,7 @@ exports.handler = async (event, context) => {
                         console.log('failed to add message to queueUpdateXBRLAPI');
                         reject(err); //stop processing and let CloudWatch log the error
                     } else {
-                        console.log("Succesfully added MessageId "+data.MessageId + " to queueUpdateXBRLAPI");
+                        console.log("Successfully added MessageId "+data.MessageId + " to queueUpdateXBRLAPI");
                         resolve()
                     }
                 });
@@ -200,7 +202,7 @@ exports.handler = async (event, context) => {
     const batchAgeSeconds = newSubmissionsInfo.data[0][0].age;
     if(batchAgeSeconds !== null) {
         if(batchAgeSeconds>15){  //give a a generous 5s buffer for slow starts
-            common.logEvent('ERROR SubmissionsNew batch age requires emergency writeDetailedIndexes','age: ' + batchAgeSeconds + ' s', true);
+            await common.logEvent('ERROR SubmissionsNew batch age requires emergency writeDetailedIndexes','age: ' + batchAgeSeconds + ' s', true);
             let lambda = await new AWS.Lambda({
                 region: 'us-east-1'
             });
@@ -234,10 +236,10 @@ exports.handler = async (event, context) => {
             var stepFunctions = new AWS.StepFunctions();
             stepFunctions.startExecution(params, function (err, data) {
                 if (err) {
-                    common.logEvent('err while executing step function');
+                    console.log('error executing step function indexBatchTimer');
                     reject(err);
                 } else {
-                    console.log('started execution of step function');
+                    console.log('started execution of step function indexBatchTimer');
                     resolve(true);
                 }
             });

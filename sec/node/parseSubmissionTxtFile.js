@@ -76,8 +76,11 @@ process.on('message', async (processInfo) => {
             } else {
                 filing.xmlBody = xmlBody[0];
                 //console.log(filing.xmlBody);
+
                 filing.noS3Writes = true;
                 filing.lowChatterMode = true;
+                rootS3Folder
+                //MAIN CALL TO LAMBDA CODE:
                 result = await OwnershipProcessor.handler(filing);  //big call!!
                 result.form = result.documentType;
                 result.processNum = processInfo.processNum;

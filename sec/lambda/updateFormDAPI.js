@@ -246,7 +246,7 @@ async function processFormDSubmission(submission, remainsChecking){
         console.log('collecting exemptOfferingAPIPromise...');
         try{
             exemptOfferingAPIObject = JSON.parse(await exemptOfferingAPIPromise);
-        } catch(e){
+        } catch(e){  //if no index file exists, create blank starter index file
             exemptOfferingAPIObject = {
                 "title": "EDGAR summary of Offerings of Exempt Securities",
                 "period": acceptanceYYYYQq,
@@ -279,10 +279,10 @@ async function processFormDSubmission(submission, remainsChecking){
                 break;
             }
             if(offeringInFile.isAmendment && offeringInFile.previousAccessionNumber==submission.adsh) { //leave unchanged since API offering is the replacement of what was just ingested
-                common.logEvent('WARNING updateFormDAPI older exempt offering ingested', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
+                await common.logEvent('WARNING updateFormDAPI older exempt offering ingested', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
                 break;
             }
-            common.logEvent('WARNING updateFormDAPI multiple offerings', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
+            await common.logEvent('WARNING updateFormDAPI multiple offerings', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
         }
     }
     if(i==exemptOfferingAPIObject.exemptOfferings.length) {
@@ -310,6 +310,7 @@ async function processFormDSubmission(submission, remainsChecking){
 async function saveFormDSubmission(s){
    const q = common.q;
    /* try {*/
+        let tableSuffix = '';  // s.crawlerOverrides?s.crawlerOverrides.tableSuffix||'':'';
         //save main submission record (on duplicate handling in case of retries)
         delete s.filing.xmlBody;
         const dbOfferingExists = await common.runQuery("select count(*) as recordcount from exemptOffering where adsh=" + q(s.filing.adsh, true));
@@ -317,8 +318,8 @@ async function saveFormDSubmission(s){
         if(dbOfferingExists.data[0].recordcount==0){
             if(s.totalRemaining=="Indefinite") s.totalRemaining = null;
             if(s.totalOfferingAmount=="Indefinite") s.totalOfferingAmount = null;
-            let sql = 'INSERT INTO exemptOffering '
-                + '(adsh,  schemaVersion, submissionType, industryGroupType, is40Act, revenueRange, aggregateNetAssetValueRange, federalExemptionsExclusions, isAmendment, previousAccessionNumber, '
+            let sql = 'INSERT INTO exemptOffering'+tableSuffix
+                + ' (adsh,  schemaVersion, submissionType, industryGroupType, is40Act, revenueRange, aggregateNetAssetValueRange, federalExemptionsExclusions, isAmendment, previousAccessionNumber, '
                 + ' dateOfFirstSale, durationMoreThenOneYear, typesOfSecuritiesOffered, isBusinessCombinationTransaction, businessCombinationTransactionClarification, '
                 + ' minimumInvestmentAccepted, salesCompensationList, totalOfferingAmount, totalAmountSold, totalRemaining, salesAmountsClarification, hasNonAccreditedInvestors, numberAlreadyInvested, '
                 + ' salesCommissions, findersFees, commissionsAndFeesClarification, grossProceedsUsed, grossProceedsUsedClarification,authorizedRepresentativeSignature, signature) '
@@ -330,7 +331,7 @@ async function saveFormDSubmission(s){
             const offeringPromise =  common.runQuery(sql);  //just collect a promise for now allowing the person to be inserted simultaneously
 
             //save issuers (note: first is the primaryIssuer)
-            sql = 'insert into exemptOfferingIssuers '
+            sql = 'insert into exemptOfferingIssuers'+tableSuffix
                 + ' (adsh, issuernum, cik, entityName, street1, street2, city, stateOrCountry, stateOrCountryDescription, '
                 + ' zip, phone, jurisdictionOfInc, previousIssuerNames, previousEdgarNames, entityType, yearOfInc) '
                 + ' values ';  //use multirow insert syntax = much faster
@@ -347,7 +348,7 @@ async function saveFormDSubmission(s){
 
             //save related persons
             if(s.relatedPersons){
-                sql = 'insert into exemptOfferingPersons '
+                sql = 'insert into exemptOfferingPersons'+tableSuffix
                     + ' (adsh, personnum, firstName, lastName, middleName, street1, street2, city, stateOrCountry, stateOrCountryDescription, zip, phone, relationships) '
                     + ' values ';  //use multirow insert syntax = much faster
                 for(let p=0; p<s.relatedPersons.length;p++){
@@ -451,3 +452,10 @@ create table if not exists exemptOfferingPersons  (
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////*/
+message = {
+    "Records": [
+        {
+            "body": "{\"path\":\"sec/edgar/data/99106/000009910616000002/\",\"adsh\":\"0000099106-16-000002\",\"cik\":\"0000099106\",\"fileNum\":\"021-254817\",\"form\":\"D\",\"filingDate\":\"20160108\",\"period\":false,\"acceptanceDateTime\":\"20160108152628\",\"indexHeaderFileName\":\"sec/edgar/data/99106/000009910616000002/0000099106-16-000002-index-headers.html\",\"files\":[{\"name\":\"xslX07/primary_doc.xml\",\"description\":\"D\"},{\"name\":\"primary_doc.xml\",\"description\":\"D\"}],\"bucket\":\"restapi.publicdata.guru\",\"sic\":\"3990\",\"ein\":\"131394750\",\"incorporation\":{\"state\":\"DE\",\"country\":false}}"
+        }
+    ]
+}

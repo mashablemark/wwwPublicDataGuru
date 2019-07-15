@@ -129,10 +129,10 @@ async function processQuarterlyIndex(processControl, callback) {
                 if(updateProcess != 'noProcessing'){
                     if(updateProcess == 'syncProcessing') {
                         processIndexHeader(lineParts);
-                        await wait(200);  //process 10 submissions / second
+                        await wait(100);  //process 10 submissions / second
                     } else {
                         processIndexHeader(lineParts);
-                        await wait(200);  //process 10 submissions / second
+                        await wait(100);  //process 10 submissions / second
                     }
                 }
             }
@@ -313,7 +313,8 @@ async function processIndexHeader(lineParts){
                 }
             ],
             crawlerOverrides: {
-                noLatestIndexProcessing: true
+                noLatestIndexProcessing: true,
+                tableSuffix: '_2016q1'
             }
         };
 
