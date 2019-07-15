@@ -70,11 +70,37 @@ const enableS3Writes = false;  //eliminate biggest cost of test runs.  Set true 
 exports.handler = async (messageBatch, context) => {
     let event = JSON.parse(messageBatch.Records[0].body);  //batch = 1 by configuration
 
+    //if no DB connectivity, error willbe thrown to terminatre process
     await common.logEvent('updateXBRLAPI '+ event.adsh, 'invoked', true); //await first call to get connection; otherwise multiple connections get made
-    let dbCheckPromise = common.runQuery("select sum(recs) as records from ("
-        + "select count(*) as recs from fin_sub where adsh='"+event.adsh+"' "
-        + "   UNION ALL "
-        + "select count(*) as recs from fin_num where adsh='"+event.adsh+"') r"
+
+    const tries = await common.runQuery(`select htmlhash, xmlhash, tries from fin_sub where adsh = '${event.adsh}'`);
+    if(tries.data.length && tries.data[0].tries>=3)
+        return false;  //do not process after 3 tries!!!  End now (without error) to remove item from SMS queue
+
+    await common.runQuery(`insert into fin_sub (adsh, tries) values ('${event.adsh}', 1) on duplicate key update tries = tries + 1`);
+
+    let fileSizeHTML = null;
+    let fileSizeXBRL = null;
+    for (let i = 0; i < event.files.length; i++) {
+        if (XBRLDocuments.iXBRL[event.files[i].type]) {
+            if (['.txt', '.pdf'].indexOf(event.files[i].name.substr(-4).toLowerCase()) === -1) {
+                fileSizeHTML = common.getS3ObjectSize(event.path + event.files[i].name).catch(() => {
+                    throw new Error('unable to check size of ' + event.path + event.files[i].name)
+                });
+            }
+        }
+        if (XBRLDocuments.XBRL[event.files[i].type]) {
+            console.log('XBRL ' + event.files[i].type + ' doc found: ' + event.path + event.files[i].name);
+            fileSizeXBRL = common.getS3ObjectSize(event.path + event.files[i].name).catch(() => {
+                throw new Error('unable to check size of ' + event.path + event.files[i].name)
+            });
+        }
+    }
+
+            let dbCheckPromise = common.runQuery(`select sum(recs) as records from (
+        select count(*) as recs from fin_sub where adsh='${event.adsh}' 
+          UNION ALL 
+        select count(*) as recs from fin_num where adsh='${event.adsh}') r`
     );
     let submission = {
         filing: event,

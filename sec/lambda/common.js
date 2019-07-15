@@ -122,19 +122,38 @@ let me = {
         if(display) console.log(type, msg);
         await me.runQuery("insert into eventlog (event, data) values ("+me.q(type)+me.q(msg.substr(0,59999), true)+")");  //data field is varchar 60,000
     },
-    readS3: async (file) => {
+    getS3Library: () => {
         let now = new Date();
         if(!s3 || !s3Age || (s3Age - now>s3MaxAge)){
             s3 = new AWS.S3;
             console.log('created new S3 object from SDK');
             s3Age = now;
         }
+    },
+    getS3ObjectSize: async (file) => {
         return new Promise((resolve, reject) => {
             let params = {
                 Bucket: me.bucket,
                 Key: file
             };
-            s3.getObject(params, (err, data) => {
+            s3.headObject(params, (err, data) => {
+                if (err) {  // an error occurred
+                    console.log(err, err.stack);
+                    reject(err, err.stack);
+                }
+                else { // successful response  (alt method = createreadstreeam)
+                    resolve(data.ContentLength);
+                }
+            });
+        });
+    },
+    readS3: async (file) => {
+        return new Promise((resolve, reject) => {
+            let params = {
+                Bucket: me.bucket,
+                Key: file
+            };
+            me.getS3Library().getObject(params, (err, data) => {
                 if (err) {  // an error occurred
                     console.log(err, err.stack);
                     reject(err, err.stack);
@@ -146,13 +165,8 @@ let me = {
         });
     },
     writeS3: (fileKey, text) => {
-        let now = new Date();
-        if(!s3 || !s3Age || (s3Age - now>s3MaxAge)){
-            s3 = new AWS.S3;
-            s3Age = now;
-        }
         return new Promise((resolve, reject) => {
-            s3.putObject({
+            me.getS3Library().putObject({
                 Body: text,
                 Bucket: me.bucket,
                 Key: fileKey
