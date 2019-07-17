@@ -51,7 +51,6 @@ const common = require('common');
 const skipNameSpaces = ['xbrli','xbrldi'];  //already scrapped in parts 1. of this routine, but for "deiNumTags" exceptions
 const standardNumericalTaxonomies = ['us-gaap', 'ifrs', 'invest', 'dei', 'srt'];
 const standardQuarters = [0, 1, 4];
-const deiNumTags = ['EntityCommonStockSharesOutstanding', 'EntityListingParValuePerShare', 'EntityNumberOfEmployees' ,'EntityPublicFloat'];  //dei tags scraped by DERA (but not other such as period, fy...
 const XBRLDocuments= {
     iXBRL: {
         '10-Q': 'html',
@@ -65,9 +64,14 @@ const XBRLDocuments= {
 };
 const debugMode = false;  //set false in production or when running at scale to avoid large CloudWatch log & costs
 const rootS3Folder = "test";  //todo: change root directory to "sec" from "test" to go live for S3 writes of financial statement lists, timeseries and frames APIs
-const enableS3Writes = false;  //eliminate biggest cost of test runs.  Set true for PRODUCTION
+const enableS3Writes = true;  //eliminate biggest cost of test runs.  Set true for PRODUCTION
 
 exports.handler = async (messageBatch, context) => {
+    if(!messageBatch.Records.length) {
+        console.log('empty message from queue');
+        return false;
+    }
+
     let event = JSON.parse(messageBatch.Records[0].body);  //batch = 1 by configuration
 
     //if no DB connectivity, error willbe thrown to terminatre process
@@ -77,31 +81,9 @@ exports.handler = async (messageBatch, context) => {
     if(tries.data.length && tries.data[0].tries>=3)
         return false;  //do not process after 3 tries!!!  End now (without error) to remove item from SMS queue
 
+    //create / increment tries record before any processing or errors
     await common.runQuery(`insert into fin_sub (adsh, tries) values ('${event.adsh}', 1) on duplicate key update tries = tries + 1`);
 
-    let fileSizeHTML = null;
-    let fileSizeXBRL = null;
-    for (let i = 0; i < event.files.length; i++) {
-        if (XBRLDocuments.iXBRL[event.files[i].type]) {
-            if (['.txt', '.pdf'].indexOf(event.files[i].name.substr(-4).toLowerCase()) === -1) {
-                fileSizeHTML = common.getS3ObjectSize(event.path + event.files[i].name).catch(() => {
-                    throw new Error('unable to check size of ' + event.path + event.files[i].name)
-                });
-            }
-        }
-        if (XBRLDocuments.XBRL[event.files[i].type]) {
-            console.log('XBRL ' + event.files[i].type + ' doc found: ' + event.path + event.files[i].name);
-            fileSizeXBRL = common.getS3ObjectSize(event.path + event.files[i].name).catch(() => {
-                throw new Error('unable to check size of ' + event.path + event.files[i].name)
-            });
-        }
-    }
-
-            let dbCheckPromise = common.runQuery(`select sum(recs) as records from (
-        select count(*) as recs from fin_sub where adsh='${event.adsh}' 
-          UNION ALL 
-        select count(*) as recs from fin_num where adsh='${event.adsh}') r`
-    );
     let submission = {
         filing: event,
         counts: {
@@ -110,47 +92,62 @@ exports.handler = async (messageBatch, context) => {
             units: 0,
             contexts: 0
         },
-        dei: {},
+        dei: {
+            EntityCentralIndexKey: [],
+            EntityCommonStockSharesOutstanding: [],
+            EntityFilerCategory: [],
+            EntityRegistrantName: []
+        },
         namespaces: {},
         contextTree: {},
         unitTree: {},
         facts: {}
     };  //event = processIndexHeaders parsing of index-headers.html file
+
     //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
     for (let i = 0; i < event.files.length; i++) {
         if(XBRLDocuments.iXBRL[event.files[i].type]) {
             if(['.txt','.pdf'].indexOf(event.files[i].name.substr(-4).toLowerCase())===-1){
-                console.log('primary '+event.files[i].type + ' HTML doc found: '+ event.path + event.files[i].name);
-                let fileBody = await common.readS3(event.path + event.files[i].name).catch(()=>{throw new Error('unable to read ' + event.path + event.files[i].name)});
-                console.log('html length: '+ fileBody.length);
-                await parseIXBRL(cheerio.load(fileBody), submission);
-                if(submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
-                submission.primaryHTML = event.files[i].name;
-                console.log(submission.counts);
+                console.log(`primary ${event.files[i].type } HTML doc found: ${event.path}${event.files[i].name}`);
+                let fileBody = await common.readS3(event.path + event.files[i].name).catch(()=>{throw new Error(`unable to read ${event.path}${event.files[i].name}`)});
+                let hash = common.makeHash(fileBody);
+                if(tries.data.length && hash==tries.data[0].htmlhash){
+                    await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
+                } else {
+                    await common.runQuery(`update fin_sub set htmllength=${fileBody.length}, htmlhash='${hash}' where adsh='${event.adsh}'`);
+                    await parseIXBRL(cheerio.load(fileBody), submission);
+                    if(submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
+                    submission.primaryHTML = event.files[i].name;
+                    console.log(submission.counts);
+                }
             } else {
                 console.log('WARNING: primary doc is .txt or .pdf file -> skip');
             }
+            runGarbageCollection();
         }
         if(XBRLDocuments.XBRL[event.files[i].type]) {
-            console.log('XBRL '+event.files[i].type + ' doc found: '+ event.path + event.files[i].name);
+            console.log(`primary ${event.files[i].type } XBRL instance XML found: ${event.path}${event.files[i].name}`);
             let fileBody = await common.readS3(event.path + event.files[i].name).catch(()=>{throw new Error('unable to read ' + event.path + event.files[i].name)});
-            await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
-            if(submission.hasXBRL) submission.hasXBRL = event.files[i].name;
-            console.log(submission.counts);
+            console.log('read XML file');
+            let hash = common.makeHash(fileBody);
+            if(tries.data.length && hash==tries.data[0].xmlhash){
+                await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
+            } else {
+                await common.runQuery(`update fin_sub set xmllength=${fileBody.length}, xmlhash='${hash}' where adsh='${event.adsh}'`);
+
+                await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
+                if (submission.hasXBRL) submission.hasXBRL = event.files[i].name;
+                console.log(submission.counts);
+            }
+            runGarbageCollection();
         }
     }
+
     //console.log(JSON.stringify(submission));
     //save parsed submission object into DB and update APIs
     if(submission.counts.standardFacts) {
-        if(submission.dei.EntityCentralIndexKey.value!=submission.filing.cik)
+        if(deiValue('EntityCentralIndexKey',submission)!=submission.filing.cik)
             await common.logEvent('ERROR updateXBRLAPI: header and DEI CIK mismatch', submission.filing.path);
-        let existingRecords = await dbCheckPromise;
-        if(debugMode) console.log(existingRecords);
-        if(existingRecords.data.length){
-            await common.logEvent('WARNING: existing XBRL records', event.adsh + ' has '+existingRecords.data[0].records+' fin_sub and fin_num records', true);
-            await common.runQuery("delete from fin_sub where adsh='"+ event.adsh+"'");
-            await common.runQuery("delete from fin_num where adsh='"+ event.adsh+"'");
-        }
         await saveXBRLSubmission(submission);
         console.log('submission saved');
 
@@ -158,9 +155,9 @@ exports.handler = async (messageBatch, context) => {
         //todo: have updateTSPromise  return all TS for cik/tag (not just UOM & QTRS updated)
 
         let updateAPIPromises = [];
-        const financialStatementsList = await common.runQuery("call listFinancialStatements('"+submission.dei.EntityCentralIndexKey.value+"');");
+        const financialStatementsList = await common.runQuery("call listFinancialStatements('"+deiValue('EntityCentralIndexKey',submission)+"');");
         //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
-        if(enableS3Writes) updateAPIPromises.push(common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(submission.dei.EntityCentralIndexKey.value)+'.json', financialStatementsList.data[0][0].jsonList));
+        if(enableS3Writes) updateAPIPromises.push(common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(deiValue('EntityCentralIndexKey',submission), 10)+'.json', financialStatementsList.data[0][0].jsonList));
 
         //write to time series REST API in S3
 
@@ -204,7 +201,7 @@ exports.handler = async (messageBatch, context) => {
         if(enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
         timeSeriesFileCount++;
         let endTSProcess = new Date();
-        console.log('processed and made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
         //write to frame REST API in S3 by looping through list of parsed facts and updating the DB's JSON object rather than recreating = too DB intensive
         let frameCount = 0;
@@ -257,15 +254,17 @@ exports.handler = async (messageBatch, context) => {
                 console.log(frameRecord.data);
                 throw e;
             }
-            let newPoint = {"accn": submission.filing.adsh,
-                "cik": parseInt(submission.dei.EntityCentralIndexKey ? submission.dei.EntityCentralIndexKey.value : submission.filing.cik),
-                "entityName": submission.dei.EntityRegistrantName ? submission.dei.EntityRegistrantName.value : submission.filing.entityName,
-                "sic": parseInt(submission.filing.sic),
+            let newPoint = {
+                "accn": submission.filing.adsh,
+                "cik": parseInt(deiValue('EntityCentralIndexKey', submission)  || submission.filing.cik, 10),
+                "entityName": deiValue('EntityRegistrantName', submission) || submission.filing.entityName,
+                "sic": parseInt(submission.filing.sic, 10),
                 "loc": ((submission.filing.businessAddress && submission.filing.businessAddress.country) || (submission.filing.mailingAddress && submission.filing.mailingAddress.country) || 'US') + '-' + ((submission.filing.businessAddress && submission.filing.businessAddress.state) || ( submission.filing.mailingAddress && submission.filing.mailingAddress.state) || ''),
                 "start": fact.start,
                 "end": fact.end,
                 "val": fact.value,
-                "rev": 1};
+                "rev": 1
+            };
             let i;
             for(i=0;i<frameDataArray.length;i++) {  //frame data is ordered by cik ascending
                 let point = frameDataArray[i];
@@ -296,7 +295,7 @@ exports.handler = async (messageBatch, context) => {
                 let response;
                 let success = await writeFrameToDB(frameRecord,1);
                 if(success) {
-                    await common.writeS3(S3key, JSON.stringify(
+                    if(enableS3Writes) await common.writeS3(S3key, JSON.stringify(
                         {
                             tag: frame.tag,
                             ccp: frame.ccp,
@@ -360,6 +359,7 @@ function parseXBRL($, submission){
 
     //1d & e. scrap dei and numerical tag values (by looping through all tags)
     var nameParts, val, $this, tag, tax;
+
     $('*').each(function(i, elem) { //gave up on trying to select tags in a namespace (e.g. 'us-gaap\\:*' does not work)
         if(this.type == 'tag' ){
             $this = $(elem);
@@ -370,11 +370,17 @@ function parseXBRL($, submission){
                 tag = nameParts[1];
                 if((skipNameSpaces.indexOf(tax)==-1) && val.length){
                     if(tax=='dei'){
-                        submission.dei[tag] = {
+                        let deiFact =  {
                             value: val,
                             contextRef: this.attribs.contextRef || this.attribs.contextref
                         };
-                        if (!submission.dei[tag].contextRef) common.logEvent("missing DEI contextRef for "+tag, submission.filing.adsh);
+                        if (!deiFact.contextRef) common.logEvent("missing DEI contextRef for "+tag, submission.filing.adsh);
+                        if(Array.isArray(submission.dei[tag]))
+                            submission.dei[tag].push(deiFact);
+                        else {
+                            if (submission.dei[tag] && submission.dei[tag].value != deiFact.value) console.log(`${tag} value ${submission.dei[tag].value} is being overwritten with ${deiFact.value}`);
+                            submission.dei[tag] = deiFact;
+                        }
                     } else {
                         if(standardNumericalTaxonomies.indexOf(tax)!=-1){
                             let factInfo = extractFactInfo(submission, $, elem);
@@ -386,8 +392,8 @@ function parseXBRL($, submission){
                                     } else {
                                         let storedFact = submission.facts[factKey];
                                         if(storedFact.value != factInfo.value){
-                                            let storedDecimal = parseInt(storedFact.decimals || 0),
-                                                factDecimal = parseInt(factInfo.decimals || 0),
+                                            let storedDecimal = parseInt(storedFact.decimals || 0, 10),
+                                                factDecimal = parseInt(factInfo.decimals || 0, 10),
                                                 minDecimal = Math.min(storedDecimal, factDecimal),
                                                 power = Math.pow(10, minDecimal);
                                             if(Math.round(factInfo.value*power)!=Math.round(storedFact.value*power) && Math.floor(factInfo.value*power)!=Math.floor(storedFact.value*power)) {
@@ -405,8 +411,6 @@ function parseXBRL($, submission){
                             }
                         }
                     }
-
-
                 }
             }
         }
@@ -428,19 +432,27 @@ function parseIXBRL($, parsedFacts){
     if($deiTags.length==0) return;  //this html doc does not contain SEC compliant inline XBRL
     $deiTags.each((i, elem)=> {
         let deiTag = elem.attribs.name.split(':').pop();
-        parsedFacts.dei[deiTag] = {
+        let deiFact =  {
             text: $(elem).text(),
             contextRef:  elem.attribs.contextref || elem.attribs.contextRef,
             format: elem.attribs.format,
         };
-        if (!elem.attribs.contextref) common.logEvent("missing DEI contextRef for "+deiTag, parsedFacts.filing.adsh);
-        if(parsedFacts.dei[deiTag].format){
+        if (!deiFact.contextRef) common.logEvent("WARNING missing DEI contextRef for "+deiTag, parsedFacts.filing.adsh);
+        if(deiFact.format){
             //problematic date formats all contain the string 'daymonth': http://www.xbrl.org/inlineXBRL/transformation/
-            if(elem.attribs.format && elem.attribs.format.indexOf('daymonth')!=-1) common.logEvent("unhandled data form", elem.attribs.format + ' in iXBRL of ' + parsedFacts.filing.adsh);
-            parsedFacts.dei[deiTag].value = translateXBRLFormat(parsedFacts.dei[deiTag].text, parsedFacts.dei[deiTag].format);
+            if(deiFact.format && deiFact.format.indexOf('daymonth')!=-1) common.logEvent("WARNING unhandled data format", elem.attribs.format + ' in iXBRL of ' + parsedFacts.filing.adsh);
+            deiFact.value = translateXBRLFormat(deiFact.text, deiFact.format);
         } else {
-            parsedFacts.dei[deiTag].value = parsedFacts.dei[deiTag].text;
+            deiFact.value = deiFact.text;
         }
+        if(Array.isArray(parsedFacts.dei[deiTag])){
+            parsedFacts.dei[deiTag].push(deiFact);
+        } else {
+            if (parsedFacts.dei[tag] && parsedFacts.dei[tag].value != deiFact.value) common.logEvent(`WARNING dei overwrite`, `${tag} value ${parsedFacts.dei[tag].value} is being overwritten with ${deiFact.value}`);
+            parsedFacts.dei[deiTag] = deiFact;
+        }
+
+
     });
     /*  parsedFacts.dei =>  { EntityRegistrantName: 'DOVER Corp',
             CurrentFiscalYearEndDate: '--12-31',
@@ -477,8 +489,8 @@ function parseIXBRL($, parsedFacts){
                         let storedFact = parsedFacts.facts[factKey];
                         if(storedFact.value != factInfo.value){
                             //todo:  do same check using scale for iXBRL
-                            let storedDecimal = parseInt(storedFact.decimals || 0),
-                                factDecimal = parseInt(factInfo.decimals || 0),
+                            let storedDecimal = parseInt(storedFact.decimals || 0, 10),
+                                factDecimal = parseInt(factInfo.decimals || 0, 10),
                                 minDecimal = Math.min(storedDecimal, factDecimal),
                                 power = Math.pow(10, minDecimal);
                             if(Math.round(factInfo.value*power)!=Math.round(storedFact.value*power) && Math.floor(factInfo.value*power)!=Math.floor(storedFact.value*power)) {
@@ -628,28 +640,34 @@ function translateXBRLFormat(text, format, scale = 0){
 async function saveXBRLSubmission(s){
     //console.log(JSON.stringify(s)); //debug only!!!
     //save main submission record into fin_sub
-    let q = common.q,
-        startProcess = new Date(),
-        sql = 'INSERT INTO fin_sub(adsh, cik, name, sic, fye, form, period, fy, fp, filed'
-            + ', countryba, stprba, cityba, zipba, bas1, bas2, baph, '
-            + ' countryma, stprma, cityma, zipma, mas1, mas2, countryinc, stprinc, ein, former, changed, filercategory, '
-            +' accepted, prevrpt, detail, htmlfile, instance, nciks, aciks '
-            + " ) VALUES ("+q(s.filing.adsh)+s.dei.EntityCentralIndexKey.value+","+q(s.dei.EntityRegistrantName.value)+(s.filing.sic||0)+','
-            + q(s.dei.CurrentFiscalYearEndDate.value.replace(/-/g,'').substr(-4,4))+q(s.dei.DocumentType.value)+q(s.dei.DocumentPeriodEndDate.value)
-            + q(s.dei.DocumentFiscalYearFocus.value)+q(s.dei.DocumentFiscalPeriodFocus.value)+q(s.filing.filingDate)
-            + q(s.filing.businessAddress&&s.filing.businessAddress.country)+q(s.filing.businessAddress&&s.filing.businessAddress.state)+q(s.filing.businessAddress&&s.filing.businessAddress.city)+q(s.filing.businessAddress&&s.filing.businessAddress.zip)
-            + q(s.filing.businessAddress&&s.filing.businessAddress.street1)+q(s.filing.businessAddress&&s.filing.businessAddress.street2)+q(s.filing.businessAddress&&s.filing.businessAddress.phone)
-            + q(s.filing.mailingAddress&&s.filing.mailingAddress.country)+q(s.filing.mailingAddress&&s.filing.mailingAddress.state)+q(s.filing.mailingAddress&&s.filing.mailingAddress.city)+q(s.filing.mailingAddress&&s.filing.mailingAddress.zip)
-            + q(s.filing.mailingAddress&&s.filing.mailingAddress.street1)+q(s.filing.mailingAddress&&s.filing.mailingAddress.street2)
-            + q(s.filing.incorporation?s.filing.incorporation.country:null)+q(s.filing.incorporation?s.filing.incorporation.state:null)+q(s.filing.ein)
-            + q('former')+q('changed')+q(s.dei.EntityFilerCategory.value)+ q(s.filing.acceptanceDateTime) +" 4, 5, "
-            + q(s.primaryHTML) + q(s.hasIXBRL||s.hasXBRL)+"1,"+q(s.dei.EntityCentralIndexKey.value, true)+")";
+    function q(val){return common.q(val,true)}
+    let cik = deiValue('EntityCentralIndexKey',s),
+        aciks = [];
+    for(let i=0;i<s.dei.EntityCentralIndexKey.length; i++){
+        if(s.dei.EntityCentralIndexKey[i].value!=cik) aciks.push(s.dei.EntityCentralIndexKey[i].value)
+    }
+    let startProcess = new Date(),
+        sql = `update fin_sub 
+            set cik=${cik}, name=${q(deiValue('EntityRegistrantName',s))}, 
+                sic=${s.filing.sic||0}, fye=${q(deiValue('CurrentFiscalYearEndDate',s).replace(/-/g,'').substr(-4,4))}, 
+                form=${q(deiValue('DocumentType',s))}, period=${q(deiValue('DocumentPeriodEndDate',s))}, fy=${q(deiValue('DocumentFiscalYearFocus',s))}, 
+                fp=${q(deiValue('DocumentFiscalPeriodFocus',s))}, filed=${q(s.filing.filingDate)}, countryba=${q(s.filing.businessAddress&&s.filing.businessAddress.country)}, 
+                stprba=${q(s.filing.businessAddress&&s.filing.businessAddress.state)}, cityba=${q(s.filing.businessAddress&&s.filing.businessAddress.city)}, 
+                zipba=${q(s.filing.businessAddress&&s.filing.businessAddress.zip)}, bas1=${q(s.filing.businessAddress&&s.filing.businessAddress.street1)}, 
+                bas2=${q(s.filing.businessAddress&&s.filing.businessAddress.street2)}, baph=${q(s.filing.businessAddress&&s.filing.businessAddress.phone)}, 
+                countryma=${q(s.filing.mailingAddress&&s.filing.mailingAddress.country)}, stprma=${q(s.filing.mailingAddress&&s.filing.mailingAddress.state)}, 
+                cityma=${q(s.filing.mailingAddress&&s.filing.mailingAddress.city)}, zipma=${q(s.filing.mailingAddress&&s.filing.mailingAddress.zip)}, 
+                mas1=${q(s.filing.mailingAddress&&s.filing.mailingAddress.street1)}, mas2=${q(s.filing.mailingAddress&&s.filing.mailingAddress.street2)}, 
+                countryinc=${q(s.filing.incorporation?s.filing.incorporation.country:null)}, stprinc=${q(s.filing.incorporation?s.filing.incorporation.state:null)}, 
+                ein=${q(s.filing.ein)}, former='former', changed='changed', filercategory=${q(deiValue('EntityFilerCategory',s))}, 
+                accepted=${q(s.filing.acceptanceDateTime)}, prevrpt=null, detail=null, htmlfile=${ q(s.primaryHTML)}, instance=${q(s.hasIXBRL||s.hasXBRL)}, nciks=${s.dei.EntityCentralIndexKey.length}, aciks=${q(aciks.join(' '))}
+            where adsh='${s.filing.adsh}'`;
     await common.runQuery(sql);
 
     //save numerical fact records into fin_num
     console.log('saving facts...');
     let i=0, fact, numSQL, version, coreg;
-    const numInsertHeader = 'insert into fin_num (adsh, tag, version, coreg, startdate, enddate, qtrs, ccp, uom, value) values ';
+    const numInsertHeader = 'REPLACE into fin_num (adsh, tag, version, coreg, startdate, enddate, qtrs, ccp, uom, value) values ';
     numSQL = numInsertHeader;
     for(let factKey in s.facts){
         //console.log(JSON.stringify(fact));  //todo: DEBUG ONLY!!
@@ -662,8 +680,8 @@ async function saveXBRLSubmission(s){
             version = (standardNumericalTaxonomies.indexOf(fact.taxonomy) == -1) ? s.filing.adsh : fact.taxonomy;
             if(version!=s.adsh && coreg=='' && fact.unit) fact.isStandard = true;
             //multi-row inserts are faster
-            numSQL += (i%1000==0?'':', ') + "(" + q(s.filing.adsh) + q(fact.tag) + q(version) + "''," + q(fact.start)+ q(fact.end)  + fact.qtrs+','
-                + q(fact.ccp) + q(fact.uom.label) + fact.value + ")";
+            numSQL += (i%1000==0?'':', ')
+                + `(${q(s.filing.adsh)}, ${q(fact.tag)}, ${q(version)}, '', ${q(fact.start)}, ${q(fact.end)}, ${fact.qtrs}, ${q(fact.ccp)}, ${q(fact.uom.label)}, ${fact.value})`;
             i++;
             if(i%1000==0){ //but don't let the query get too long.... default max packet size 2MB  <-  INCREASE TO 160 MB!!!!
                 await common.runQuery(numSQL);
@@ -676,6 +694,29 @@ async function saveXBRLSubmission(s){
     if(i%1000!=0) await common.runQuery(numSQL);  // execute multi-row insert
     let endProcess = new Date();
     console.log('saveXBRLSubmission wrote ' + i + ' facts from '+s.dei.EntityRegistrantName.value+' ' + s.filing.form + ' for ' + s.filing.period + ' ('+ s.filing.adsh +') in ' + (endProcess-startProcess) + ' ms');
+}
+function deiValue(tag, submission){
+    if(!submission.dei[tag]) return null;
+    if(Array.isArray(submission.dei[tag])){
+        if(submission.dei[tag].length==1)
+            return submission.dei[tag][0].value;
+        for(let i=0;i<submission.dei[tag].length;i++){
+            if(!submission.contextTree[submission.dei[tag][i].contextRef].member)
+                return submission.dei[tag][i].value;
+        }
+        common.logEvent('ERROR undetermined value for '+tag, submission.filing.path+submission.filing.adsh);
+        return null;  //hack to avoid errors while running quarterly ingest
+    } else {
+        return submission.dei[tag].value;
+    }
+}
+function runGarbageCollection(){
+    if (global.gc) {
+        console.log(process.memoryUsage());
+        console.log('collecting garbage');
+        global.gc();
+        console.log(process.memoryUsage());
+    } else console.log('global.gc not set');
 }
 
 /*//////////////////// TEST CARDS  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
