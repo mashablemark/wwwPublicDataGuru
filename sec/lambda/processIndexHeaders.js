@@ -197,7 +197,8 @@ exports.handler = async (event, context) => {
 
     }
 
-    //8. check if new step function needs to be start or if age of existing new submission indicates a failure = fire writeDetailedIndexes immediately
+    //6. check if new step function needs to be start or if age of existing new submission indicates a failure = fire writeDetailedIndexes immediately
+    console.log('step 6');
     const newSubmissionsInfo = await newSubmissionPromise;
     const batchAgeSeconds = newSubmissionsInfo.data[0][0].age;
     if(batchAgeSeconds !== null) {
@@ -228,6 +229,7 @@ exports.handler = async (event, context) => {
             console.log('batchAge of '+batchAgeSeconds+'s is in spec')
         }
     } else {  //null = new submission -> start batch timer
+        console.log('new indexBatchTimer');
         await new Promise((resolve, reject)=> {
             let params = {
                 stateMachineArn: 'arn:aws:states:us-east-1:008161247312:stateMachine:indexBatchTimer', //indexBatchTimer
