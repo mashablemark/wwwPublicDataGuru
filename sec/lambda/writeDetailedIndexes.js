@@ -18,6 +18,7 @@ exports.handler = async (event, context) => {
     const subDS = await common.runQuery('call submissionsGetClearNew()');
     const now = new Date();
     if(subDS.data && subDS.data[0] && subDS.data[0].length){
+        console.log('fetched and processing '+subDS.data[0].length+' new submissions');
         //step 2.  loop through new submission (ordered by accptancedatetime
         let dailyIndexesToWrite = [];  //keep a list of detail indexes to write out micro index is written out (note: routine allows multiple dissemination dates)
         for(let i=0;i<subDS.data[0].length;i++){
@@ -29,9 +30,16 @@ exports.handler = async (event, context) => {
                 if(i>0){
                     dailyIndexesToWrite.push(dailyIndex);
                 }
+                let key = root+ "/indexes/daily-index/"+ disseminationDate.getUTCFullYear()+"/QTR"+qtr+"/detailed."+ indexDate + ".json";
+                console.log('reading S3 object '+key);
                 try{
-                    let json = await common.readS3(root+ "/indexes/daily-index/"+ disseminationDate.getUTCFullYear()+"/QTR"+qtr+"/detailed."+ indexDate + ".json");
-                    dailyIndex = JSON.parse(json);
+                    let json = await common.readS3(key);
+                    try{
+                        dailyIndex = JSON.parse(json);
+                    } catch (e) {
+                        await common.logEvent('ERROR writeDetailedIndexes',`unable to parse index JSON for ${key}`);
+                        return;  //leave evidence for analysis: don't overwrite
+                    }
                     let checkLength = dailyIndex.submissions.length;
                 } catch (e) {
                     dailyIndex = {
