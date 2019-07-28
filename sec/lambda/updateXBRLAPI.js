@@ -146,8 +146,14 @@ exports.handler = async (messageBatch, context) => {
     //console.log(JSON.stringify(submission));
     //save parsed submission object into DB and update APIs
     if(submission.counts.standardFacts) {
-        if(deiValue('EntityCentralIndexKey',submission)!=submission.filing.cik)
-            await common.logEvent('ERROR updateXBRLAPI: header and DEI CIK mismatch', submission.filing.path);
+        let primaryCIK = deiValue('EntityCentralIndexKey', submission);
+        if(!submission.filing.filers[primaryCIK]){
+            await common.logEvent('ERROR updateXBRLAPI: primaryFiler not found: terminating!', submission.filing.path);
+            return {status: 'ERROR updateXBRLAPI: primaryFiler not found'};
+        }
+        submission.primaryFiler = submission.filing.filers[primaryCIK];
+        submission.primaryFiler.cik = primaryCIK;
+
         await saveXBRLSubmission(submission);
         console.log('submission saved');
 
@@ -155,12 +161,11 @@ exports.handler = async (messageBatch, context) => {
         //todo: have updateTSPromise  return all TS for cik/tag (not just UOM & QTRS updated)
 
         let updateAPIPromises = [];
-        const financialStatementsList = await common.runQuery("call listFinancialStatements('"+deiValue('EntityCentralIndexKey',submission)+"');");
+        const financialStatementsList = await common.runQuery("call listFinancialStatements('"+deiValue('EntityCentralIndexKey',submission)+"');"); //todo: maintain list for non-primaryFilers
         //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
         if(enableS3Writes) updateAPIPromises.push(common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(deiValue('EntityCentralIndexKey',submission), 10)+'.json', financialStatementsList.data[0][0].jsonList));
 
         //write to time series REST API in S3
-
         let startTSProcess = new Date();
         let updatedTimeSeriesAPIDataset = await updateTSPromise;  //updates and returns all TS for the tags in submission (note: more returned than updated)
         let lastCik = false,
@@ -173,7 +178,7 @@ exports.handler = async (messageBatch, context) => {
         console.log('count of TS to update: '+updatedTimeSeriesAPIDataset.data[0].length);
         for(i=0; i<updatedTimeSeriesAPIDataset.data[0].length;i++) {
             let ts = updatedTimeSeriesAPIDataset.data[0][i];
-            if (lastCik && lastTag && (lastCik != ts.cik || lastTag != ts.tag)) {
+            if(lastCik && lastTag && (lastCik != ts.cik || lastTag != ts.tag)) {
                 if(enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));
                 oTimeSeries = {};
                 timeSeriesFileCount++;
@@ -201,7 +206,7 @@ exports.handler = async (messageBatch, context) => {
         if(enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
         timeSeriesFileCount++;
         let endTSProcess = new Date();
-        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+deiValue('EntityRegistrantName', submission)+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
         //write to frame REST API in S3 by looping through list of parsed facts and updating the DB's JSON object rather than recreating = too DB intensive
         let frameCount = 0;
@@ -222,7 +227,7 @@ exports.handler = async (messageBatch, context) => {
         for(let i=0;i<updateAPIPromises.length;i++){
             await updateAPIPromises[i];
         }
-        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') created ' + frameCount + ' frames from '+submission.dei.EntityRegistrantName.value+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') created ' + frameCount + ' frames from '+ deiValue('EntityRegistrantName', submission) +' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
     } else {
         await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
@@ -254,12 +259,13 @@ exports.handler = async (messageBatch, context) => {
                 console.log(frameRecord.data);
                 throw e;
             }
+
             let newPoint = {
                 "accn": submission.filing.adsh,
-                "cik": parseInt(deiValue('EntityCentralIndexKey', submission)  || submission.filing.cik, 10),
+                "cik": parseInt(submission.primaryFiler.cik, 10),
                 "entityName": deiValue('EntityRegistrantName', submission) || submission.filing.entityName,
                 "sic": parseInt(submission.filing.sic, 10),
-                "loc": ((submission.filing.businessAddress && submission.filing.businessAddress.country) || (submission.filing.mailingAddress && submission.filing.mailingAddress.country) || 'US') + '-' + ((submission.filing.businessAddress && submission.filing.businessAddress.state) || ( submission.filing.mailingAddress && submission.filing.mailingAddress.state) || ''),
+                "loc": ((submission.primaryFiler.businessAddress && submission.primaryFiler.businessAddress.country) || (submission.primaryFiler.mailingAddress && submission.primaryFiler.mailingAddress.country) || 'US') + '-' + ((submission.primaryFiler.businessAddress && submission.primaryFiler.businessAddress.state) || ( submission.primaryFiler.mailingAddress && submission.primaryFiler.mailingAddress.state) || ''),
                 "start": fact.start,
                 "end": fact.end,
                 "val": fact.value,
@@ -649,17 +655,17 @@ async function saveXBRLSubmission(s){
     let startProcess = new Date(),
         sql = `update fin_sub 
             set cik=${cik}, name=${q(deiValue('EntityRegistrantName',s))}, 
-                sic=${s.filing.sic||0}, fye=${q(deiValue('CurrentFiscalYearEndDate',s).replace(/-/g,'').substr(-4,4))}, 
+                sic=${s.primaryFiler.sic||0}, fye=${q(deiValue('CurrentFiscalYearEndDate',s).replace(/-/g,'').substr(-4,4))}, 
                 form=${q(deiValue('DocumentType',s))}, period=${q(deiValue('DocumentPeriodEndDate',s))}, fy=${q(deiValue('DocumentFiscalYearFocus',s))}, 
-                fp=${q(deiValue('DocumentFiscalPeriodFocus',s))}, filed=${q(s.filing.filingDate)}, countryba=${q(s.filing.businessAddress&&s.filing.businessAddress.country)}, 
-                stprba=${q(s.filing.businessAddress&&s.filing.businessAddress.state)}, cityba=${q(s.filing.businessAddress&&s.filing.businessAddress.city)}, 
-                zipba=${q(s.filing.businessAddress&&s.filing.businessAddress.zip)}, bas1=${q(s.filing.businessAddress&&s.filing.businessAddress.street1)}, 
-                bas2=${q(s.filing.businessAddress&&s.filing.businessAddress.street2)}, baph=${q(s.filing.businessAddress&&s.filing.businessAddress.phone)}, 
-                countryma=${q(s.filing.mailingAddress&&s.filing.mailingAddress.country)}, stprma=${q(s.filing.mailingAddress&&s.filing.mailingAddress.state)}, 
-                cityma=${q(s.filing.mailingAddress&&s.filing.mailingAddress.city)}, zipma=${q(s.filing.mailingAddress&&s.filing.mailingAddress.zip)}, 
-                mas1=${q(s.filing.mailingAddress&&s.filing.mailingAddress.street1)}, mas2=${q(s.filing.mailingAddress&&s.filing.mailingAddress.street2)}, 
-                countryinc=${q(s.filing.incorporation?s.filing.incorporation.country:null)}, stprinc=${q(s.filing.incorporation?s.filing.incorporation.state:null)}, 
-                ein=${q(s.filing.ein)}, former='former', changed='changed', filercategory=${q(deiValue('EntityFilerCategory',s))}, 
+                fp=${q(deiValue('DocumentFiscalPeriodFocus',s))}, filed=${q(s.filing.filingDate)}, countryba=${q(s.primaryFiler.businessAddress&&s.primaryFiler.businessAddress.country)}, 
+                stprba=${q(s.primaryFiler.businessAddress&&s.primaryFiler.businessAddress.state)}, cityba=${q(s.primaryFiler.businessAddress&&s.primaryFiler.businessAddress.city)}, 
+                zipba=${q(s.primaryFiler.businessAddress&&s.primaryFiler.businessAddress.zip)}, bas1=${q(s.primaryFiler.businessAddress&&s.primaryFiler.businessAddress.street1)}, 
+                bas2=${q(s.primaryFiler.businessAddress&&s.primaryFiler.businessAddress.street2)}, baph=${q(s.primaryFiler.businessAddress&&s.primaryFiler.businessAddress.phone)}, 
+                countryma=${q(s.primaryFiler.mailingAddress&&s.primaryFiler.mailingAddress.country)}, stprma=${q(s.primaryFiler.mailingAddress&&s.primaryFiler.mailingAddress.state)}, 
+                cityma=${q(s.primaryFiler.mailingAddress&&s.primaryFiler.mailingAddress.city)}, zipma=${q(s.primaryFiler.mailingAddress&&s.primaryFiler.mailingAddress.zip)}, 
+                mas1=${q(s.primaryFiler.mailingAddress&&s.primaryFiler.mailingAddress.street1)}, mas2=${q(s.primaryFiler.mailingAddress&&s.primaryFiler.mailingAddress.street2)}, 
+                countryinc=${q(s.primaryFiler.incorporation?s.primaryFiler.incorporation.country:null)}, stprinc=${q(s.primaryFiler.incorporation?s.primaryFiler.incorporation.state:null)}, 
+                ein=${q(s.primaryFiler.ein)}, former='former', changed='changed', filercategory=${q(deiValue('EntityFilerCategory',s))}, 
                 accepted=${q(s.filing.acceptanceDateTime)}, prevrpt=null, detail=null, htmlfile=${ q(s.primaryHTML)}, instance=${q(s.hasIXBRL||s.hasXBRL)}, nciks=${s.dei.EntityCentralIndexKey.length}, aciks=${q(aciks.join(' '))}
             where adsh='${s.filing.adsh}'`;
     await common.runQuery(sql);

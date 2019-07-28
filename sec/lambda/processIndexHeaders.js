@@ -64,8 +64,8 @@ exports.handler = async (event, context) => {
     console.log('step 2');
     const thisSubmission = {
         path: folder,
+        ciks: [],
         adsh: headerInfo(indexHeaderBody, '<ACCESSION-NUMBER>'),
-        cik: headerInfo(indexHeaderBody, '<CIK>'),
         fileNum: headerInfo(indexHeaderBody, '<FILE-NUMBER>'),
         form: headerInfo(indexHeaderBody, '<FORM-TYPE>'),
         filingDate: headerInfo(indexHeaderBody, '<FILING-DATE>'),
@@ -74,6 +74,14 @@ exports.handler = async (event, context) => {
         indexHeaderFileName: firstS3record.object.key,
         files: []
     };
+    const allCiks = indexHeaderBody.match(/<CIK>\d+/g);
+    if(allCiks){
+        for(let i=0;i<allCiks.length;i++){
+            thisSubmission.ciks.push(allCiks[i].substr(3));
+        }
+    } else {
+        await common.logEvent('ERROR processIndexHeaders: no CIks found', key, true)
+    }
 
     try {
         let acceptanceDateTime = common.getDisseminationDate(thisSubmission.acceptanceDateTime);
@@ -85,22 +93,24 @@ exports.handler = async (event, context) => {
     //3. parse and add hyperlinks to submission object
     console.log('step 3');
     const links = indexHeaderBody.match(/<a href="[^<]+<\/a>/g); // '/<a href="\S+"/g');
-    for(let i=0; i<links.length;i++){
-        let firstQuote = links[i].indexOf('"');
-        let relativeKey = links[i].substr(firstQuote+1, links[i].indexOf('"',firstQuote+1)-firstQuote-1);
-        let linkLocation = indexHeaderBody.indexOf(links[i]);
-        let linkSection = indexHeaderBody.substring(indexHeaderBody.substr(0, linkLocation).lastIndexOf('&lt;DOCUMENT&gt;'), linkLocation);
-        let fileType = headerInfo(linkSection, '&lt;TYPE&gt;');
-        let fileDescription = headerInfo(linkSection, '&lt;DESCRIPTION&gt;');
-        let notIdeaDoc = fileDescription ? fileDescription.indexOf("IDEA: XBRL DOCUMENT")=== -1 : true; //don't add the OSD created derived files to the JSON index
-        let mainDirectoryFile = relativeKey.indexOf('/') === -1;
-        if(notIdeaDoc && mainDirectoryFile) {
-            let thisFile = {
-                name: relativeKey
-            };
-            if(fileDescription) thisFile.description = fileDescription;
-            if(fileType) thisFile.type = fileType;
-            thisSubmission.files.push(thisFile);
+    if(links){
+        for(let i=0; i<links.length;i++){
+            let firstQuote = links[i].indexOf('"');
+            let relativeKey = links[i].substr(firstQuote+1, links[i].indexOf('"',firstQuote+1)-firstQuote-1);
+            let linkLocation = indexHeaderBody.indexOf(links[i]);
+            let linkSection = indexHeaderBody.substring(indexHeaderBody.substr(0, linkLocation).lastIndexOf('&lt;DOCUMENT&gt;'), linkLocation);
+            let fileType = headerInfo(linkSection, '&lt;TYPE&gt;');
+            let fileDescription = headerInfo(linkSection, '&lt;DESCRIPTION&gt;');
+            let notIdeaDoc = fileDescription ? fileDescription.indexOf("IDEA: XBRL DOCUMENT")=== -1 : true; //don't add the OSD created derived files to the JSON index
+            let mainDirectoryFile = relativeKey.indexOf('/') === -1;
+            if(notIdeaDoc && mainDirectoryFile) {
+                let thisFile = {
+                    name: relativeKey
+                };
+                if(fileDescription) thisFile.description = fileDescription;
+                if(fileType) thisFile.type = fileType;
+                thisSubmission.files.push(thisFile);
+            }
         }
     }
 
@@ -138,13 +148,32 @@ exports.handler = async (event, context) => {
         thisSubmission.crawlerOverrides = {tableSuffix: event.crawlerOverrides?event.crawlerOverrides.tableSuffix || '':''}; //pass on override(s) here
         //get additional meta data from header
         thisSubmission.bucket= firstS3record.bucket.name;
-        thisSubmission.sic = headerInfo(indexHeaderBody, '<ASSIGNED-SIC>');
-        thisSubmission.ein = headerInfo(indexHeaderBody, '<IRS-NUMBER>');
-        thisSubmission.incorporation = {
-            state: headerInfo(indexHeaderBody, '<STATE-OF-INCORPORATION>'),
-            country: headerInfo(indexHeaderBody, '<COUNTRY-OF-INCORPORATION>')
-        };
-        await getAddresses(thisSubmission, indexHeaderBody, processor);
+        const filerSections = indexHeaderBody.match(/<FILER>((?!<\/FILER>)[\s\S])*<\/FILER>/g);
+        if(filerSections){
+            let filers = {};
+            for(let i=0;i<filerSections.length;i++){
+                let thisCIK = headerInfo(filerSections[i], '<CIK>');
+                filers[thisCIK] = {
+                    sic: headerInfo(filerSections[i], '<ASSIGNED-SIC>'),
+                    ein: headerInfo(filerSections[i], '<IRS-NUMBER>'),
+                    incorporation: {
+                        state: headerInfo(filerSections[i], '<STATE-OF-INCORPORATION>'),
+                        country: headerInfo(filerSections[i], '<COUNTRY-OF-INCORPORATION>')
+                    }
+                };
+                await getAddresses(filers[thisCIK], filerSections[i], processor);
+            }
+            thisSubmission.filers = filers; //replace array of CIKs with hash object
+        } else {
+            thisSubmission.cik = headerInfo(indexHeaderBody, '<CIK>');
+            thisSubmission.sic = headerInfo(indexHeaderBody, '<ASSIGNED-SIC>');
+            thisSubmission.ein = headerInfo(indexHeaderBody, '<IRS-NUMBER>');
+            thisSubmission.incorporation = {
+                state: headerInfo(indexHeaderBody, '<STATE-OF-INCORPORATION>'),
+                country: headerInfo(indexHeaderBody, '<COUNTRY-OF-INCORPORATION>')
+            };
+            await getAddresses(thisSubmission, indexHeaderBody, processor);
+        }
 
         thisSubmission.timeStamp = (new Date).getTime();
         let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
