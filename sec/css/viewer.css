@@ -135,6 +135,78 @@ button.player_play {
 .highcharts-tooltip table{
     font-size: small;
 }
+g.highcharts-series{
+    cursor: pointer;
+}
+div.highcharts-tooltip {
+    pointer-events: auto !important;
+}
+
+/* sytles to support on-click stable tooltips */
+.highcharts-tooltip > span {
+    display: block;
+}
+
+.highcharts-tooltip > span .center {
+    text-align: center;
+}
+
+.highcharts-tooltip > span .img-block {
+    width: 100%;
+    height: 50%;
+}
+
+.highcharts-tooltip > span > .img-block > img {
+    width: 50%;
+    height: 100%;
+}
+
+.highcharts-tooltip > span > .center > .btn {
+    display: inline-block;
+    padding: 6px 12px;
+    margin: 7px;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.42857143;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: middle;
+    -ms-touch-action: manipulation;
+    touch-action: manipulation;
+    cursor: pointer;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    background-image: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    text-decoration: none;
+}
+
+.highcharts-tooltip > span > .center > .btn-primary {
+    background-color: #1ab394;
+    border-color: #1ab394;
+    color: #FFFFFF;
+}
+
+.invisible {
+    visibility: hidden !important;
+}
+
+.highcharts-tooltip:not(.clone){
+    visibility: hidden !important;
+}
+
+.tttip{
+    position: absolute;
+    top: 30%;
+    left: 45%;
+    z-index: 1000000;
+    background-color: azure;
+    padding: 10px;
+    border: thin grey solid;
+}
 
 .custom-combobox {
     position: relative;
