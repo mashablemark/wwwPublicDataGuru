@@ -354,6 +354,12 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                 oChart.chart.renderTo = $('#tschart')[0];
                 if(self.barChart) self.barChart.destroy();
                 self.barChart = new Highcharts.Chart(oChart);
+                if(!window.localStorage || !localStorage.getItem('columnClicked')){
+                    $('#tschart .highcharts-container').prepend('<div class="tttip">click on columns for fact disclosures and links</div>');
+                    setTimeout(function(){
+                        $('#tschart .tttip').fadeOut(1000, function(){$('#tschart .tttip').remove()});
+                    }, 1000);
+                }
                 $('#popviz_durations, #popviz_units').change(function(){
                     var duration = $('#popviz_durations').val();
                     self.vars.qtrs = (duration && duration.substr(2)) || self.vars.qtrs;
@@ -398,6 +404,23 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
             return html;
         }
 
+        var clone_container = null;
+        var clone_tooltip = null;
+        function clean_tooltip() {
+            $('#tschart .tttip').remove();
+            if (clone_container) {  self.barChart.container.firstChild.removeChild(clone_container);
+                clone_container = null;
+            }
+
+            if (clone_tooltip) {
+                self.barChart.container.removeChild(clone_tooltip);
+                clone_tooltip = null;
+            }
+        }
+        function hasClass(element,cls) {
+            return element.classList.contains(cls);
+        }
+
         function makeTimeSeriesChartObject(aryTimeSeriesParams, callingParams){
             var chartLabels = makeChartLabels(aryTimeSeriesParams),
                 yAxes = processYAxes(aryTimeSeriesParams),
@@ -409,15 +432,18 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                 var oChart = {
                     chart: {
                         type: 'column',
-                        height: 500
+                        height: 500,
+                        events: {
+                            click: function(event) {
+                                clean_tooltip();
+                            }
+                        }
                     },
                     tooltip:{
-                        followPointer: false,
-                        hideDelay: 2500,
+                        //followPointer: false,
+                        hideDelay: 50,
                         useHTML: true,
-                        style: {
-                            pointerEvents: 'auto'
-                        },
+                        //style: {pointerEvents: 'auto'},
                         headerFormat: '',
                         pointFormatter: function(){ //change to "" in Highcharts v.4+
                             //todo:  fix this for multiseries charts
@@ -465,8 +491,31 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                     },
                     series: highSeries,
                     plotOptions: {
-                        column: {
-                            stickyTracking: false
+                        series: {
+                            stickyTracking: false,
+                            cursor: 'pointer',
+                            point: {
+                                events: {
+                                    click: function () {
+                                        clean_tooltip();
+                                        if(window.localStorage ) localStorage.setItem('columnClicked', true);
+                                            var hc_tooltip = document.getElementsByClassName("highcharts-tooltip");
+                                        var orig_container = hc_tooltip[0];
+                                        var orig_tooltip = hc_tooltip[1];
+
+                                        clone_tooltip = orig_tooltip.cloneNode(true);
+                                        clone_tooltip.classList.remove("invisible");
+                                        clone_tooltip.classList.add("clone");
+
+                                        clone_container = this.series.chart.tooltip.label.element.cloneNode(true);
+                                        clone_container.classList.remove("invisible");
+                                        clone_container.classList.add("clone");
+
+                                        self.barChart.container.firstChild.appendChild(clone_container);
+                                        self.barChart.container.appendChild(clone_tooltip);
+                                    }
+                                }
+                            }
                         }
                     }
                 };
@@ -493,7 +542,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                     tagLabel = self.secDataCache[tsp.url][tsp.tag]['label'];
                     chartLabels.series[i] = (!sameCompany?company:'') + (!sameCompany && !sameTag?' ':'') + (!sameTag?tagLabel:'');
                 }
-                chartLabels.subtitle =  sameTag ? self.secDataCache[tsp.url][tsp.tag].desc: '';
+                chartLabels.subtitle =  sameTag ? self.secDataCache[tsp.url][tsp.tag].description: '';
                 chartLabels.title = (sameCompany?company:'') + (sameCompany && sameTag?' ':'') + (sameTag?tagLabel:'');
 
                 return chartLabels;
@@ -1145,6 +1194,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
         //calculate the fiscal to calendar relationship and set document reporting period, fy, adsh and cik
         ixbrlViewer.documentPeriodEndDate= $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentPeriodEndDate"]').text();
         ixbrlViewer.reportForm = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentType"]').text();
+        //todo: modify to determine priary CIK for multi-filer submission
         ixbrlViewer.cik = $frameDoc.find('ix\\:nonnumeric[name="dei\\:EntityCentralIndexKey"]').text();
         ixbrlViewer.fy = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentFiscalYearFocus"]').text();
         ixbrlViewer.fp = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentFiscalPeriodFocus"]').text();
