@@ -1,8 +1,8 @@
 <?php
 $edgarPath = 'https://www.sec.gov/Archives/edgar/data/';
 $cik = $_REQUEST['cik'];
-$accnA = $_REQUEST['b'];
-$accnB = $_REQUEST['a'];
+$accnA = $_REQUEST['a'];
+$accnB = $_REQUEST['b'];
 $indexHeaderA = httpGet($edgarPath . $cik . "/".str_replace("-","", $accnA)."/".$accnA."-index-headers.html");
 $indexHeaderB = httpGet($edgarPath . $cik . "/".str_replace("-","", $accnB)."/".$accnB."-index-headers.html");
 
@@ -20,17 +20,13 @@ $B = parseIndexHeader($indexHeaderB);
 
     <!--CSS files-->
     <link  rel="stylesheet" href="/global/js/jqueryui/jquery-ui.css" type="text/css" />
+    <link  rel="stylesheet" href="/global/js/loadmask/jquery.loadmask.css" type="text/css" />
     <!-- open source javascript libraries -->
     <script type="text/javascript" src="js/wikEdDiff.js"></script>
     <script type="text/javascript" src="/global/js/jquery/jquery-3.3.1.min.js"></script>
     <script type="text/javascript" src="/global/js/jqueryui/jquery-ui.min.js"></script>
+    <script type="text/javascript" src="/global/js/loadmask/jquery.loadmask.js"></script>
     <style>
-        div.scrollpanel{
-            overflow-y: scroll;
-        }
-        div.framepanel{
-            padding: 0;
-        }
         .wikEdDiffDelete {
             background-color: red !important;
             text-decoration: line-through;
@@ -41,11 +37,52 @@ $B = parseIndexHeader($indexHeaderB);
             margin:0;
             padding: 0;
         }
+        .framepanel{
+            position: absolute;
+            width: 99%;
+            background: white !important;
+            padding: 3px;
+        }
     </style>
 </head>
 <body>
-<div id="tabs" style="width:80%;">
+<div id="tabs" style="width:80%;" class="ui-tabs ui-corner-all ui-widget ui-widget-content">
     <!--button class="compare">compare</button-->
+    <ul role="tablist" class="ui-tabs-nav ui-corner-all ui-helper-reset ui-helper-clearfix ui-widget-header">
+        <li role="tab" tabindex="0" class="ui-tabs-tab ui-corner-top ui-state-default ui-tab ui-tabs-active ui-state-active" aria-controls="tabs-A" aria-labelledby="ui-id-1" aria-selected="true" aria-expanded="true"><a href="#tabs-A" role="presentation" tabindex="-1" class="ui-tabs-anchor" id="ui-id-1"><?=$A["description"].' (filed '.$A["filed"].")"?></a></li>
+        <li role="tab" tabindex="-1" class="ui-tabs-tab ui-corner-top ui-state-default ui-tab" aria-controls="tabs-B" aria-labelledby="ui-id-2" aria-selected="false" aria-expanded="false"><a href="#tabs-B" role="presentation" tabindex="-1" class="ui-tabs-anchor" id="ui-id-2"><?=$B["description"].' (filed '.$B["filed"].")"?></a></li>
+        <li role="tab" tabindex="-1" class="ui-tabs-tab ui-corner-top ui-state-default ui-tab" aria-controls="tabs-redline" aria-labelledby="ui-id-3" aria-selected="false" aria-expanded="false"><a href="#tabs-redline" role="presentation" tabindex="-1" class="ui-tabs-anchor" id="ui-id-3">Difference</a></li>
+    </ul>
+    <div id="tabs-A" class="framepanel ui-corner-bottom ui-widget-content" aria-labelledby="ui-id-1" role="tabpanel" aria-hidden="false" style="height: 1049.87px;z-index: 30">
+        <iframe id="iframe-A" src="viewer.php?f=true&doc=<?= $cik . "/".str_replace("-","", $accnA)."/" . $A["fileName"] ?>" onload="iframeLoaded()"></iframe>
+    </div>
+    <div id="tabs-B" class="framepanel ui-corner-bottom ui-widget-content" aria-labelledby="ui-id-2" role="tabpanel" aria-hidden="true" style="height: 1049.87px; z-index: 0;">
+        <iframe id="iframe-B" src="viewer.php?f=true&doc=<?= $cik . "/".str_replace("-","", $accnB)."/" . $B["fileName"] ?>" onload="iframeLoaded()"></iframe>
+    </div>
+    <div id="tabs-redline" class="framepanel ui-corner-bottom ui-widget-content" aria-labelledby="ui-id-3" role="tabpanel" aria-hidden="true" style="height: 1049.87px; z-index: 0;">
+        <div class="footerRight" style="position:fixed ; top: 200px; right: 5px;">
+            <div class="footerItemTitle">Legend
+            </div>
+            <div class="footerItemText">
+                <div class="legend">
+                    <ul>
+                        <li><span class="wikEdDiffMarkRight" title="Moved block" id="wikEdDiffMark999" onmouseover="wikEdDiffBlockHandler(undefined, this, 'mouseover');"></span> Original block position</li>
+                        <li><span title="+" class="wikEdDiffInsert">Inserted<span class="wikEdDiffSpace"><span class="wikEdDiffSpaceSymbol"></span> </span>text<span class="wikEdDiffNewline"> </span></span></li>
+                        <li><span title="−" class="wikEdDiffDelete">Deleted<span class="wikEdDiffSpace"><span class="wikEdDiffSpaceSymbol"></span> </span>text<span class="wikEdDiffNewline"> </span></span></li>
+                        <li><span class="wikEdDiffBlockLeft" title="◀" id="wikEdDiffBlock999" onmouseover="wikEdDiffBlockHandler(undefined, this, 'mouseover');">Moved<span class="wikEdDiffSpace"><span class="wikEdDiffSpaceSymbol"></span> </span>block<span class="wikEdDiffNewline"> </span></span></li>
+                        <li><span class="newlineSymbol">¶</span> Newline <span class="spaceSymbol">·</span> Space <span class="tabSymbol">→</span> Tab</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <iframe src="compare_template.html" id="redline" onload="iframeLoaded()"></iframe>
+    </div>
+    <div class="framepanel" style="z-index: -99; position:static;"></div>
+
+</div>
+
+
+<!--div id="tabs" style="width:80%;">
     <ul>
           <li><a href="#tabs-A"><?=$A["description"].' (filed '.$A["filed"].")"?></a></li>
           <li><a href="#tabs-B"><?=$B["description"].' (filed '.$B["filed"].")"?></a></li>
@@ -71,14 +108,29 @@ $B = parseIndexHeader($indexHeaderB);
         </div>
         <iframe src="compare_template.html" id="redline" onload="iframeLoaded()"></iframe>
     </div>
-</div>
+</div-->
 </body>
 
 <script language="JavaScript">
     $(document).ready(function() {
-        $('#tabs').tabs();
-        $('div.scrollpanel, div.framepanel').height(window.innerHeight-$('ul.ui-tabs-nav').outerHeight()-25);
-
+        //$('#tabs').tabs();  //JQUI's tabs hides the panels by setting display=none.  Chrome handles this poorly, forgetting the scroll placement and reflowing when redisplayed  = very slow
+        $('#tabs').mask('Loading the documents and performing the comparison.<br><br>Please use a current version of Firefox, Google Chrome, or Microsoft Edge for fastest load times.');
+        $('div.scrollpanel, div.framepanel').height(window.innerHeight-$('ul.ui-tabs-nav').outerHeight()-55);
+        var tabItems = $('#tabs ul.ui-tabs-nav li');
+        tabItems.click(function(){
+            var $clickedItem = $(this).addClass('ui-tabs-active ui-state-active'),
+                clickedID = this.id,
+                clickedHREF = $clickedItem.find('a').attr('href');
+                $(clickedHREF).css('z-index', 10);
+            $.each(tabItems, function(i, li){
+                var $li = $(li),
+                    thisHREF = $li.find('a').attr('href');
+                if(thisHREF!=clickedHREF){
+                    $li.removeClass('ui-tabs-active ui-state-active');
+                    $(thisHREF).css('z-index', 0);
+                }
+            });
+        })
     });
     var frameLoaded = 0;
     function iframeLoaded(){
@@ -113,17 +165,25 @@ console.time('wikEdDiff');
                 recursiveDiff: true,
                 repeatedDiff: true,
                 showBlockMoves: true,
-                stripTrailingNewline: false,
+                stripTrailingNewline: true,
                 timer: false,
                 unitTesting: false,
                 unlinkBlocks: false,
                 unlinkMax: 20
             };
             var wikEdDiff = new WikEdDiff();
-            var diffHtml = wikEdDiff.diff(oldString, newString).replace(/<\/*pre([^>]+)>/gi,'').replace(/\n/g,'<p>');
-            console.log(diffHtml.substring(0,100));
+            var diffHtml = wikEdDiff.diff(oldString, newString).replace(/<(\/*)pre([^>]*)>/gi,'<$1p>').replace(/\n+\s*\n*/g,'</p><p>');
+            //console.log(diffHtml.substring(0,100));
+            console.log('<PRE count: '+ (diffHtml.match(/<pre([^>]*)>/gi) || []).length);
+            console.log('</PRE or <PRE count: '+ (diffHtml.match(/<(\/*)(pre)([^>]*)>/gi) || []).length);
+            console.log('newline count: '+ (diffHtml.match(/\n/g) || []).length);
+            console.log('start')
+            console.log(diffHtml.substr(0,3000));
+            console.log('end')
+            console.log(diffHtml.substr(-1000));
 console.timeEnd('wikEdDiff');
-            document.getElementById('redline').contentDocument.body.innerHTML = diffHtml;  //executes in 683ms for two 2.8MB complex 10-Q files
+            document.getElementById('redline').contentDocument.body.innerHTML = diffHtml; //.replace(/<p>\s*<p>/ig, '<p>');  //executes in 683ms for two 2.8MB complex 10-Q files
+            $('body').unmask();
         }
     }
 </script>
