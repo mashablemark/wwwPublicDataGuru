@@ -168,6 +168,9 @@ exports.handler = async (messageBatch, context) => {
         //write to time series REST API in S3
         let startTSProcess = new Date();
         let updatedTimeSeriesAPIDataset = await updateTSPromise;  //updates and returns all TS for the tags in submission (note: more returned than updated)
+
+        //start the Frames request = long running (after the time series finishes to space out the database requests)
+        const updateFramePromise = common.runQuery("call updateFrames2('"+submission.filing.adsh+"');");  //3,400ms runtime for 450 frames with 11y history
         let lastCik = false,
             lastTag = false,
             oTimeSeries = {},
@@ -209,142 +212,42 @@ exports.handler = async (messageBatch, context) => {
         console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+deiValue('EntityRegistrantName', submission)+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
         //write to frame REST API in S3 by looping through list of parsed facts and updating the DB's JSON object rather than recreating = too DB intensive
-        let frameCount = 0;
-        for(let factKey in submission.facts){
-            let fact = submission.facts[factKey];
-            if(fact.isStandard && fact.ccp && fact.uom){  //no uom = text block tag such as footnotes -> not a frame!
-                updateAPIPromises.push(
-                    updateFrame(fact).catch(error => {
-                        console.log(error);
-                        process.exit();
-                    })
-                );
-                frameCount++;
+        let updatedFramesAPIDataset = await updateFramePromise;
+        for(i=0; i<updatedFramesAPIDataset.data[0].length;i++) {
+            let frame = updatedFramesAPIDataset.data[0][i];
+            try {
+                let frameDataArray = JSON.parse(frame.json);  //note:  apiWriteFramesAPI.py does this replace too before writing to S3
+                frameDataArray.sort((a,b)=>{return a.cik-b.cik}); //necessary when appending new cki to existing frame
+                s3Key = rootS3Folder + '/frames/' + frame.tag + '/' + frame.uom + '/'+ frame.ccp +'.json';
+                if(enableS3Writes)  updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(
+                    {
+                        tag: frame.tag,
+                        ccp: frame.ccp,
+                        uom: frame.uom,
+                        qtrs: frame.qtrs,
+                        label: frame.label,
+                        description: frame.description,
+                        data: frameDataArray
+                    })));
+            } catch (e) {
+                common.logEvent('ERROR updateXBRLAPI: unable to save frame', `${frame.tag}/${frame.uom}/${frame.ccp}`, true);
+                throw e;
             }
         }
+
+        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') updated/created ' + updatedFramesAPIDataset.data[0].length + ' frames from '+ deiValue('EntityRegistrantName', submission) +' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
 
         //promise collection
         for(let i=0;i<updateAPIPromises.length;i++){
             await updateAPIPromises[i];
         }
-        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') created ' + frameCount + ' frames from '+ deiValue('EntityRegistrantName', submission) +' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        console.log(`awaited ${updateAPIPromises.length} S3 Promises for updating API file`);
 
     } else {
         await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
     }
     await common.logEvent('updateXBRLAPI '+ event.adsh, 'completed with ' + submission.counts.standardFacts + ' standard facts parsed', true);
 
-
-    function updateFrame(fact){
-        // 1. read JSON and timestamp from DB
-        // 2. update JSON if needed
-        // 3. if updated write to DB via stored procedure (updateFrame) that checks for timestamp constancy:
-        //     returns (A) confirmation -> next fact) or (B) new timestamp and json for retry (step 2)
-
-        return new Promise(async (resolve, reject) => {
-            //initial call to updateFrame fetches frame data and tstamp to prevent collisions
-            let getCommand = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs+",'', null);";  //no json = get request
-            let S3key = rootS3Folder + '/frames/'+fact.tag+'/'+fact.uom.label+'/'+fact.ccp+'.json';
-            let needsUpdate = false;
-            let frameRecord = await common.runQuery(getCommand);
-            if(debugMode) console.log('bytes used over return for '+S3key+": " + JSON.stringify(frameRecord).length + '/' + JSON.stringify(frameRecord.data[0][0]).length);
-            let frame, frameDataArray;
-            try{
-                frame = frameRecord.data[0][0];
-                frameDataArray = JSON.parse(frame.json);  //note:  apiWriteFramesAPI.py does this replace too before writing to S3
-                frameDataArray.sort((a,b)=>{return a.cik-b.cik}); //this should not be necessary = insurance against some process misordering the array
-            } catch(e){
-                console.log('ERROR PARSING FRAME FOR ' + S3key);
-                console.log(getCommand);
-                console.log(frameRecord.data);
-                throw e;
-            }
-
-            let newPoint = {
-                "accn": submission.filing.adsh,
-                "cik": parseInt(submission.primaryFiler.cik, 10),
-                "entityName": deiValue('EntityRegistrantName', submission) || submission.filing.entityName,
-                "sic": parseInt(submission.filing.sic, 10),
-                "loc": ((submission.primaryFiler.businessAddress && submission.primaryFiler.businessAddress.country) || (submission.primaryFiler.mailingAddress && submission.primaryFiler.mailingAddress.country) || 'US') + '-' + ((submission.primaryFiler.businessAddress && submission.primaryFiler.businessAddress.state) || ( submission.primaryFiler.mailingAddress && submission.primaryFiler.mailingAddress.state) || ''),
-                "start": fact.start,
-                "end": fact.end,
-                "val": fact.value,
-                "rev": 1
-            };
-            let i;
-            for(i=0;i<frameDataArray.length;i++) {  //frame data is ordered by cik ascending
-                let point = frameDataArray[i];
-                if (newPoint.cik == point.cik) {
-                    if ((point.start != newPoint.start && (point.start || newPoint.start)) || point.end != newPoint.end) {
-                        //TODO: THROW THE FOLLOWING ERROR ONCE DERA DATE ROUNDED DATA IS REPLACED WITH CORRECTLY PARSED DATA
-                        //throw("parsed tag "+fact.tag+" has different dates then frame "+ S3key + ' existing: ('+point.start+','+point.end+'), new: ('+newPoint.start+','+newPoint.end+')');
-                    }
-                    if (point.value != newPoint.value) newPoint.rev = point.rev + 1;
-                    if (point.value != newPoint.value || point.sic != newPoint.sic || point.entityName != newPoint.entityName || point.loc != newPoint.loc) {
-                        frameDataArray.splice(i, 1, newPoint);
-                        needsUpdate = true;
-                    }
-                    break;
-                }
-                if (newPoint.cik < point.cik) {
-                    frameDataArray.splice(i, 0, newPoint);
-                    needsUpdate = true;
-                    break;
-                }
-            }
-            if(i==frameDataArray.length){
-                needsUpdate = true;
-                frameDataArray.push(newPoint);
-            }
-
-            if(needsUpdate){
-                let response;
-                let success = await writeFrameToDB(frameRecord,1);
-                if(success) {
-                    if(enableS3Writes) await common.writeS3(S3key, JSON.stringify(
-                        {
-                            tag: frame.tag,
-                            ccp: frame.ccp,
-                            uom: frame.uom,
-                            qtrs: frame.qtrs,
-                            label: frame.label,
-                            description: frame.description,
-                            data: frameDataArray
-                        }));
-                    resolve(S3key);
-                } else {
-                    reject(new Error('unable to write to DB for object '+ S3key));
-                }
-
-                async function writeFrameToDB(responseFromUpdateFrameWithTStamp, depth){
-                    let writeCall  = "call updateFrame("+common.q(fact.tag)+common.q(fact.uom.label)+common.q(fact.ccp)+fact.qtrs
-                        +','+common.q(JSON.stringify(frameDataArray))+common.q(responseFromUpdateFrameWithTStamp.data[0][0].tstamp, true)+")";  //json = write request
-                    try {
-                        response = await common.runQuery(writeCall);
-                        if(response.data[0][0].processed) {
-                            return true;
-                        } else {
-                            if(depth<3){
-                                console.log('retry depth='+depth+' for '+ S3key);
-                                depth++;
-                                return await writeFrameToDB(response, depth);  //retry up to 3 times
-                            }
-                            else {
-                                console.log('struck out trying to process '+S3key);
-                                return(false);
-                            }
-                        }
-                    } catch(e){
-                        console.log(e);
-                        console.log('updateFrame error at depth: ' + depth + ' processing '+S3key);
-                        return(false);
-                    }
-                }
-            } else {
-                resolve(true);
-            }
-        });
-    }
 };
 
 function parseXBRL($, submission){
