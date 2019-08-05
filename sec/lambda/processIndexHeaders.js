@@ -77,7 +77,7 @@ exports.handler = async (event, context) => {
     const allCiks = indexHeaderBody.match(/<CIK>\d+/g);
     if(allCiks){
         for(let i=0;i<allCiks.length;i++){
-            thisSubmission.ciks.push(allCiks[i].substr(3));
+            thisSubmission.ciks.push(allCiks[i].substr(5));
         }
     } else {
         await common.logEvent('ERROR processIndexHeaders: no CIks found', key, true)
@@ -177,6 +177,7 @@ exports.handler = async (event, context) => {
 
         thisSubmission.timeStamp = (new Date).getTime();
         let payload = JSON.stringify(thisSubmission, null, 2); // include all props with 2 spaces (not sure if truly required)
+        //console.log(payload);   //debugging only!!
         //some processes are invoked directly; long running or non-concurrent ones may need queues
         if(formPostProcesses[thisSubmission.form].queue){
             let sqs = new AWS.SQS({apiVersion: '2012-11-05'});

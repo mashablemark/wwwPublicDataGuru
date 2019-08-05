@@ -8,7 +8,7 @@ AWS.config.update({region: 'us-east-1'});
 const secure = require('./secure');  //DO NOT COMMIT!
 let s3 = false,  //error can occur if s3 object created from AWS SDK is old & unused
     s3Age = false;
-const s3MaxAge = 10000; //todo:  research raising this from 10s to ??
+const s3MaxAge = 100000; //get a new S3 object every 100s to avoid credentials timing out.
 let dynamodb = false;
 process.on('unhandledRejection', (reason, promise) => { console.log('Unhandled rejection at: ', reason.stack|| reason)});  //outside of handler = run once
 
@@ -124,11 +124,12 @@ let me = {
     },
     getS3Library: () => {
         let now = new Date();
-        if(!s3 || !s3Age || (s3Age - now>s3MaxAge)){
+        if(!s3 || !s3Age || ((s3Age - now.getTime())>s3MaxAge)){
             s3 = new AWS.S3;
-            console.log('created new S3 object from SDK');
-            s3Age = now;
+            s3Age = now.getTime();
+            console.log('created new S3 object from SDK (age='+s3Age+')');
         }
+        return s3;
     },
     getS3ObjectSize: async (file) => {
         return new Promise((resolve, reject) => {

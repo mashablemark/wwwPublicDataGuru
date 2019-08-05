@@ -12,6 +12,8 @@ Speed on M5.XL instance = 7,100 files / hr
 Full quarter scrape of ownership & XBRL = 186,060 files / 7,500 file/hr = ~25 hours
 On download, indexes and targeted submissions files will be stored in S3 and Lambda functions triggered for parsing.
 
+Just to download entire quarter's *-index.html file = 300,000 submissions / 36,000 h = 9h
+
 Note that that the routine can be rerun to:
   1. verify no missing days/submissions
   2. retrigger Lambda function and parsing
@@ -54,9 +56,10 @@ const processControl = {
         year: 2016,
         q: 1
     },
+    getIndexHtmlOnly: false,
     updateAPIs: true,
     offset: 0, //REMOVE OR SET TO 0 TO ENSURE FULL SCRAPE AFTER TESTING
-    //stickyFetch: true, // once a fetch to sec.gov is needed (not found in restapi.publicdata.guru bucket), skip all future local read attempts to speed up new batch
+    stickyFetch: true, // once a fetch to sec.gov is needed (not found in restapi.publicdata.guru bucket), skip all future local read attempts to speed up new batch
     lastDownloadTime: false,
     retrigger: false  //master mode determines whether existing index-headers.htm are rewritten if already exist to retrigger Lambda function
 };
@@ -120,19 +123,23 @@ async function processQuarterlyIndex(processControl, callback) {
         let lineParts = lines[lineNum].split('|');
         if (lineParts.length == 5) {
             console.log(lineNum + ': ' + lines[lineNum]);
-            if (targetFormTypes[lineParts[indexLineFields.FormType]]) {
-                processControl[lineParts[indexLineFields.FormType]] = (processControl[lineParts[indexLineFields.FormType]] || 0) + 1;
-                processControl.progress = Math.round(lineNum/lines.length*1000)/10+'%';
-                //await getSubmission(lineParts, lineNum);
+            if(processControl.getIndexHtmlOnly){
+                await getIndexHtmlOnly(lineParts, lineNum);
+            } else {
+                if (targetFormTypes[lineParts[indexLineFields.FormType]]) {
+                    processControl[lineParts[indexLineFields.FormType]] = (processControl[lineParts[indexLineFields.FormType]] || 0) + 1;
+                    processControl.progress = Math.round(lineNum/lines.length*1000)/10+'%';
+                    //await getSubmission(lineParts, lineNum);
 
-                let updateProcess = targetFormTypes[lineParts[indexLineFields.FormType]];
-                if(updateProcess != 'noProcessing'){
-                    if(updateProcess == 'syncProcessing') {
-                        processIndexHeader(lineParts);
-                        await wait(200);  //process 10 submissions / second
-                    } else {
-                        processIndexHeader(lineParts);
-                        await wait(200);  //process 10 submissions / second
+                    let updateProcess = targetFormTypes[lineParts[indexLineFields.FormType]];
+                    if(updateProcess != 'noProcessing'){
+                        if(updateProcess == 'syncProcessing') {
+                            processIndexHeader(lineParts);
+                            await wait(200);  //process 10 submissions / second
+                        } else {
+                            processIndexHeader(lineParts);
+                            await wait(200);  //process 10 submissions / second
+                        }
                     }
                 }
             }
@@ -143,6 +150,14 @@ async function processQuarterlyIndex(processControl, callback) {
     console.log(processControl);
     //terminate here
 
+    async function getIndexHtmlOnly(lineParts, lineNum) {
+        let submissionPathParts = lineParts[indexLineFields.Filename].split('/');
+        let adsh = submissionPathParts.pop().split('.')[0];
+        let submissionPath = submissionPathParts.join('/') + '/' + adsh.replace(/-/g, '') + '/';
+        let indexHtmlFilename = submissionPath + adsh + '-index.html';
+        let indexHtmlBody = await fetch(processControl, indexHtmlFilename, true);
+        return (indexHtmlBody.indexOf ? indexHtmlBody.indexOf('<div id="PageTitle">Filing Detail</div>')!=-1 : false);
+    }
 
     async function getSubmission(lineParts, lineNum) {
         let submissionPathParts = lineParts[indexLineFields.Filename].split('/');
@@ -198,6 +213,7 @@ async function fetch(processControl, fileName, autosave){
                 if (err) { // not found = return new empty archive for today
                     //3. if not found, get from sec.gov (with at least 100ms between fetches!)
                     processControl.s3CacheMiss = true;
+                    if(processControl.stickyFetch) console.log('missed cache!');
                     fetchFromSEC();
                 } else {
                     processControl.getCount = (processControl.getCount||0) + 1;
@@ -214,19 +230,15 @@ async function fetch(processControl, fileName, autosave){
                 //console.log(fileName+' not found in bucket;  need to fetch '+processControl.secDomain + fileName);
                 request(processControl.secDomain + fileName, async function (error, response, body) {
                     if (error) {
-                        logEvent('ERROR edgarCrawl: EDGAR file not file', processControl.secDomain + fileName, true);
+                        //logEvent('ERROR edgarCrawl: EDGAR file not file', processControl.secDomain + fileName, true);
                         processControl.missingCount = (processControl.missingCount || 0) + 1;
                         reject(processControl.secDomain + fileName);
                     } else {
                         processControl.downloadedGB = (processControl.downloadedGB || 0) + body.length / (1024 * 1024 * 1024);
                         processControl.fetchCount = (processControl.fetchCount || 0) + 1;
                         //console.log('fetched byte count: ' + body.length);
-                        if (autosave) {
-                            await put(processControl, body, fileName);
-                            resolve(resolve);
-                        } else {
-                            resolve(body);
-                        }
+                        if (autosave) await put(processControl, body, fileName);
+                        resolve(body);
                     }
                 });
             }, waitTime);

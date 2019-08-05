@@ -65,8 +65,20 @@ const XBRLDocuments= {
 const debugMode = false;  //set false in production or when running at scale to avoid large CloudWatch log & costs
 const rootS3Folder = "test";  //todo: change root directory to "sec" from "test" to go live for S3 writes of financial statement lists, timeseries and frames APIs
 const enableS3Writes = true;  //eliminate biggest cost of test runs.  Set true for PRODUCTION
+var connectionErrorTimeStamp = false; 
 
 exports.handler = async (messageBatch, context) => {
+    if(connectionErrorTimeStamp){
+        //error was thrown during initial db access of last invocation
+        let now = new Date();
+        if(connectionErrorTimeStamp<now.getTime()-10000){
+            await common.wait(2000);  //burn cycles to limit number of invocations from queue 
+            throw("previous invoke encountered db connection issues; 10s cooling down period in effect");  //throw error to keep message in Queue
+        }
+        else
+            connectionErrorTimeStamp = false;  //cool down period over
+    }
+
     if(!messageBatch.Records.length) {
         console.log('empty message from queue');
         return false;
@@ -74,103 +86,120 @@ exports.handler = async (messageBatch, context) => {
 
     let event = JSON.parse(messageBatch.Records[0].body);  //batch = 1 by configuration
 
-    //if no DB connectivity, error willbe thrown to terminatre process
-    await common.logEvent('updateXBRLAPI '+ event.adsh, 'invoked', true); //await first call to get connection; otherwise multiple connections get made
-
-    const tries = await common.runQuery(`select htmlhash, xmlhash, tries from fin_sub where adsh = '${event.adsh}'`);
-    if(tries.data.length && tries.data[0].tries>=3)
-        return false;  //do not process after 3 tries!!!  End now (without error) to remove item from SMS queue
-
-    //create / increment tries record before any processing or errors
-    await common.runQuery(`insert into fin_sub (adsh, tries) values ('${event.adsh}', 1) on duplicate key update tries = tries + 1`);
-
-    let submission = {
-        filing: event,
-        counts: {
-            facts: 0,
-            standardFacts: 0,
-            units: 0,
-            contexts: 0
-        },
-        dei: {
-            EntityCentralIndexKey: [],
-            EntityCommonStockSharesOutstanding: [],
-            EntityFilerCategory: [],
-            EntityRegistrantName: []
-        },
-        namespaces: {},
-        contextTree: {},
-        unitTree: {},
-        facts: {}
-    };  //event = processIndexHeaders parsing of index-headers.html file
-
-    //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
-    for (let i = 0; i < event.files.length; i++) {
-        if(XBRLDocuments.iXBRL[event.files[i].type]) {
-            if(['.txt','.pdf'].indexOf(event.files[i].name.substr(-4).toLowerCase())===-1){
-                console.log(`primary ${event.files[i].type } HTML doc found: ${event.path}${event.files[i].name}`);
-                let fileBody = await common.readS3(event.path + event.files[i].name).catch(()=>{throw new Error(`unable to read ${event.path}${event.files[i].name}`)});
-                let hash = common.makeHash(fileBody);
-                if(tries.data.length && hash==tries.data[0].htmlhash){
-                    await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
-                } else {
-                    await common.runQuery(`update fin_sub set htmllength=${fileBody.length}, htmlhash='${hash}' where adsh='${event.adsh}'`);
-                    await parseIXBRL(cheerio.load(fileBody), submission);
-                    if(submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
-                    submission.primaryHTML = event.files[i].name;
-                    console.log(submission.counts);
-                }
-            } else {
-                console.log('WARNING: primary doc is .txt or .pdf file -> skip');
-            }
-            runGarbageCollection();
-        }
-        if(XBRLDocuments.XBRL[event.files[i].type]) {
-            console.log(`primary ${event.files[i].type } XBRL instance XML found: ${event.path}${event.files[i].name}`);
-            let fileBody = await common.readS3(event.path + event.files[i].name).catch(()=>{throw new Error('unable to read ' + event.path + event.files[i].name)});
-            console.log('read XML file');
-            let hash = common.makeHash(fileBody);
-            if(tries.data.length && hash==tries.data[0].xmlhash){
-                await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
-            } else {
-                await common.runQuery(`update fin_sub set xmllength=${fileBody.length}, xmlhash='${hash}' where adsh='${event.adsh}'`);
-
-                await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
-                if (submission.hasXBRL) submission.hasXBRL = event.files[i].name;
-                console.log(submission.counts);
-            }
-            runGarbageCollection();
-        }
+    //if no DB connectivity, error will be thrown to terminate process
+    try{
+        await common.logEvent('updateXBRLAPI '+ event.adsh, 'invoked', true); //await first call to get connection; otherwise multiple connections get made
+    } catch (e) {
+        let now = new Date();
+        connectionErrorTimeStamp = now.getTime();
+        console.log('db connection failure entering cool down period and re-throwing caught error to preserve message in queue');
+        throw e;
     }
 
-    //console.log(JSON.stringify(submission));
-    //save parsed submission object into DB and update APIs
-    if(submission.counts.standardFacts) {
-        let primaryCIK = deiValue('EntityCentralIndexKey', submission);
-        if(!submission.filing.filers[primaryCIK]){
-            await common.logEvent('ERROR updateXBRLAPI: primaryFiler not found: terminating!', submission.filing.path);
-            return {status: 'ERROR updateXBRLAPI: primaryFiler not found'};
+    const tries = await common.runQuery(`select htmlhash, xmlhash, tries, api_state from fin_sub where adsh = '${event.adsh}'`);
+    if(tries.data.length && tries.data[0].tries>=3)
+        return false;  //do not process after 3 tries!!!  End without error to remove item from SMS queue
+
+    //create / increment tries record before any processing and errors can occur
+    await common.runQuery(`insert into fin_sub (adsh, tries, api_state) values ('${event.adsh}', 1, 0) on duplicate key update tries = tries + 1`);
+
+    let submissionPreviouslyParsedToDB = tries.data.length && tries.data[0].api_state>=1;
+
+    if(!submissionPreviouslyParsedToDB ) {
+        let submission = {
+            filing: event,
+            counts: {
+                facts: 0,
+                standardFacts: 0,
+                units: 0,
+                contexts: 0
+            },
+            dei: {
+                EntityCentralIndexKey: [],
+                EntityCommonStockSharesOutstanding: [],
+                EntityFilerCategory: [],
+                EntityRegistrantName: []
+            },
+            namespaces: {},
+            contextTree: {},
+            unitTree: {},
+            facts: {}
+        };  //event = processIndexHeaders parsing of index-headers.html file
+
+        //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
+        for (let i = 0; i < event.files.length; i++) {
+            if (XBRLDocuments.iXBRL[event.files[i].type]) {
+                if (['.txt', '.pdf'].indexOf(event.files[i].name.substr(-4).toLowerCase()) === -1) {
+                    console.log(`primary ${event.files[i].type } HTML doc found: ${event.path}${event.files[i].name}`);
+                    let fileBody = await common.readS3(event.path + event.files[i].name).catch(() => {
+                        throw new Error(`unable to read ${event.path}${event.files[i].name}`)
+                    });
+                    let hash = common.makeHash(fileBody);
+                    if (tries.data.length && hash == tries.data[0].htmlhash) {
+                        await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
+                    } else {
+                        await common.runQuery(`update fin_sub set htmllength=${fileBody.length}, htmlhash='${hash}' where adsh='${event.adsh}'`);
+                        await parseIXBRL(cheerio.load(fileBody), submission);
+                        if (submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
+                        submission.primaryHTML = event.files[i].name;
+                        console.log(submission.counts);
+                    }
+                } else {
+                    console.log('WARNING: primary doc is .txt or .pdf file -> skip');
+                }
+                runGarbageCollection();
+            }
+            if (XBRLDocuments.XBRL[event.files[i].type]) {
+                console.log(`primary ${event.files[i].type } XBRL instance XML found: ${event.path}${event.files[i].name}`);
+                let fileBody = await common.readS3(event.path + event.files[i].name).catch(() => {
+                    throw new Error('unable to read ' + event.path + event.files[i].name)
+                });
+                console.log('read XML file');
+                let hash = common.makeHash(fileBody);
+                if (tries.data.length && hash == tries.data[0].xmlhash) {
+                    await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
+                } else {
+                    await common.runQuery(`update fin_sub set xmllength=${fileBody.length}, xmlhash='${hash}' where adsh='${event.adsh}'`);
+
+                    await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
+                    if (submission.hasXBRL) submission.hasXBRL = event.files[i].name;
+                    console.log(submission.counts);
+                }
+                runGarbageCollection();
+            }
         }
-        submission.primaryFiler = submission.filing.filers[primaryCIK];
-        submission.primaryFiler.cik = primaryCIK;
 
-        await saveXBRLSubmission(submission);
-        console.log('submission saved');
+        //save parsed submission object into DB and update APIs
+        if(submission.counts.standardFacts) {
+            let primaryCIK = deiValue('EntityCentralIndexKey', submission);
+            if(!submission.filing.filers[primaryCIK]){
+                await common.logEvent('ERROR updateXBRLAPI: primaryFiler not found: terminating!', submission.filing.path);
+                return {status: 'ERROR updateXBRLAPI: primaryFiler not found'};
+            }
+            submission.primaryFiler = submission.filing.filers[primaryCIK];
+            submission.primaryFiler.cik = primaryCIK;
 
-        const updateTSPromise = common.runQuery("call updateTimeSeries('"+submission.filing.adsh+"');");  //52ms runtime
+            await saveXBRLSubmission(submission);
+            console.log('submission saved');
+
+            const financialStatementsList = await common.runQuery("call listFinancialStatements('"+deiValue('EntityCentralIndexKey',submission)+"');"); //todo: maintain list for non-primaryFilers
+            //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
+            if(enableS3Writes) await common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(deiValue('EntityCentralIndexKey',submission), 10)+'.json', financialStatementsList.data[0][0].jsonList);
+            await common.runQuery(`update fin_sub set api_state=1 where adsh='${event.adsh}'`);
+        }
+
+
+        const updateTSPromise = common.runQuery("call updateTimeSeries('"+event.adsh+"');");  //52ms runtime
         //todo: have updateTSPromise  return all TS for cik/tag (not just UOM & QTRS updated)
 
         let updateAPIPromises = [];
-        const financialStatementsList = await common.runQuery("call listFinancialStatements('"+deiValue('EntityCentralIndexKey',submission)+"');"); //todo: maintain list for non-primaryFilers
-        //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
-        if(enableS3Writes) updateAPIPromises.push(common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(deiValue('EntityCentralIndexKey',submission), 10)+'.json', financialStatementsList.data[0][0].jsonList));
 
         //write to time series REST API in S3
         let startTSProcess = new Date();
         let updatedTimeSeriesAPIDataset = await updateTSPromise;  //updates and returns all TS for the tags in submission (note: more returned than updated)
 
         //start the Frames request = long running (after the time series finishes to space out the database requests)
-        const updateFramePromise = common.runQuery("call updateFrames2('"+submission.filing.adsh+"');");  //3,400ms runtime for 450 frames with 11y history
+        const updateFramePromise = common.runQuery("call updateFrames2('"+event.adsh+"');");  //3,400ms runtime for 450 frames with 11y history
         let lastCik = false,
             lastTag = false,
             oTimeSeries = {},
@@ -246,7 +275,8 @@ exports.handler = async (messageBatch, context) => {
     } else {
         await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
     }
-    await common.logEvent('updateXBRLAPI '+ event.adsh, 'completed with ' + submission.counts.standardFacts + ' standard facts parsed', true);
+    await common.runQuery(`update fin_sub set api_state=3 where adsh='${event.adsh}'`);
+    console.log('updateXBRLAPI '+ event.adsh + 'completed');
 
 };
 
@@ -556,7 +586,7 @@ async function saveXBRLSubmission(s){
         if(s.dei.EntityCentralIndexKey[i].value!=cik) aciks.push(s.dei.EntityCentralIndexKey[i].value)
     }
     let startProcess = new Date(),
-        sql = `update fin_sub 
+        subSQL = `update fin_sub 
             set cik=${cik}, name=${q(deiValue('EntityRegistrantName',s))}, 
                 sic=${s.primaryFiler.sic||0}, fye=${q(deiValue('CurrentFiscalYearEndDate',s).replace(/-/g,'').substr(-4,4))}, 
                 form=${q(deiValue('DocumentType',s))}, period=${q(deiValue('DocumentPeriodEndDate',s))}, fy=${q(deiValue('DocumentFiscalYearFocus',s))}, 
@@ -569,9 +599,9 @@ async function saveXBRLSubmission(s){
                 mas1=${q(s.primaryFiler.mailingAddress&&s.primaryFiler.mailingAddress.street1)}, mas2=${q(s.primaryFiler.mailingAddress&&s.primaryFiler.mailingAddress.street2)}, 
                 countryinc=${q(s.primaryFiler.incorporation?s.primaryFiler.incorporation.country:null)}, stprinc=${q(s.primaryFiler.incorporation?s.primaryFiler.incorporation.state:null)}, 
                 ein=${q(s.primaryFiler.ein)}, former='former', changed='changed', filercategory=${q(deiValue('EntityFilerCategory',s))}, 
-                accepted=${q(s.filing.acceptanceDateTime)}, prevrpt=null, detail=null, htmlfile=${ q(s.primaryHTML)}, instance=${q(s.hasIXBRL||s.hasXBRL)}, nciks=${s.dei.EntityCentralIndexKey.length}, aciks=${q(aciks.join(' '))}
+                accepted=${q(s.filing.acceptanceDateTime)}, prevrpt=null, detail=null, htmlfile=${ q(s.primaryHTML)}, instance=${q(s.hasIXBRL||s.hasXBRL)}, nciks=${s.dei.EntityCentralIndexKey.length}, 
+                aciks=${q(aciks.join(' '))}, api_state=1
             where adsh='${s.filing.adsh}'`;
-    await common.runQuery(sql);
 
     //save numerical fact records into fin_num
     console.log('saving facts...');
@@ -601,6 +631,7 @@ async function saveXBRLSubmission(s){
         }
     }
     if(i%1000!=0) await common.runQuery(numSQL);  // execute multi-row insert
+    await common.runQuery(subSQL);  //update api status and header only after the num records are written
     let endProcess = new Date();
     console.log('saveXBRLSubmission wrote ' + i + ' facts from '+s.dei.EntityRegistrantName.value+' ' + s.filing.form + ' for ' + s.filing.period + ' ('+ s.filing.adsh +') in ' + (endProcess-startProcess) + ' ms');
 }
