@@ -30,6 +30,8 @@ exports.handler = async (messageBatch, context) => {
         'D': '.xml',
         'D/A': '.xml'
     };
+    console.log('updateFormDAPI invoked for ' + formDEvent.adsh);
+
     let i;
     for (i = 0; i < formDevent.files.length; i++) {
         if (exemptOfferingsForms[formDevent.files[i].type] == formDevent.files[i].name.substr(-4).toLowerCase()
@@ -279,10 +281,11 @@ async function processFormDSubmission(submission, remainsChecking){
                 break;
             }
             if(offeringInFile.isAmendment && offeringInFile.previousAccessionNumber==submission.adsh) { //leave unchanged since API offering is the replacement of what was just ingested
-                await common.logEvent('WARNING updateFormDAPI older exempt offering ingested', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
+                await common.logEvent('WARNING updateFormDAPI older exempt offering ingested', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}), true);
                 break;
             }
-            await common.logEvent('WARNING updateFormDAPI multiple offerings', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}));
+            await common.logEvent('WARNING updateFormDAPI multiple offerings', JSON.stringify({cik: offeringInFile.cik, exisiting: {adsh: offeringInFile.adsh, isAmendment: offeringInFile.isAmendment}, new: {adsh: exemptOfferingSummary.adsh, isAmendment: exemptOfferingSummary.isAmendment}}), true);
+            break;
         }
     }
     if(i==exemptOfferingAPIObject.exemptOfferings.length) {

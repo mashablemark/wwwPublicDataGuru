@@ -27,10 +27,11 @@
 //     - write to S3: restdata.publicdata.guru/sec/
 //     - tell cloudFront to refresh the cache for the updated issuer API file
 
-// lambda execution time = 10s using a 512MB container
-// executions per year = 26,000
-// Lambda execution costs for updateXBRLAPI per year = $0.000000834 * 100 payment units of 100ms * 26,000 = $2.16 per year
-// CloudFront XBRL invalidation costs per year = 26,000 * (1 timeseries path +  320 frame paths) * $0.005 per invalidation path = $41,000 per year
+// lambda execution time = 13s using a 3GB container
+// executions per quarter = 7,500
+// Lambda execution costs for updateXBRLAPI per year = $0.000004897 * 130 payment units of 100ms * 7,500 = $4.76 per quarter
+// Note:  runs in rougher same time in 512MB contain, but crashes on a few very large XBRL submission.  Could possibly downsize by switching to a streaming parser instead of Cheerio
+
 
 // problem: simultaneous invalidation request limit of 3,0000 file invalidation & 15 path invalidation whereas peak filing day has 5,000 submissions * 320 changed frame generating 1,600,000 invalidation request
 // note: invalidate requests take 5 - 15 minutes (with some users reporting times up to 1 hour)
@@ -97,99 +98,99 @@ exports.handler = async (messageBatch, context) => {
     }
 
     const tries = await common.runQuery(`select htmlhash, xmlhash, tries, api_state from fin_sub where adsh = '${event.adsh}'`);
-    if(tries.data.length && tries.data[0].tries>=3)
+    if(tries.data.length && tries.data[0].tries>=3){
+        console.log('max retries exceeded.  Exiting and removing from SQS feeder queue');
         return false;  //do not process after 3 tries!!!  End without error to remove item from SMS queue
+    }
+    let submissionPreviouslyParsedToDB = tries.data.length && tries.data[0].api_state>=1; 
 
     //create / increment tries record before any processing and errors can occur
     await common.runQuery(`insert into fin_sub (adsh, tries, api_state) values ('${event.adsh}', 1, 0) on duplicate key update tries = tries + 1`);
 
-    let submissionPreviouslyParsedToDB = tries.data.length && tries.data[0].api_state>=1;
+    let submission = {
+        filing: event,
+        counts: {
+            facts: 0,
+            standardFacts: 0,
+            units: 0,
+            contexts: 0
+        },
+        dei: {
+            EntityCentralIndexKey: [],
+            EntityCommonStockSharesOutstanding: [],
+            EntityFilerCategory: [],
+            EntityRegistrantName: []
+        },
+        namespaces: {},
+        contextTree: {},
+        unitTree: {},
+        facts: {}
+    };  //event = processIndexHeaders parsing of index-headers.html file
 
-    if(!submissionPreviouslyParsedToDB ) {
-        let submission = {
-            filing: event,
-            counts: {
-                facts: 0,
-                standardFacts: 0,
-                units: 0,
-                contexts: 0
-            },
-            dei: {
-                EntityCentralIndexKey: [],
-                EntityCommonStockSharesOutstanding: [],
-                EntityFilerCategory: [],
-                EntityRegistrantName: []
-            },
-            namespaces: {},
-            contextTree: {},
-            unitTree: {},
-            facts: {}
-        };  //event = processIndexHeaders parsing of index-headers.html file
-
-        //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
-        for (let i = 0; i < event.files.length; i++) {
-            if (XBRLDocuments.iXBRL[event.files[i].type]) {
-                if (['.txt', '.pdf'].indexOf(event.files[i].name.substr(-4).toLowerCase()) === -1) {
-                    console.log(`primary ${event.files[i].type } HTML doc found: ${event.path}${event.files[i].name}`);
-                    let fileBody = await common.readS3(event.path + event.files[i].name).catch(() => {
-                        throw new Error(`unable to read ${event.path}${event.files[i].name}`)
-                    });
-                    let hash = common.makeHash(fileBody);
-                    if (tries.data.length && hash == tries.data[0].htmlhash) {
-                        await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
-                    } else {
-                        await common.runQuery(`update fin_sub set htmllength=${fileBody.length}, htmlhash='${hash}' where adsh='${event.adsh}'`);
-                        await parseIXBRL(cheerio.load(fileBody), submission);
-                        if (submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
-                        submission.primaryHTML = event.files[i].name;
-                        console.log(submission.counts);
-                    }
-                } else {
-                    console.log('WARNING: primary doc is .txt or .pdf file -> skip');
-                }
-                runGarbageCollection();
-            }
-            if (XBRLDocuments.XBRL[event.files[i].type]) {
-                console.log(`primary ${event.files[i].type } XBRL instance XML found: ${event.path}${event.files[i].name}`);
+    //loop through submission files looking for primary HTML document and Exhibit 101 XBRL XML documents
+    for (let i = 0; i < event.files.length; i++) {
+        if (XBRLDocuments.iXBRL[event.files[i].type]) {
+            if (['.txt', '.pdf'].indexOf(event.files[i].name.substr(-4).toLowerCase()) === -1) {
+                console.log(`primary ${event.files[i].type } HTML doc found: ${event.path}${event.files[i].name}`);
                 let fileBody = await common.readS3(event.path + event.files[i].name).catch(() => {
-                    throw new Error('unable to read ' + event.path + event.files[i].name)
+                    throw new Error(`unable to read ${event.path}${event.files[i].name}`)
                 });
-                console.log('read XML file');
-                let hash = common.makeHash(fileBody);
-                if (tries.data.length && hash == tries.data[0].xmlhash) {
+                submission.hashIXBRL = common.makeHash(fileBody);
+                if (tries.data.length && submission.hashIXBRL == tries.data[0].htmlhash && submissionPreviouslyParsedToDB) {
                     await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
                 } else {
-                    await common.runQuery(`update fin_sub set xmllength=${fileBody.length}, xmlhash='${hash}' where adsh='${event.adsh}'`);
-
-                    await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
-                    if (submission.hasXBRL) submission.hasXBRL = event.files[i].name;
+                    await common.runQuery(`update fin_sub set htmllength=${fileBody.length}, htmlhash='${submission.hashIXBRL}' where adsh='${event.adsh}'`);
+                    await parseIXBRL(cheerio.load(fileBody), submission);
+                    if (submission.hasIXBRL) submission.hasIXBRL = event.files[i].name;
+                    submission.primaryHTML = event.files[i].name;
                     console.log(submission.counts);
                 }
-                runGarbageCollection();
+            } else {
+                console.log('WARNING: primary doc is .txt or .pdf file -> skip');
             }
+            runGarbageCollection();
         }
-
-        //save parsed submission object into DB and update APIs
-        if(submission.counts.standardFacts) {
-            let primaryCIK = deiValue('EntityCentralIndexKey', submission);
-            if(!submission.filing.filers[primaryCIK]){
-                await common.logEvent('ERROR updateXBRLAPI: primaryFiler not found: terminating!', submission.filing.path);
-                return {status: 'ERROR updateXBRLAPI: primaryFiler not found'};
+        if (XBRLDocuments.XBRL[event.files[i].type]) {
+            console.log(`primary ${event.files[i].type } XBRL instance XML found: ${event.path}${event.files[i].name}`);
+            let fileBody = await common.readS3(event.path + event.files[i].name).catch(() => {
+                throw new Error('unable to read ' + event.path + event.files[i].name)
+            });
+            console.log('read XML file');
+            submission.hashXBRL = common.makeHash(fileBody);
+            if (tries.data.length && submission.hashXBRL == tries.data[0].xmlhash && submissionPreviouslyParsedToDB) {
+                await common.logEvent('WARNING updateXBRLAPI', `duplicate processing detected and avoided for ${event.path}${event.files[i].name}`, true);
+            } else {
+                await common.runQuery(`update fin_sub set xmllength=${fileBody.length}, xmlhash='${submission.hashXBRL}' where adsh='${event.adsh}'`);
+                await parseXBRL(cheerio.load(fileBody, {xmlMode: true}), submission);
+                if (submission.hasXBRL) submission.hasXBRL = event.files[i].name;
+                console.log(submission.counts);
             }
-            submission.primaryFiler = submission.filing.filers[primaryCIK];
-            submission.primaryFiler.cik = primaryCIK;
-
-            await saveXBRLSubmission(submission);
-            console.log('submission saved');
-
-            const financialStatementsList = await common.runQuery("call listFinancialStatements('"+deiValue('EntityCentralIndexKey',submission)+"');"); //todo: maintain list for non-primaryFilers
-            //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
-            if(enableS3Writes) await common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(deiValue('EntityCentralIndexKey',submission), 10)+'.json', financialStatementsList.data[0][0].jsonList);
-            await common.runQuery(`update fin_sub set api_state=1 where adsh='${event.adsh}'`);
+            runGarbageCollection();
         }
+    }
+
+    //save parsed submission object into DB and update APIs
+    if(submission.counts.standardFacts) {
+        let primaryCIK = deiValue('EntityCentralIndexKey', submission);
+        if(!submission.filing.filers[primaryCIK]){
+            await common.logEvent('ERROR updateXBRLAPI: primaryFiler not found: terminating!', submission.filing.path);
+            return {status: 'ERROR updateXBRLAPI: primaryFiler not found'};
+        }
+        submission.primaryFiler = submission.filing.filers[primaryCIK];
+        submission.primaryFiler.cik = primaryCIK;
+
+        await saveXBRLSubmission(submission);
+        console.log('submission saved');
+
+        const financialStatementsList = await common.runQuery("call listFinancialStatements('"+deiValue('EntityCentralIndexKey',submission)+"');"); //todo: maintain list for non-primaryFilers
+        //todo: add list properties: (1) "statement": path to primary HTML doc (2) "isIXBRL" boolean
+        if(enableS3Writes) await common.writeS3(rootS3Folder+'/financialStatementsByCompany/cik'+parseInt(deiValue('EntityCentralIndexKey',submission), 10)+'.json', financialStatementsList.data[0][0].jsonList);
+        await common.runQuery(`update fin_sub set api_state=1 where adsh='${event.adsh}'`);
+    }
 
 
-        const updateTSPromise = common.runQuery("call updateTimeSeries('"+event.adsh+"');");  //52ms runtime
+    if(submission.counts.standardFacts || (tries.data.length && tries.data[0].api_state==1)) {
+        const updateTSPromise = common.runQuery("call updateTimeSeries('" + event.adsh + "');");  //52ms runtime
         //todo: have updateTSPromise  return all TS for cik/tag (not just UOM & QTRS updated)
 
         let updateAPIPromises = [];
@@ -199,7 +200,7 @@ exports.handler = async (messageBatch, context) => {
         let updatedTimeSeriesAPIDataset = await updateTSPromise;  //updates and returns all TS for the tags in submission (note: more returned than updated)
 
         //start the Frames request = long running (after the time series finishes to space out the database requests)
-        const updateFramePromise = common.runQuery("call updateFrames2('"+event.adsh+"');");  //3,400ms runtime for 450 frames with 11y history
+        const updateFramePromise = common.runQuery("call updateFrames2('" + event.adsh + "');");  //3,400ms runtime for 450 frames with 11y history
         let lastCik = false,
             lastTag = false,
             oTimeSeries = {},
@@ -207,11 +208,11 @@ exports.handler = async (messageBatch, context) => {
             i,
             timeSeriesFileCount = 0;
         //note:  stored procedures return select results (data[0]) and the status (data[1]) as a 2-element array
-        console.log('count of TS to update: '+updatedTimeSeriesAPIDataset.data[0].length);
-        for(i=0; i<updatedTimeSeriesAPIDataset.data[0].length;i++) {
+        console.log('count of TS to update: ' + updatedTimeSeriesAPIDataset.data[0].length);
+        for (i = 0; i < updatedTimeSeriesAPIDataset.data[0].length; i++) {
             let ts = updatedTimeSeriesAPIDataset.data[0][i];
-            if(lastCik && lastTag && (lastCik != ts.cik || lastTag != ts.tag)) {
-                if(enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));
+            if (lastCik && lastTag && (lastCik != ts.cik || lastTag != ts.tag)) {
+                if (enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));
                 oTimeSeries = {};
                 timeSeriesFileCount++;
             }
@@ -235,20 +236,24 @@ exports.handler = async (messageBatch, context) => {
             }
             oTimeSeries[ts.tag][cikKey]["units"][ts.uom][qtrs] = JSON.parse(ts.json);  //DQ = duration in quarters
         }
-        if(enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
+        if (enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(oTimeSeries)));  //write of final rollup
         timeSeriesFileCount++;
         let endTSProcess = new Date();
-        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series from '+deiValue('EntityRegistrantName', submission)+' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        console.log('processed and (enableS3Writes = ' + enableS3Writes.toString() + ') made write promises for ' + timeSeriesFileCount + ' S3 object write(s) containing ' + i + ' time series  from ' + submission.filing.adsh + ' ('+ submission.filing.form + ' for ' + submission.filing.period + ') in ' + (endTSProcess - startTSProcess) + ' ms');
 
         //write to frame REST API in S3 by looping through list of parsed facts and updating the DB's JSON object rather than recreating = too DB intensive
+
+        let startFrameProcess = new Date();
         let updatedFramesAPIDataset = await updateFramePromise;
-        for(i=0; i<updatedFramesAPIDataset.data[0].length;i++) {
+        for (i = 0; i < updatedFramesAPIDataset.data[0].length; i++) {
             let frame = updatedFramesAPIDataset.data[0][i];
             try {
                 let frameDataArray = JSON.parse(frame.json);  //note:  apiWriteFramesAPI.py does this replace too before writing to S3
-                frameDataArray.sort((a,b)=>{return a.cik-b.cik}); //necessary when appending new cki to existing frame
-                s3Key = rootS3Folder + '/frames/' + frame.tag + '/' + frame.uom + '/'+ frame.ccp +'.json';
-                if(enableS3Writes)  updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(
+                frameDataArray.sort((a, b) => {
+                    return a.cik - b.cik
+                }); //necessary when appending new cki to existing frame
+                s3Key = rootS3Folder + '/frames/' + frame.tag + '/' + frame.uom + '/' + frame.ccp + '.json';
+                if (enableS3Writes) updateAPIPromises.push(common.writeS3(s3Key, JSON.stringify(
                     {
                         tag: frame.tag,
                         ccp: frame.ccp,
@@ -263,21 +268,21 @@ exports.handler = async (messageBatch, context) => {
                 throw e;
             }
         }
-
-        console.log('processed and (enableS3Writes = '+enableS3Writes.toString() +') updated/created ' + updatedFramesAPIDataset.data[0].length + ' frames from '+ deiValue('EntityRegistrantName', submission) +' ' + submission.filing.form + ' for ' + submission.filing.period + ' ('+ submission.filing.adsh +') in ' + (endTSProcess-startTSProcess) + ' ms');
+        let endFrameProcess = new Date();
+        console.log('processed and (enableS3Writes = ' + enableS3Writes.toString() + ') updated/created ' + updatedFramesAPIDataset.data[0].length + ' frames from ' +  submission.filing.adsh + ' ('+ submission.filing.form + ' for ' + submission.filing.period + ') in ' + (endFrameProcess - endTSProcess) + ' ms');
 
         //promise collection
-        for(let i=0;i<updateAPIPromises.length;i++){
+        for (let i = 0; i < updateAPIPromises.length; i++) {
             await updateAPIPromises[i];
         }
-        console.log(`awaited ${updateAPIPromises.length} S3 Promises for updating API file`);
+        let endPromiseCollection = new Date();
 
+        console.log(`awaited ${updateAPIPromises.length} S3 Promises for updating API files in ${endPromiseCollection.getTime()-endFrameProcess.getTime()} ms`);
     } else {
-        await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
+        if(!tries.data.length) await common.logEvent('WARNING updateXBRLAPI: no iXBRL/XBRL found' , event.path+'/'+event.adsh+'-index.html', true);
     }
-    await common.runQuery(`update fin_sub set api_state=3 where adsh='${event.adsh}'`);
-    console.log('updateXBRLAPI '+ event.adsh + 'completed');
-
+    await common.runQuery(`update fin_sub set api_state=2 where adsh='${event.adsh}'`);
+    console.log('updateXBRLAPI '+ event.adsh + ' completed');
 };
 
 function parseXBRL($, submission){
@@ -661,133 +666,15 @@ function runGarbageCollection(){
 
 /*//////////////////// TEST CARDS  - COMMENT OUT WHEN LAUNCHING AS LAMBDA/////////////////////////
 // TEST Card A: iXBRL 10Q:  https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index.htm
-const event = 	{
-    "path": "sec/edgar/data/29905/000002990519000029\",
-    "adsh": "0000029905-19-000029",
-    "cik": "0000029905",
-    "fileNum": "001-04018",
-    "form": "10-Q",
-    "filingDate": "20190418",
-    "period": "20190331",
-    "acceptanceDateTime": "20190418072005",
-    "indexHeaderFileName": "sec/edgar/data/29905/000002990519000029/0000029905-19-000029-index-headers.html",
-    "files": [
-        {
-            "name": "dov-20190331.htm",
-            "description": "10-Q",
-            "type": "10-Q"
-        },
-        {
-            "name": "a2019033110-qex101.htm",
-            "description": "EX - 10.1",
-            "type": "EX-10.1"
-        },
-        {
-            "name": "a2019033110-qexhibit102.htm",
-            "description": "EX - 10.2",
-            "type": "EX-10.2"
-        },
-        {
-            "name": "a2019033110-qexhibit103.htm",
-            "description": "EX - 10.3",
-            "type": "EX-10.3"
-        },
-        {
-            "name": "a2019033110-qex104.htm",
-            "description": "EX - 10.4",
-            "type": "EX-10.4"
-        },
-        {
-            "name": "a2019033110-qexhibit311.htm",
-            "description": "EX - 31.1",
-            "type": "EX-31.1"
-        },
-        {
-            "name": "a2019033110-qexhibit312.htm",
-            "description": "EX - 31.2",
-            "type": "EX-31.2"
-        },
-        {
-            "name": "a2019033110-qexhibit32.htm",
-            "description": "EX - 32",
-            "type": "EX-32"
-        },
-        {
-            "name": "dov-20190331.xsd",
-            "description": "XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT",
-            "type": "EX-101.SCH"
-        },
-        {
-            "name": "dov-20190331_cal.xml",
-            "description": "XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT",
-            "type": "EX-101.CAL"
-        },
-        {
-            "name": "dov-20190331_def.xml",
-            "description": "XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT",
-            "type": "EX-101.DEF"
-        },
-        {
-            "name": "dov-20190331_lab.xml",
-            "description": "XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT",
-            "type": "EX-101.LAB"
-        },
-        {
-            "name": "dov-20190331_pre.xml",
-            "description": "XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT",
-            "type": "EX-101.PRE"
-        },
-        {
-            "name": "dov-20190331_g1.jpg",
-            "type": "GRAPHIC"
-        },
-        {
-            "name": "image1.jpg",
-            "type": "GRAPHIC"
-        },
-        {
-            "name": "image2.jpg",
-            "type": "GRAPHIC"
-        },
-        {
-            "name": "image3.jpg",
-            "type": "GRAPHIC"
-        }
-    ],
-    "bucket": "restapi.publicdata.guru",
-    "sic": "3530",
-    "ein": "530257888",
-    "incorporation": {
-        "state": "DE",
-        "country": false
-    },
-    "businessAddress": {
-        "street1": "3005 HIGHLAND PARKWAY",
-        "street2": "SUITE 200",
-        "city": "DOWNERS GROVE",
-        "state": "IL",
-        "zip": "60515",
-        "phone": "(630) 541-1540"
-    },
-    "mailingAddress": {
-        "street1": "3005 HIGHLAND PARKWAY",
-        "street2": "SUITE 200",
-        "city": "DOWNERS GROVE",
-        "state": "IL",
-        "zip": "60515",
-        "phone": false
-    }
-};
-exports.handler(event);
-///////////////////////////////////////////////////////////////////////////////////////////////*/
 
-
-/*////////////////////////////////////////////////////////////////////////////////////////////////
-// TEST Card B: XBRL 10K:  https://www.sec.gov/Archives/edgar/data/1000180/000100018016000068/0001000180-16-000068-index.htm
+const messageBatch =
 {
-    "Records": [
-        {"body": "{\"path\":\"sec/edgar/data/1000180/000100018016000068/\",\"adsh\":\"0001000180-16-000068\",\"cik\":\"0001000180\",\"fileNum\":\"000-26734\",\"form\":\"10-K\",\"filingDate\":\"20160212\",\"period\":\"20160103\",\"acceptanceDateTime\":\"20160212170356\",\"indexHeaderFileName\":\"sec/edgar/data/1000180/000100018016000068/0001000180-16-000068-index-headers.html\",\"files\":[{\"name\":\"sndk201510-k.htm\",\"description\":\"FORM 10-K FY15\",\"type\":\"10-K\"},{\"name\":\"sndkex-1037xnewy2facilitya.htm\",\"description\":\"NEW Y2 FACILITY AGREEMENT\",\"type\":\"EX-10.37\"},{\"name\":\"sndkex-121xratioofearnings.htm\",\"description\":\"COMPUTATION OF RATIO TO FIXED CHARGES\",\"type\":\"EX-12.1\"},{\"name\":\"sndkex-211xsignificantsubs.htm\",\"description\":\"SUBSIDIARIES OF THE REGISTRANT\",\"type\":\"EX-21.1\"},{\"name\":\"sndkex-231xconsentofindepe.htm\",\"description\":\"CONSENT OF INDEPENDENT REGISTERED PUBLIC ACCOUNTING FIRM\",\"type\":\"EX-23.1\"},{\"name\":\"sndkex-311xsoxceocertfy15.htm\",\"description\":\"CEO CERTIFICATION TO SECTION 302\",\"type\":\"EX-31.1\"},{\"name\":\"sndkex-312xsoxcfocertfy15.htm\",\"description\":\"CFO CERTIFICATION TO SECTION 302\",\"type\":\"EX-31.2\"},{\"name\":\"sndkex-321xsec906ceocertfy.htm\",\"description\":\"CEO CERTIFICATION TO SECTION 906\",\"type\":\"EX-32.1\"},{\"name\":\"sndkex-322xsec906cfocertfy.htm\",\"description\":\"CFO CERTIFICATION TO SECTION 906\",\"type\":\"EX-32.2\"},{\"name\":\"sndk-20160103.xml\",\"description\":\"XBRL INSTANCE DOCUMENT\",\"type\":\"EX-101.INS\"},{\"name\":\"sndk-20160103.xsd\",\"description\":\"XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT\",\"type\":\"EX-101.SCH\"},{\"name\":\"sndk-20160103_cal.xml\",\"description\":\"XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT\",\"type\":\"EX-101.CAL\"},{\"name\":\"sndk-20160103_def.xml\",\"description\":\"XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT\",\"type\":\"EX-101.DEF\"},{\"name\":\"sndk-20160103_lab.xml\",\"description\":\"XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT\",\"type\":\"EX-101.LAB\"},{\"name\":\"sndk-20160103_pre.xml\",\"description\":\"XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT\",\"type\":\"EX-101.PRE\"},{\"name\":\"performancegraph2015.jpg\",\"type\":\"GRAPHIC\"},{\"name\":\"sndk.jpg\",\"type\":\"GRAPHIC\"}],\"bucket\":\"restapi.publicdata.guru\",\"sic\":\"3572\",\"ein\":\"770191793\",\"incorporation\":{\"state\":\"DE\",\"country\":false},\"businessAddress\":{\"street1\":\"951 SANDISK DRIVE\",\"street2\":false,\"city\":\"MILPITAS\",\"state\":\"CA\",\"zip\":\"95035\",\"phone\":\"408-801-1000\"},\"mailingAddress\":{\"street1\":\"951 SANDISK DRIVE\",\"street2\":false,\"city\":\"MILPITAS\",\"state\":\"CA\",\"zip\":\"95035\",\"phone\":false}}"
-        }
-    ]
+  "Records": [
+    {
+      "body": "{\"path\":\"sec/edgar/data/1000180/000100018016000068/\",\"ciks\":[\"0001000180\"],\"adsh\":\"0001000180-16-000068\",\"fileNum\":\"000-26734\",\"form\":\"10-K\",\"filingDate\":\"20160212\",\"period\":\"20160103\",\"acceptanceDateTime\":\"20160212170356\",\"indexHeaderFileName\":\"sec/edgar/data/1000180/000100018016000068/0001000180-16-000068-index-headers.html\",\"files\":[{\"name\":\"sndk201510-k.htm\",\"description\":\"FORM 10-K FY15\",\"type\":\"10-K\"},{\"name\":\"sndkex-1037xnewy2facilitya.htm\",\"description\":\"NEW Y2 FACILITY AGREEMENT\",\"type\":\"EX-10.37\"},{\"name\":\"sndkex-121xratioofearnings.htm\",\"description\":\"COMPUTATION OF RATIO TO FIXED CHARGES\",\"type\":\"EX-12.1\"},{\"name\":\"sndkex-211xsignificantsubs.htm\",\"description\":\"SUBSIDIARIES OF THE REGISTRANT\",\"type\":\"EX-21.1\"},{\"name\":\"sndkex-231xconsentofindepe.htm\",\"description\":\"CONSENT OF INDEPENDENT REGISTERED PUBLIC ACCOUNTING FIRM\",\"type\":\"EX-23.1\"},{\"name\":\"sndkex-311xsoxceocertfy15.htm\",\"description\":\"CEO CERTIFICATION TO SECTION 302\",\"type\":\"EX-31.1\"},{\"name\":\"sndkex-312xsoxcfocertfy15.htm\",\"description\":\"CFO CERTIFICATION TO SECTION 302\",\"type\":\"EX-31.2\"},{\"name\":\"sndkex-321xsec906ceocertfy.htm\",\"description\":\"CEO CERTIFICATION TO SECTION 906\",\"type\":\"EX-32.1\"},{\"name\":\"sndkex-322xsec906cfocertfy.htm\",\"description\":\"CFO CERTIFICATION TO SECTION 906\",\"type\":\"EX-32.2\"},{\"name\":\"sndk-20160103.xml\",\"description\":\"XBRL INSTANCE DOCUMENT\",\"type\":\"EX-101.INS\"},{\"name\":\"sndk-20160103.xsd\",\"description\":\"XBRL TAXONOMY EXTENSION SCHEMA DOCUMENT\",\"type\":\"EX-101.SCH\"},{\"name\":\"sndk-20160103_cal.xml\",\"description\":\"XBRL TAXONOMY EXTENSION CALCULATION LINKBASE DOCUMENT\",\"type\":\"EX-101.CAL\"},{\"name\":\"sndk-20160103_def.xml\",\"description\":\"XBRL TAXONOMY EXTENSION DEFINITION LINKBASE DOCUMENT\",\"type\":\"EX-101.DEF\"},{\"name\":\"sndk-20160103_lab.xml\",\"description\":\"XBRL TAXONOMY EXTENSION LABEL LINKBASE DOCUMENT\",\"type\":\"EX-101.LAB\"},{\"name\":\"sndk-20160103_pre.xml\",\"description\":\"XBRL TAXONOMY EXTENSION PRESENTATION LINKBASE DOCUMENT\",\"type\":\"EX-101.PRE\"},{\"name\":\"performancegraph2015.jpg\",\"type\":\"GRAPHIC\"},{\"name\":\"sndk.jpg\",\"type\":\"GRAPHIC\"}],\"crawlerOverrides\":{\"tableSuffix\":\"\"},\"bucket\":\"restapi.publicdata.guru\",\"filers\":{\"0001000180\":{\"sic\":\"3572\",\"ein\":\"770191793\",\"incorporation\":{\"state\":\"DE\",\"country\":false},\"businessAddress\":{\"street1\":\"951 SANDISK DRIVE\",\"street2\":false,\"city\":\"MILPITAS\",\"state\":\"CA\",\"zip\":\"95035\",\"phone\":\"408-801-1000\"},\"mailingAddress\":{\"street1\":\"951 SANDISK DRIVE\",\"street2\":false,\"city\":\"MILPITAS\",\"state\":\"CA\",\"zip\":\"95035\",\"phone\":false}}},\"timeStamp\":1565186559513}"
+    }
+  ]
 }
+
+
 */

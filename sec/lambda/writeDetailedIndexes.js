@@ -19,25 +19,26 @@ exports.handler = async (event, context) => {
     if(subDS.data && subDS.data[0] && subDS.data[0].length){
         //start fetching all required indexes at the same time with promises
         let requiredDailyIndexesPromises = {}, requiredDailyIndexes = {};
-        console.log('fetched index for and processing '+subDS.data[0].length+' new submissions');
+        console.log('fetching index(es) for '+subDS.data[0].length+' new submissions');
         for(let i=0;i<subDS.data[0].length;i++){  //ordered by acceptancedatatime
             let disseminationDate = common.getDisseminationDate(subDS.data[0][i].acceptancedatetime);
             let indexDate = disseminationDate.toISOString().substr(0,10);
+            if(indexDate<subDS.data[0][i].filingDate) indexDate = subDS.data[0][i].filingDate;
             if(!requiredDailyIndexesPromises[indexDate]) requiredDailyIndexesPromises[indexDate] = fetchDailyIndex(disseminationDate);
         }
         //collect all fetch promises
         for(let indexDate in requiredDailyIndexesPromises) requiredDailyIndexes[indexDate] = await requiredDailyIndexesPromises[indexDate];
 
         //push all new submissions onto all indexes
-        for(let i=0;i<subDS.data[0].length;i++){ //ordered by acceptancedatatime
+        for(let i=0;i<subDS.data[0].length;i++){ //ordered by acceptancedatetime
             let disseminationDate = common.getDisseminationDate(subDS.data[0][i].acceptancedatetime);
             let indexDate = disseminationDate.toISOString().substr(0,10);
+            if(indexDate<subDS.data[0][i].filingDate) indexDate = subDS.data[0][i].filingDate;
             let newSub = JSON.parse(subDS.data[0][i].json);
             requiredDailyIndexes[indexDate].submissions.push(newSub);
             dailyIndex = requiredDailyIndexes[indexDate];  //keep the most recent index used in module scope for reuse on next call
         }
 
-        console.log('fetched and processed '+subDS.data[0].length+' new submissions into '+requiredDailyIndexesPromises.length+' different daily indexes');
 
         //first write last-10 micro index
         const last10IndexBody = {
@@ -52,6 +53,7 @@ exports.handler = async (event, context) => {
         //next get write promises for the micro index and daily indexes that need writing out
         const writePromises = [];
         writePromises.push(common.writeS3(root+"/indexes/last10EDGARSubmissionsFastIndex.json",JSON.stringify(last10IndexBody)));
+        console.log('made write promise for micro index; about to make the daily index write promises');
 
         for(let indexDate in requiredDailyIndexes){
             let dailyIndexToWrite = requiredDailyIndexes[indexDate];
@@ -61,7 +63,7 @@ exports.handler = async (event, context) => {
                  , JSON.stringify(dailyIndexToWrite)));
         }
 
-        //collect the write promises
+        console.log('about to collect the write promises');
         for(let i=0;i<writePromises.length;i++) {
             await writePromises[i];
         }
@@ -91,6 +93,7 @@ async function fetchDailyIndex(disseminationDate){
                     reject(e);  //leave evidence for analysis: don't overwrite
                 }
             } catch (e) {
+                console.log('creating new daily index for '+ indexDate);
                 resolve({
                     "title": "daily EDGAR file index with file manifest for " + indexDate,
                     "format": "JSON",

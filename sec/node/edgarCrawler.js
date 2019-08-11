@@ -31,8 +31,8 @@ const s3 = new AWS.S3();
 const targetFormTypes= {
     //'S-1': 'noProcessing',
     //'S-1/A': 'noProcessing',
-    'D': 'syncProcessing',
-    'D/A': 'syncProcessing',
+    'D': 'asyncProcessing',
+    'D/A': 'asyncProcessing',
     '3': 'asyncProcessing',
     '3/A': 'asyncProcessing',
     '4': 'asyncProcessing',
@@ -56,10 +56,11 @@ const processControl = {
         year: 2016,
         q: 1
     },
+    triggerOnAllForms: true,
     getIndexHtmlOnly: false,
     updateAPIs: true,
     offset: 0, //REMOVE OR SET TO 0 TO ENSURE FULL SCRAPE AFTER TESTING
-    stickyFetch: true, // once a fetch to sec.gov is needed (not found in restapi.publicdata.guru bucket), skip all future local read attempts to speed up new batch
+    stickyFetch: false, // once a fetch to sec.gov is needed (not found in restapi.publicdata.guru bucket), skip all future local read attempts to speed up new batch
     lastDownloadTime: false,
     retrigger: false  //master mode determines whether existing index-headers.htm are rewritten if already exist to retrigger Lambda function
 };
@@ -113,7 +114,8 @@ async function ingestNextQuarter(processControl){
 async function processQuarterlyIndex(processControl, callback) {
     let idxUrl = processControl.indexUrl;
     logEvent('quarter ingest', 'fetching ' + idxUrl, true);
-    let indexBody = await fetch(processControl, processControl.indexUrl, true);
+    let indexFetchObject = await fetch(processControl, processControl.indexUrl, true);
+    let indexBody = indexFetchObject.body;
     let lines = indexBody.split('\n');
     lines.splice(0,11); // ditch header rows
     //ensure that we index files by oldest to latest
@@ -126,18 +128,18 @@ async function processQuarterlyIndex(processControl, callback) {
             if(processControl.getIndexHtmlOnly){
                 await getIndexHtmlOnly(lineParts, lineNum);
             } else {
-                if (targetFormTypes[lineParts[indexLineFields.FormType]]) {
+                if (targetFormTypes[lineParts[indexLineFields.FormType]] || processControl.triggerOnAllForms) {
                     processControl[lineParts[indexLineFields.FormType]] = (processControl[lineParts[indexLineFields.FormType]] || 0) + 1;
                     processControl.progress = Math.round(lineNum/lines.length*1000)/10+'%';
                     //await getSubmission(lineParts, lineNum);
 
-                    let updateProcess = targetFormTypes[lineParts[indexLineFields.FormType]];
+                    let updateProcess = targetFormTypes[lineParts[indexLineFields.FormType]] || 'asyncProcessing';
                     if(updateProcess != 'noProcessing'){
                         if(updateProcess == 'syncProcessing') {
                             processIndexHeader(lineParts);
                             await wait(200);  //process 10 submissions / second
                         } else {
-                            processIndexHeader(lineParts);
+                            processIndexHeader(lineParts, true);
                             await wait(200);  //process 10 submissions / second
                         }
                     }
@@ -155,7 +157,8 @@ async function processQuarterlyIndex(processControl, callback) {
         let adsh = submissionPathParts.pop().split('.')[0];
         let submissionPath = submissionPathParts.join('/') + '/' + adsh.replace(/-/g, '') + '/';
         let indexHtmlFilename = submissionPath + adsh + '-index.html';
-        let indexHtmlBody = await fetch(processControl, indexHtmlFilename, true);
+        let indexHtmlFetchObject = await fetch(processControl, indexHtmlFilename, true);
+        let indexHtmlBody = indexHtmlFetchObject.body;
         return (indexHtmlBody.indexOf ? indexHtmlBody.indexOf('<div id="PageTitle">Filing Detail</div>')!=-1 : false);
     }
 
@@ -166,7 +169,8 @@ async function processQuarterlyIndex(processControl, callback) {
         let indexHeaderFilename = submissionPath + adsh + '-index-headers.html';
         let oldFetchCount = processControl.fetchCount;
         console.log(lineNum + ': ' + lineParts[indexLineFields.FormType] + ' ' + indexHeaderFilename);
-        let indexHeaderBody = await fetch(processControl, indexHeaderFilename, false);  //must be saved after other files present
+        let indexHeaderFetchObject = await fetch(processControl, indexHeaderFilename, false);  //must be saved after other files present
+        let indexHeaderBody = indexHeaderFetchObject.body;
         let fetchedIndexHeader = oldFetchCount != processControl.fetchCount;
         let links = indexHeaderBody.match(/<a href="\S+\.(html|htm|xml)"/g);
         let i;
@@ -217,7 +221,7 @@ async function fetch(processControl, fileName, autosave){
                     fetchFromSEC();
                 } else {
                     processControl.getCount = (processControl.getCount||0) + 1;
-                    resolve(data.Body.toString('utf-8'));
+                    resolve({source: "s3", body: data.Body.toString('utf-8')});
                 }
             });
         }
@@ -238,7 +242,7 @@ async function fetch(processControl, fileName, autosave){
                         processControl.fetchCount = (processControl.fetchCount || 0) + 1;
                         //console.log('fetched byte count: ' + body.length);
                         if (autosave) await put(processControl, body, fileName);
-                        resolve(body);
+                        resolve({source: "sec", body: body});
                     }
                 });
             }, waitTime);
@@ -305,49 +309,57 @@ function runQuery(sql, callback, retryFlag){
     }
 }
 
-async function processIndexHeader(lineParts){
+async function processIndexHeader(lineParts, asyncProcessing){
     let submissionPathParts = lineParts[indexLineFields.Filename].split('/');
     let adsh = submissionPathParts.pop().split('.')[0];
     let submissionPath = submissionPathParts.join('/') + '/' + adsh.replace(/-/g, '') + '/';
     let indexHeaderFilename = submissionPath + adsh + '-index-headers.html';
-    return new Promise((resolve, reject) => {
-        let lambda = new AWS.Lambda({
-            region: 'us-east-1'
-        });
-        let fakeS3Event = {
-            //event object description https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html
-            Records: [
+
+    return new Promise(async (resolve, reject) => {
+        let fetchObject = await fetch(processControl, indexHeaderFilename, true);
+        if(fetchObject.source=="s3"){
+            let lambda = new AWS.Lambda({
+                region: 'us-east-1'
+            });
+            let fakeS3Event = {
+                //event object description https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html
+                Records: [
+                    {
+                        s3: {
+                            bucket: {name: "restapi.publicdata.guru"},
+                            object: {key: "sec/"+indexHeaderFilename}
+                        }
+                    }
+                ],
+                crawlerOverrides: {
+                    noLatestIndexProcessing: false,
+                    tableSuffix: '_2016q1',
+                    body: fetchObject.body,  //no need to fetch it twice
+                }
+            };
+
+            let payload = JSON.stringify(fakeS3Event, null, 2); // include all props with 2 spaces (not sure if truly required)
+            let li = lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
                 {
-                    s3: {
-                        bucket: {name: "restapi.publicdata.guru"},
-                        object: {key: "sec/"+indexHeaderFilename}
+                    FunctionName: 'processIndexHeaders',
+                    Payload: payload,
+                    InvocationType: asyncProcessing ? 'Event' : 'RequestResponse' //async (event) will retire and send repeat failures to deadletter queue
+                },
+                function (error, data) {
+                    if (error) {
+                        console.log(error);
+                        reject(error);
+                    }
+                    if (data.Payload) {
+                        resolve(data.Payload);
+                    } else {
+                        resolve(0);
                     }
                 }
-            ],
-            crawlerOverrides: {
-                noLatestIndexProcessing: true,
-                tableSuffix: '_2016q1'
-            }
-        };
+            );
 
-        let payload = JSON.stringify(fakeS3Event, null, 2); // include all props with 2 spaces (not sure if truly required)
-        let li = lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
-            {
-                FunctionName: 'processIndexHeaders',
-                Payload: payload,
-                InvocationType: 'RequestResponse'  //synchronous
-            },
-            function (error, data) {
-                if (error) {
-                    console.log(error);
-                    reject(error);
-                }
-                if (data.Payload) {
-                    resolve(data.Payload);
-                } else {
-                    resolve(0);
-                }
-            }
-        );
+        } else {
+            resolve(0);  //if source was SEC, the object was written to S3 triggering processIndexHeaders Lambda function
+        }
     })
 }
