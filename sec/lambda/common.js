@@ -125,7 +125,7 @@ let me = {
     getS3Library: () => {
         let now = new Date();
         if(!s3 || !s3Age || ((s3Age - now.getTime())>s3MaxAge)){
-            s3 = new AWS.S3;
+            s3 = new AWS.S3();
             s3Age = now.getTime();
             console.log('created new S3 object from SDK (age='+s3Age+')');
         }

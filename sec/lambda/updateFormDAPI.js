@@ -30,7 +30,7 @@ exports.handler = async (messageBatch, context) => {
         'D': '.xml',
         'D/A': '.xml'
     };
-    console.log('updateFormDAPI invoked for ' + formDEvent.adsh);
+    console.log('updateFormDAPI invoked for ' + formDevent.adsh);
 
     let i;
     for (i = 0; i < formDevent.files.length; i++) {
@@ -455,10 +455,11 @@ create table if not exists exemptOfferingPersons  (
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////*/
+/*
 message = {
     "Records": [
         {
             "body": "{\"path\":\"sec/edgar/data/99106/000009910616000002/\",\"adsh\":\"0000099106-16-000002\",\"cik\":\"0000099106\",\"fileNum\":\"021-254817\",\"form\":\"D\",\"filingDate\":\"20160108\",\"period\":false,\"acceptanceDateTime\":\"20160108152628\",\"indexHeaderFileName\":\"sec/edgar/data/99106/000009910616000002/0000099106-16-000002-index-headers.html\",\"files\":[{\"name\":\"xslX07/primary_doc.xml\",\"description\":\"D\"},{\"name\":\"primary_doc.xml\",\"description\":\"D\"}],\"bucket\":\"restapi.publicdata.guru\",\"sic\":\"3990\",\"ein\":\"131394750\",\"incorporation\":{\"state\":\"DE\",\"country\":false}}"
         }
     ]
-}
+}*/
