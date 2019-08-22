@@ -1218,6 +1218,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                         submissionsForCurrentDisclosure.push(fs);
                     }
                 });
+                if(!ixbrlViewer.accn) ixbrlViewer.accn = ixbrlViewer.adsh.substr(0,10)+'-'+ixbrlViewer.adsh.substr(10,2)+'-'+ixbrlViewer.adsh.substr(12,10);
                 if(submissionsForCurrentDisclosure.length>1){  //this submission is part of a disclosure that has been amended
                     if(submissionsForCurrentDisclosure[0].accn == ixbrlViewer.accn){  //this disclosure is the latest version = offer to compare
                         var oldFS = submissionsForCurrentDisclosure[0];
@@ -1247,8 +1248,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                     var doc = parseInt(ixbrlViewer.cik)+"/"+newAccn.replace(/-/g,'')+"/"+newAccn+"-index.html";
                     window.location = "viewer.php?doc="+doc; //navigate there!
                 });
-            }
-        );
+        });
 
         //get iXBRL context tags make lookup tree for contextRef date values and dimensions
         var start, end, startDate, endDate, $this, $start, $member;
@@ -1360,7 +1360,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
         hasher.init();
         var hash = ixbrlViewer.getHashAsObject();
         if(hash){
-            if(hash.y && hash.d && hash.u && (hash.q || hash.q === '0')){
+            if(hash.y && hash.d && hash.u && (hash.q || hash.q === '0')) {
                 ixbrlViewer.vars = { //taxonomy, isGaap and value not set
                     tag: hash.y,
                     xTag: hash.x,
@@ -1373,8 +1373,8 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                 };
                 ixbrlViewer.openPopupVisualization(
                     ixbrlViewer.vars,
-                    function(){ //callback after barChart is loaded
-                        if(hash.c=='f') $('a[href="#tabs-frame"]').click(); //trigger frame table load
+                    function () { //callback after barChart is loaded
+                        if (hash.c == 'f') $('a[href="#tabs-frame"]').click(); //trigger frame table load
                     });
             }
         }
