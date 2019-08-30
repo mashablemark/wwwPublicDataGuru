@@ -57,7 +57,13 @@ exports.close = () => {
     }
 };
 
-exports.handler = async (event, context) => {
+exports.handler = async (messageBatch, context) => {
+    if(!messageBatch.Records.length) {
+        console.log('empty message from queue');
+        return false;
+    }
+    let event = JSON.parse(messageBatch.Records[0].body);  //batch = 1 by configuration
+
     if(!event.lowChatterMode) await common.logEvent('updateOwnershipAPI '+ event.adsh, 'invoked using path '+ event.path + ' (time stamp = ' + event.timeStamp +')', true);
     var filing = {
         path: event.path,
