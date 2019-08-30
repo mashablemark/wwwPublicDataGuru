@@ -45,7 +45,7 @@ exports.handler = async (event, context) => {
     //const size = firstS3record.object.bytes;
     const folder = key.substr(0, key.lastIndexOf('/')+1);
     //1. read the index-header.html file
-    console.log('step 1');
+    console.log('step 1: starting parse of ' + JSON.stringify(key));
     let indexHeaderBody;
     if(event.crawlerOverrides && event.crawlerOverrides.body){
         indexHeaderBody = event.crawlerOverrides.body;
@@ -126,12 +126,12 @@ exports.handler = async (event, context) => {
     // note:  Can be expanded to post processing of additional form families to create additional APIs such as RegistrationStatements, Form Ds...
     const formPostProcesses = {
         //ownership forms   (https://www.sec.gov/Archives/edgar/data/39911/000003991119000048/0000039911-19-000048-index-headers.html)
-        '3': {lambda: 'updateOwnershipAPI'},
-        '3/A': {lambda: 'updateOwnershipAPI'},
-        '4': {lambda: 'updateOwnershipAPI'},
-        '4/A': {lambda: 'updateOwnershipAPI'},
-        '5': {lambda: 'updateOwnershipAPI'},
-        '5/A': {lambda: 'updateOwnershipAPI'},
+        '3': {lambda: 'updateOwnershipAPI', queue: "https://sqs.us-east-1.amazonaws.com/008161247312/updateOwnershipAPI"},
+        '3/A': {lambda: 'updateOwnershipAPI', queue: "https://sqs.us-east-1.amazonaws.com/008161247312/updateOwnershipAPI"},
+        '4': {lambda: 'updateOwnershipAPI', queue: "https://sqs.us-east-1.amazonaws.com/008161247312/updateOwnershipAPI"},
+        '4/A': {lambda: 'updateOwnershipAPI', queue: "https://sqs.us-east-1.amazonaws.com/008161247312/updateOwnershipAPI"},
+        '5': {lambda: 'updateOwnershipAPI', queue: "https://sqs.us-east-1.amazonaws.com/008161247312/updateOwnershipAPI"},
+        '5/A': {lambda: 'updateOwnershipAPI', queue: "https://sqs.us-east-1.amazonaws.com/008161247312/updateOwnershipAPI"},
         //financial statement forms  (https://www.sec.gov/Archives/edgar/data/29905/000002990519000029/0000029905-19-000029-index-headers.html)
         '10-Q': {lambda: 'updateXBRLAPI', queue: 'https://sqs.us-east-1.amazonaws.com/008161247312/queueUpdateXBRLAPI'},
         '10-Q/A': {lambda: 'updateXBRLAPI', queue: 'https://sqs.us-east-1.amazonaws.com/008161247312/queueUpdateXBRLAPI'},
@@ -181,21 +181,27 @@ exports.handler = async (event, context) => {
         //some processes are invoked directly; long running or non-concurrent ones may need queues
         if(formPostProcesses[thisSubmission.form].queue){
             let sqs = new AWS.SQS({apiVersion: '2012-11-05'});
-            console.log('instantiated sqs');
             let params = {
                 MessageBody: payload,
                 QueueUrl: formPostProcesses[thisSubmission.form].queue
             };
+            console.log('instantiated sqs: about to sendMessage');
             await new Promise((resolve, reject)=>{
-                sqs.sendMessage(params, (err, data) => {
-                    if(err){
-                        console.log('failed to add message to queueUpdateXBRLAPI');
-                        reject(err); //stop processing and let CloudWatch log the error
-                    } else {
-                        console.log("Successfully added MessageId "+data.MessageId + " to queueUpdateXBRLAPI");
-                        resolve()
-                    }
-                });
+                try{
+                    sqs.sendMessage(params, (err, data) => {
+                        if(err){
+                            console.log('failed to add message to ' + formPostProcesses[thisSubmission.form].queue);
+                            reject(err); //stop processing and let CloudWatch log the error
+                        } else {
+                            console.log("Successfully added MessageId " + data.MessageId + " to " + formPostProcesses[thisSubmission.form].queue);
+                            resolve()
+                        }
+                    });
+                } catch (e) {
+                    console.log('error in sendMessage!');
+                    console.log(JSON.stringify(e));
+                    reject(e);
+                }
             });
         } else {
             //important!  even though the invocation is async (InvocationType: 'Event'), you must await to give enough time to invoke!
@@ -282,7 +288,7 @@ exports.handler = async (event, context) => {
 };
 
 function getAddresses(thisSubmission, indexHeaderBody, processor){
-    console.log(processor);
+    console.log('Getting addresses for '+processor);
     const addressesByType = {
         updateXBRLAPI: {
             businessAddress: ['FILER', 'BUSINESS-ADDRESS'],
