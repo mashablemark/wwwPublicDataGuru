@@ -137,10 +137,10 @@ async function processQuarterlyIndex(processControl, callback) {
                     if(updateProcess != 'noProcessing'){
                         if(updateProcess == 'syncProcessing') {
                             processIndexHeader(lineParts);
-                            await wait(200);  //process 10 submissions / second
+                            await wait(100);  //process 5 submissions / second
                         } else {
                             processIndexHeader(lineParts, true);
-                            await wait(200);  //process 10 submissions / second
+                            await wait(100);  //process 20 submissions / second
                         }
                     }
                 }
@@ -334,9 +334,9 @@ async function processIndexHeader(lineParts, asyncProcessing){
                 crawlerOverrides: {
                     noLatestIndexProcessing: false,
                     tableSuffix: '_2016q1',
-                    body: fetchObject.body,  //no need to fetch it twice
                 }
             };
+            //make Lambda do full duty w/o prefetch-shortcut => if(fetchObject.body && fetchObject.body.length<250000) fakeS3Event.crawlerOverrides.body = fetchObject.body;  //no need to fetch it twice as long as the length is within the bounds of an Lamda event payload limit (262144 bytes)
 
             let payload = JSON.stringify(fakeS3Event, null, 2); // include all props with 2 spaces (not sure if truly required)
             let li = lambda.invoke(  //https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Lambda.html
