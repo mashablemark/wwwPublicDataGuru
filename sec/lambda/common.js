@@ -125,6 +125,9 @@ let me = {
     getS3Library: () => {
         let now = new Date();
         if(!s3 || !s3Age || ((s3Age - now.getTime())>s3MaxAge)){
+            if(s3Age && ((s3Age - now.getTime())<=s3MaxAge)) {
+                console.log(`s3 library untimely death report:  Age = ${s3Age - now.getTime()} ms old (s3MaxAge = ${s3MaxAge} ms`);
+            }
             s3 = new AWS.S3();
             s3Age = now.getTime();
             console.log('created new S3 object from SDK (age='+s3Age+')');
@@ -137,7 +140,7 @@ let me = {
                 Bucket: me.bucket,
                 Key: file
             };
-            s3.headObject(params, (err, data) => {
+            me.getS3Library().headObject(params, (err, data) => {
                 if (err) {  // an error occurred
                     console.log(err, err.stack);
                     reject(err, err.stack);
