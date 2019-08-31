@@ -27,6 +27,7 @@
 const cheerio = require('cheerio');
 const common = require('common');
 const root = 'test'; //for S3 writes
+const lambdaTimeout = 20000; //don't rerun if header insert time within updateOwnershipAPI's timeout configuration (in milliseconds)
 
 const ownershipForms= {
     '3': '.xml',
@@ -79,7 +80,7 @@ exports.handler = async (messageBatch, context) => {
         xmlBody: event.xmlBody,
         tableSuffix: event.crawlerOverrides?event.crawlerOverrides.tableSuffix||'':''
     };
-    let sql = 'select bodyhash, acceptancedatetime, api_status from ownership_submission'+filing.tableSuffix+' where adsh='+ common.q(filing.adsh, true);
+    let sql = 'select bodyhash, acceptancedatetime, created, api_status from ownership_submission'+filing.tableSuffix+' where adsh='+ common.q(filing.adsh, true);
     let hashPromise = common.runQuery(sql);
 
     if(!filing.xmlBody){  //calling process can either pass in the XML body or have updateOwnershipAPI find and load it
@@ -100,9 +101,15 @@ exports.handler = async (messageBatch, context) => {
         filing.bodyHash = common.makeHash(filing.xmlBody);
         if(dbFileHash.data.length && dbFileHash.data[0].bodyhash == filing.bodyHash){
             if(dbFileHash.data[0].api_status==1){
-                submission.hasTransactions = true;
-                await common.logEvent('updateOwnershipAPI warning: updating APIs for prior incomplete/timed out attempt', event.path, true);
-                await updateAPIs(filing, submission, filing.tableSuffix);
+                let now = new Date();
+                let createDateTime = new Date(dbFileHash.data[0].created+'Z');  //timestamp is UTC
+                if(createDateTime.getTime()+lambdaTimeout < now.getTime()){
+                    await common.logEvent('updateOwnershipAPI warning: updating APIs for prior incomplete/timed out attempt', event.path, true);
+                    submission.hasTransactions = true;
+                    await updateAPIs(filing, submission, filing.tableSuffix);
+                } else {
+                    console.log('Timestamp show lambda has starting processing this submission: Terminating myself without further processing');
+                }
             } else {
                 if(!event.lowChatterMode) await common.logEvent('updateOwnershipAPI duplicate '+ event.adsh, 'identical hash signatures; not parsed', true);
                 submission.duplicate = true;
@@ -360,7 +367,7 @@ async function updateAPIs(filing, submission, tableSuffix){
         } else {
             console.log((submission.transactions?submission.transactions.length:0)+' holdings and no transactions reported: API update not needed');
         }
-        await common.runQuery(`update ownership_submission${tableSuffix} set api_status=2 where adsh='${submission.adsh}'`);
+        await common.runQuery(`update ownership_submission${tableSuffix} set api_status=2 where adsh='${filing.adsh}'`);
     }
 
     /*invalidation takes 5 - 15 minutes.  VERY EXPENSIVE. No SLA.  Better to set TTL for APIs to 60s

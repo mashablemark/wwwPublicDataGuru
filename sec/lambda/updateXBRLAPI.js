@@ -52,6 +52,7 @@ const common = require('common');
 const skipNameSpaces = ['xbrli','xbrldi'];  //already scrapped in parts 1. of this routine, but for "deiNumTags" exceptions
 const standardNumericalTaxonomies = ['us-gaap', 'ifrs', 'invest', 'dei', 'srt'];
 const standardQuarters = [0, 1, 4];
+const lambdaTimeout = 60000; //don't rerun if header insert time within updateXRBLAPI's timeout configuration (in milliseconds)
 const XBRLDocuments= {
     iXBRL: {
         '10-Q': 'html',
@@ -97,10 +98,18 @@ exports.handler = async (messageBatch, context) => {
         throw e;
     }
 
-    const tries = await common.runQuery(`select htmlhash, xmlhash, tries, api_state from fin_sub where adsh = '${event.adsh}'`);
-    if(tries.data.length && tries.data[0].tries>=3){
-        console.log('max retries exceeded.  Exiting and removing from SQS feeder queue');
-        return false;  //do not process after 3 tries!!!  End without error to remove item from SMS queue
+    const tries = await common.runQuery(`select htmlhash, xmlhash, tries, api_state, created from fin_sub where adsh = '${event.adsh}'`);
+    if(tries.data.length){
+        if(tries.data[0].tries>=3) {
+            console.log('max retries exceeded.  Exiting and removing from SQS feeder queue');
+            return false;  //do not process after 3 tries!!!  End without error to remove item from SMS queue
+        }
+        let now = new Date();
+        let createDateTime = new Date(tries.data[0].created+'Z');  //timestamp is UTC
+        if(createDateTime.getTime()+lambdaTimeout > now.getTime()){
+            console.log('Timestamp shows another lambda is processing this submission: Terminating myself without further processing');
+            return false;  //End without error to remove item from SMS queue.  The first lambda will retry if it encounters an error or times out
+        }
     }
     let submissionPreviouslyParsedToDB = tries.data.length && tries.data[0].api_state>=1; 
 
