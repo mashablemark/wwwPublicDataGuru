@@ -6,6 +6,8 @@ const mysql = require('mysql');
 const AWS = require('aws-sdk');
 AWS.config.update({region: 'us-east-1'});
 const secure = require('./secure');  //DO NOT COMMIT!
+let dbInitializationFlag = false; //set on first connection wth console.log for debugging
+let s3InitializationFlag = false; //set on first initialization wth console.log for debugging
 let s3 = false,  //error can occur if s3 object created from AWS SDK is old & unused
     s3Age = false;
 const s3MaxAge = 100000; //get a new S3 object every 100s to avoid credentials timing out.
@@ -27,10 +29,10 @@ let me = {
             return ' null' + (isLast ? '' : ',');
         }
     },
-    createDbConnection: async (dbInfo) => {
+    createDbConnection: (dbInfo) => {
         return new Promise((resolve, reject) => {
             let newConn = mysql.createConnection(dbInfo || secure.publicdataguru_dbinfo()); // (Re)create reusable connection for this Lambda
-            newConn.connect(err => {
+            newConn.connect(async err => {
                 if(err){
                     console.log('error when connecting to db:', JSON.stringify(err));
                     reject(new Error(err.message));
@@ -44,7 +46,14 @@ let me = {
                             throw new Error(err.message);
                         }
                     });
-                    console.log('createDbConnection opening a mysql connection');
+                    console.log('createDbConnection opened a new mysql connection');
+                    if(!dbInitializationFlag){
+                        dbInitializationFlag = true;
+                        console.log('db connected for first time and dbInitializationFlag set')
+                    }
+                    me.con= newConn;  //if not set, runQuery will create another
+                    let status = await me.runQuery('SHOW STATUS WHERE variable_name LIKE "Threads_%" OR variable_name = "Connections"');
+                    console.log(JSON.stringify(status.data));
                     resolve(newConn);
                 }
             });
@@ -124,13 +133,17 @@ let me = {
     },
     getS3Library: () => {
         let now = new Date();
-        if(!s3 || !s3Age || ((s3Age - now.getTime())>s3MaxAge)){
-            if(s3Age && ((s3Age - now.getTime())<=s3MaxAge)) {
+        if(!s3 || !s3Age || ((now.getTime()-s3Age)>s3MaxAge)){
+            if(s3Age && ((now.getTime() - s3Age)<=s3MaxAge)) {
                 console.log(`s3 library untimely death report:  Age = ${s3Age - now.getTime()} ms old (s3MaxAge = ${s3MaxAge} ms`);
             }
             s3 = new AWS.S3();
             s3Age = now.getTime();
             console.log('created new S3 object from SDK (age='+s3Age+')');
+            if(!s3InitializationFlag){
+                s3InitializationFlag = true;
+                console.log('S3 initialized for first time and s3InitializationFlag set')
+            }
         }
         return s3;
     },
