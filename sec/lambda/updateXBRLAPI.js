@@ -104,6 +104,10 @@ exports.handler = async (messageBatch, context) => {
             console.log('max retries exceeded.  Exiting and removing from SQS feeder queue');
             return false;  //do not process after 3 tries!!!  End without error to remove item from SMS queue
         }
+        if(tries.data[0].api_state==2){
+            console.log('api_state=2 shows another lambda has successfully processed this submission: Terminating myself without further processing');
+            return false;  //End without error to remove item from SMS queue.
+        }
         let now = new Date();
         let createDateTime = new Date(tries.data[0].created+'Z');  //timestamp is UTC
         if(createDateTime.getTime()+lambdaTimeout > now.getTime()){
