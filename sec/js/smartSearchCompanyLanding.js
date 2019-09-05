@@ -8,26 +8,36 @@ var companyTicker = {
 };
 
 $(document).ready(function(){
-    $.getJSON('company_tickers.json', function(data){
-        companyTickers = data;
-    });
-    //add key press to capture CR
-    $('#global-search-box').on('keypress', function(event){
-       if(event.keyCode==13){
-           smartSearch($('#global-search-box').val());
-           event.stopPropagation();
+    $('<td><label for="keywords">Keywords:</label><br><input name="keywords" id="keywords" size="10" tabindex="2"></td>').insertAfter($('#prior_to').closest('td'));
+    $('<button id="smartSearch">Smart Search</button>').insertAfter($("input[value='Search']"));
+    $('#smartSearch').click(function(){
+       var urlParams = new URLSearchParams(window.location.search),
+           keyWords = $('#keywords').val().trim(),
+           cik = urlParams.get('CIK');
+       if(keyWords){
+           var type = $('input#type').val().trim(),
+               priorTo = $('input#prior_to').val().trim(),
+               fromDate = false,
+               qstring = '?stemming=false&nummResults=20&queryCik='+cik+'&search_text='+encodeURIComponent(keyWords.replace(/\s+/g,' AND '));
+           if(priorTo && priorTo.length>3 && !isNaN(priorTo)){
+               fromDate = parseInt(priorTo.substr(0,4));
+               if(priorTo.length>5)
+                   fromDate = priorTo.substr(4,2) + '/' + fromDate;
+               else
+                   fromDate = '01/' + fromDate;
+               if(priorTo.length>7)
+                   fromDate = priorTo.substr(6,2) + '/' + fromDate;
+               else
+                   fromDate = '01/' + fromDate;
+               let now = new Date();
+               qstring += '&fromDate='+ fromDate + '&toDate=12/31/'+now.getFullYear();
+           }
+           //window.location = 'https://searchwww.sec.gov/EDGARFSClient/jsp/EDGAR_MainAccess.jsp'+qstring;
+       } else {
+           $('form').get(0).submit();
        }
-    }).on('change', function(event){
-        event.stopPropagation();
-    });
-    $('.global-search-button').removeAttr('type');
-
-    //take over the search
-    takeOverSearch();
-
-    setTimeout(takeOverSearch, 100); //allow other script to run before double-checking the take-over
-
-
+    }).closest('form'); //.removeAttr('action');
+    $("input[value='Search']").remove();
 });
 
 function takeOverSearch(){

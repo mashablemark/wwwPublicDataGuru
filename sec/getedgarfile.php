@@ -6,9 +6,15 @@
  * Time: 3:14 PM
  */
 $doc = $_REQUEST["f"];
-$secPath = "https://www.sec.gov";
-$edgarPath = $secPath . "/Archives/edgar/data/";
-echo repointHyperlinks(httpGet($edgarPath . $doc));
+if(isset($_REQUEST["repoint"]) && $_REQUEST["repoint"]=='true') {
+    $repoint = true;
+} else {
+    $repoint = false;
+}
+//$secPath = "https://www.sec.gov/";
+//$edgarPath = $secPath . "Archives/edgar/data/";
+$body = httpGet( $doc);
+echo $repoint ? repointHyperlinks($body): $body;
 
 function httpGet($target, $timeout = 15){
     $fp = false;
