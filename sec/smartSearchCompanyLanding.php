@@ -14,7 +14,7 @@ $homepageHTML = httpGet($target);
 
 //2. make image links absolute SEC
 $homepageHTML = str_replace ( ' src="/', ' src="'.$secPath,  $homepageHTML);
-$homepageHTML = str_replace ( 'link href="/', 'link href="'.$secPath,  $homepageHTML);
+$homepageHTML = str_replace ( ' href="/', ' href="'.$secPath,  $homepageHTML);
 //$homepageHTML = str_replace ( ' src="/', ' src="'.$secPath,  $homepageHTML);
 
 //3. insert search.js
