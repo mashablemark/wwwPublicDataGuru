@@ -4,9 +4,9 @@ node_modules/*
 .idea/*
 admin/
 chart_jpgs/
-css/
+/css/
 embed/
-global/
+/global/
 graph_data/
 info/
 preview/
