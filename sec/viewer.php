@@ -22,7 +22,7 @@ if((isset($_REQUEST["f"]) && $_REQUEST["f"])){ //f=force get and return (don't t
         $ixPos = strpos($body, $sIxSig);
         if($ixPos){
             //load the iXBRL document into the viewer and have ixbrl_viewer.js navigate to the fact
-            $docIXBRL = substr($body, $ixPos + strlen($sIxSig), strpos($body, '.htm', $ixPos) - $ixPos - strlen($sIxSig));
+            $docIXBRL = $edgarPath . substr($body, $ixPos + strlen($sIxSig), strpos($body, '.htm', $ixPos) - $ixPos - strlen($sIxSig));
         } else {
             //no iXBRL document = show index page
             echo repointHyperlinks($body);
@@ -31,7 +31,7 @@ if((isset($_REQUEST["f"]) && $_REQUEST["f"])){ //f=force get and return (don't t
         echo repointHyperlinks(httpGet($edgarPath.$doc));
     }
 } else {
-    $docIXBRL = $doc;
+    $docIXBRL = urlencode($edgarPath.$doc);
 }
 if($docIXBRL){
 ?><!DOCTYPE html>
@@ -75,23 +75,23 @@ are not subject to domestic copyright protection. 17 U.S.C. 105. -->
         }
     </style>
 
-    <link  rel="stylesheet" href="/global/js/jqueryui/jquery-ui.css" />
-    <link rel="stylesheet" href="/global/js/fancybox-master/dist/jquery.fancybox.min.css" type="text/css">
+    <link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" />
+    <link rel="stylesheet" href="global/js/fancybox-master/dist/jquery.fancybox.min.css" type="text/css">
     <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/v/dt/jszip-2.5.0/dt-1.10.18/b-1.5.4/b-html5-1.5.4/sc-1.5.0/datatables.min.css"/>
     <link rel="stylesheet" href="css/viewer.css" type="text/css">
     <link rel="stylesheet" href="https://www.sec.gov/ixviewer/css/bootstrap/bootstrap.min.css" type="text/css">
     <link rel="stylesheet" href="https://www.sec.gov/ixviewer/css/app.css" type="text/css">
     <link rel="stylesheet" href="https://www.sec.gov/ixviewer/css/icon-as-img.css" type="text/css">
-    <script type="text/javascript" src="/global/js/jquery/jquery-3.3.1.min.js"></script>
-    <script type="text/javascript" src="/global/js/highcharts/js/highcharts.js"></script>
-    <script type="text/javascript" src="/global/js/highcharts/js/modules/exporting.js"></script>
-    <script type="text/javascript" src="/global/js/fancybox-master/dist/jquery.fancybox.min.js"></script>
-    <script type="text/javascript" src="/global/js/jqueryui/jquery-ui.min.js"></script>
+    <script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>
+    <script type="text/javascript" src="global/js/highcharts/js/highcharts.js"></script>
+    <script type="text/javascript" src="global/js/highcharts/js/modules/exporting.js"></script>
+    <script type="text/javascript" src="global/js/fancybox-master/dist/jquery.fancybox.min.js"></script>
+    <script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/pdfmake.min.js"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/vfs_fonts.js"></script>
     <script type="text/javascript" src="https://cdn.datatables.net/v/dt/jszip-2.5.0/dt-1.10.18/b-1.5.4/b-html5-1.5.4/sc-1.5.0/datatables.min.js"></script>
-    <script type="text/javascript" src="/global/js/signals/signals.js"></script>
-    <script type="text/javascript" src="/global/js/hasher/hasher.min.js"></script>
+    <script type="text/javascript" src="global/js/signals/signals.js"></script>
+    <script type="text/javascript" src="global/js/hasher/hasher.min.js"></script>
     <script type="text/javascript" src="js/ixbrl_viewer.js"></script>
 
     <title>Inline XBRL Viewer</title>
@@ -276,7 +276,7 @@ are not subject to domestic copyright protection. 17 U.S.C. 105. -->
                 </div>
             </div>
         </div>
-        <iframe id="app-inline-xbrl-doc" wmode="transparent" frameborder="0" onload="ixbrlViewer.parseIXBRL(this)" src="/sec/viewer.php?f=true&doc=<?= $docIXBRL ?>"></iframe>
+        <iframe id="app-inline-xbrl-doc" wmode="transparent" frameborder="0" onload="ixbrlViewer.parseIXBRL(this)" src="/sec/getWebDoc.php?repoint=true&f=<?= $docIXBRL ?>"></iframe>
         <div id="app-panel1">
             <!-- help container -->
             <div id="app-panel-help-container">
@@ -1685,3 +1685,4 @@ function repointHyperlinks($html){
 
     return $repointedHTML;
 }
+?>

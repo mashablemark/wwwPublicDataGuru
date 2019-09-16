@@ -5,19 +5,19 @@
     <title>Edgar Viz Test Page</title>
 
     <!--CSS files-->
-    <link  rel="stylesheet" href="/global/js/jqueryui/jquery-ui.css" type="text/css" />
-    <link  rel="stylesheet" href="/global/js/loadmask/jquery.loadmask.css" type="text/css" />
+    <link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" type="text/css" />
+    <link  rel="stylesheet" href="global/js/loadmask/jquery.loadmask.css" type="text/css" />
     <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/v/dt/jszip-2.5.0/dt-1.10.18/b-1.5.4/b-html5-1.5.4/sc-1.5.0/datatables.min.css"/>
 
     <!-- open source javascript libraries -->
-    <script type="text/javascript" src="/global/js/jquery/jquery-3.3.1.min.js"></script>
-    <script type="text/javascript" src="/global/js/jqueryui/jquery-ui.min.js"></script>
+    <script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>
+    <script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/pdfmake.min.js"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.36/vfs_fonts.js"></script>
     <script type="text/javascript" src="https://cdn.datatables.net/v/dt/jszip-2.5.0/dt-1.10.18/b-1.5.4/b-html5-1.5.4/sc-1.5.0/datatables.min.js"></script>
-    <script type="text/javascript" src="/global/js/signals/signals.js"></script>
-    <script type="text/javascript" src="/global/js/hasher/hasher.js"></script>
-    <script type="text/javascript" src="/global/js/loadmask/jquery.loadmask.min.js"></script>
+    <script type="text/javascript" src="global/js/signals/signals.js"></script>
+    <script type="text/javascript" src="global/js/hasher/hasher.js"></script>
+    <script type="text/javascript" src="global/js/loadmask/jquery.loadmask.min.js"></script>
     <script type="text/javascript" src="js/ownership.js"></script>
 </head>
 <style>

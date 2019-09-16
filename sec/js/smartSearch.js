@@ -8,6 +8,8 @@ var companyTicker = {
 };
 
 $(document).ready(function(){
+    $('title').html('smart search prototype');
+    $("a[href='https://www.sec.gov/']:eq(1)").attr("style", "color: red;").html("SEARCH DEMO: NOT OFFICIAL WEBSITE");
     $.getJSON('company_tickers.json', function(data){
         companyTickers = data;
     });
@@ -43,7 +45,7 @@ function smartSearch(searchTerms){
     //1.  check if accession number format
     if(searchTerms.search(/\b\d{10}-\d{2}-\d{6}\b/) != -1){
         $.get(
-            `/sec/getedgarfile.php?f=${encodeURIComponent('https://www.sec.gov/sws/edgar/filing/'+searchTerms+'/filerXref')}`,
+            `/sec/getWebDoc.php?f=${encodeURIComponent('https://www.sec.gov/sws/edgar/filing/'+searchTerms+'/filerXref')}`,
             function(data){
                 let $data = $(data);
                 confirmSmartChoice(searchTerms,
@@ -56,7 +58,7 @@ function smartSearch(searchTerms){
     //2.  check if CIK
     if(!isNaN(searchTerms) && parseInt(searchTerms).toString()==searchTerms  && parseInt(searchTerms)>1000 && parseInt(searchTerms)<5*1000*1000){
         $.get(
-            `/sec/getedgarfile.php?f=${encodeURIComponent('https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?page=detailed&cik='+parseInt(searchTerms)+'&main_back=2')}`,
+            `/sec/getWebDoc.php?f=${encodeURIComponent('https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?page=detailed&cik='+parseInt(searchTerms)+'&main_back=2')}`,
             function(data){
                 if(data.indexOf('The selected company was not found')==-1){
                     awaitingUserInput = true;

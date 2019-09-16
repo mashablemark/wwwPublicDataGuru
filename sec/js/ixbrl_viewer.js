@@ -1201,7 +1201,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
         ixbrlViewer.fp = $frameDoc.find('ix\\:nonnumeric[name="dei\\:DocumentFiscalPeriodFocus"]').text();
         ixbrlViewer.adsh = window.location.href.split('?doc=')[1].split('/')[1];
 
-        $.getJSON('//restapi.publicdata.guru/sec/financialStatementsByCompany/cik'+parseInt(ixbrlViewer.cik)+'.json',
+        $.getJSON('https://restapi.publicdata.guru/sec/financialStatementsByCompany/cik'+parseInt(ixbrlViewer.cik)+'.json',
             function(allFinancialStatements) {
                 ixbrlViewer.allFinancialStatements = allFinancialStatements;
                 var message = false,

@@ -11,8 +11,8 @@ if(isset($_REQUEST["repoint"]) && $_REQUEST["repoint"]=='true') {
 } else {
     $repoint = false;
 }
-//$secPath = "https://www.sec.gov/";
-//$edgarPath = $secPath . "Archives/edgar/data/";
+$secPath = "https://www.sec.gov/";
+$edgarPath = $secPath . "Archives/edgar/data/";
 $body = httpGet( $doc);
 echo $repoint ? repointHyperlinks($body): $body;
 

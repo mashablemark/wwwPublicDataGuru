@@ -18,9 +18,11 @@ $homepageHTML = str_replace ( ' href="/', ' href="'.$secPath,  $homepageHTML);
 
 //3. insert smartSearch.js
 $homepageHTML = str_replace ( '<head>', '<head>'
-    . '<link  rel="stylesheet" href="/global/js/jqueryui/jquery-ui.css" />'
-    . '<script type="text/javascript" src="/sec/global/js/jquery/jquery-3.3.1.min.js"></script>'
-    . '<script type="text/javascript" src="/global/js/jqueryui/jquery-ui.min.js"></script>'
+    . '<link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" />'
+    . '<link  rel="stylesheet" href="global/js/loadmask/jquery.loadmask.css" />'
+    . '<script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>'
+    . '<script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>'
+    . '<script type="text/javascript" src="global/js/loadmask/jquery.loadmask.min.js"></script>'
     . '<script src="js/smartSearch.js"></script>',  $homepageHTML);
 
 //4. modify banner = not official site!
@@ -54,16 +56,4 @@ function httpGet($target, $timeout = 15){
     return $content;
 }
 
-function repointHyperlinks($html){
-    global $secPath, $remoteLocalPath;
-    //repoint source file relative links (e.g. local images) to SEC
-    $repointedHTML = preg_replace('/src="(\w+)/', 'src="' . $remoteLocalPath. '/${1}', $html);
-
-    //repoint root relative links and images to SEC
-    $repointedHTML = str_replace('href="/', 'href="' . $secPath . '/', $repointedHTML);
-    $repointedHTML = str_replace('src="/', 'src="' . $secPath . '/', $repointedHTML);
-    $repointedHTML = str_replace('href="https://www.sec.gov/ix?doc=/Archives/edgar/data/', 'href="https://www.publicdata.guru/sec/viewer.php?doc=', $repointedHTML);
-
-    return $repointedHTML;
-}
 ?>
