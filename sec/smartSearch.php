@@ -56,4 +56,16 @@ function httpGet($target, $timeout = 15){
     return $content;
 }
 
+function repointHyperlinks($html){
+    global $secPath, $remoteLocalPath;
+    //repoint source file relative links (e.g. local images) to SEC
+    $repointedHTML = preg_replace('/src="(\w+)/', 'src="' . $remoteLocalPath. '/${1}', $html);
+
+    //repoint root relative links and images to SEC
+    $repointedHTML = str_replace('href="/', 'href="' . $secPath . '/', $repointedHTML);
+    $repointedHTML = str_replace('src="/', 'src="' . $secPath . '/', $repointedHTML);
+    $repointedHTML = str_replace('href="https://www.sec.gov/ix?doc=/Archives/edgar/data/', 'href="https://www.publicdata.guru/sec/viewer.php?doc=', $repointedHTML);
+
+    return $repointedHTML;
+}
 ?>

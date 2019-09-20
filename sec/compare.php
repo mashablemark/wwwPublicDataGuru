@@ -19,13 +19,13 @@ $B = parseIndexHeader($indexHeaderB);
     <title>Financial Statement Textual Comparison</title>
 
     <!--CSS files-->
-    <link  rel="stylesheet" href="/global/js/jqueryui/jquery-ui.css" type="text/css" />
-    <link  rel="stylesheet" href="/global/js/loadmask/jquery.loadmask.css" type="text/css" />
+    <link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" type="text/css" />
+    <link  rel="stylesheet" href="global/js/loadmask/jquery.loadmask.css" type="text/css" />
     <!-- open source javascript libraries -->
     <script type="text/javascript" src="js/wikEdDiff.js"></script>
-    <script type="text/javascript" src="/global/js/jquery/jquery-3.3.1.min.js"></script>
-    <script type="text/javascript" src="/global/js/jqueryui/jquery-ui.min.js"></script>
-    <script type="text/javascript" src="/global/js/loadmask/jquery.loadmask.js"></script>
+    <script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>
+    <script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>
+    <script type="text/javascript" src="global/js/loadmask/jquery.loadmask.js"></script>
     <style>
         .wikEdDiffDelete {
             background-color: red !important;
@@ -54,10 +54,10 @@ $B = parseIndexHeader($indexHeaderB);
         <li role="tab" tabindex="-1" class="ui-tabs-tab ui-corner-top ui-state-default ui-tab" aria-controls="tabs-redline" aria-labelledby="ui-id-3" aria-selected="false" aria-expanded="false"><a href="#tabs-redline" role="presentation" tabindex="-1" class="ui-tabs-anchor" id="ui-id-3">Difference</a></li>
     </ul>
     <div id="tabs-A" class="framepanel ui-corner-bottom ui-widget-content" aria-labelledby="ui-id-1" role="tabpanel" aria-hidden="false" style="height: 1049.87px;z-index: 30">
-        <iframe id="iframe-A" src="viewer.php?f=true&doc=<?= $cik . "/".str_replace("-","", $accnA)."/" . $A["fileName"] ?>" onload="iframeLoaded()"></iframe>
+        <iframe id="iframe-A" src="getWebDoc.php?repoint=true&f=<?= $edgarPath . $cik . "/".str_replace("-","", $accnA)."/" . $A["fileName"] ?>" onload="iframeLoaded()"></iframe>
     </div>
     <div id="tabs-B" class="framepanel ui-corner-bottom ui-widget-content" aria-labelledby="ui-id-2" role="tabpanel" aria-hidden="true" style="height: 1049.87px; z-index: 0;">
-        <iframe id="iframe-B" src="viewer.php?f=true&doc=<?= $cik . "/".str_replace("-","", $accnB)."/" . $B["fileName"] ?>" onload="iframeLoaded()"></iframe>
+        <iframe id="iframe-B" src="getWebDoc.php?repoint=true&f=<?= $edgarPath . $cik . "/".str_replace("-","", $accnB)."/" . $B["fileName"] ?>" onload="iframeLoaded()"></iframe>
     </div>
     <div id="tabs-redline" class="framepanel ui-corner-bottom ui-widget-content" aria-labelledby="ui-id-3" role="tabpanel" aria-hidden="true" style="height: 1049.87px; z-index: 0;">
         <div class="footerRight" style="position:fixed ; top: 200px; right: 5px;">
@@ -177,9 +177,9 @@ console.time('wikEdDiff');
             console.log('<PRE count: '+ (diffHtml.match(/<pre([^>]*)>/gi) || []).length);
             console.log('</PRE or <PRE count: '+ (diffHtml.match(/<(\/*)(pre)([^>]*)>/gi) || []).length);
             console.log('newline count: '+ (diffHtml.match(/\n/g) || []).length);
-            console.log('start')
+            console.log('start');
             console.log(diffHtml.substr(0,3000));
-            console.log('end')
+            console.log('end');
             console.log(diffHtml.substr(-1000));
 console.timeEnd('wikEdDiff');
             document.getElementById('redline').contentDocument.body.innerHTML = diffHtml; //.replace(/<p>\s*<p>/ig, '<p>');  //executes in 683ms for two 2.8MB complex 10-Q files

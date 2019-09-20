@@ -11,10 +11,11 @@ var contentTypeMap = {
 	html: 'text/html',
 	htm: 'text/html',
 	php: 'text/html',
-	css: 'text/css'
+	css: 'text/css',
+	png: 'image/png'
 };
 http.createServer(function (req, res) {
-	let fileName = req.url.split('?')[0].substr(1) || 'index.html',
+	var fileName = req.url.split('?')[0].substr(1) || 'index.html',
 		ext = fileName.split('.')[fileName.split('.').length-1],
 		contentType = contentTypeMap[ext] || 'text/plain',
 		q = url.parse(req.url, true).query;
@@ -56,8 +57,16 @@ http.createServer(function (req, res) {
 				res.end();
 			});
 			break;
+		case "compare.php":
+			webGet('https://www.publicdata.guru/'+req.url, res,(rawHTML) => {
+				res.writeHead(200, {'Content-Type': contentType});
+				res.write(rawHTML);
+				res.end();
+			});
+			break;
 		case "viewer.php":
-			if(q.doc.indexOf('-index.html')==-1){
+			if(q.doc.indexOf('-index') === -1){
+				console.log(q.doc);
                 fs.readFile('sec/'+fileName.replace('files/',''), 'utf8', function(err, body){
                     if(err){
                         console.log(req.url);
@@ -73,13 +82,35 @@ http.createServer(function (req, res) {
                     res.end();
                 });
 			} else {
-                webGet(q.doc, res, (html)=>{
-                	if(html.indexOf('iXBRL')==-1){
+                webGet(edgarArchive + q.doc + (q.doc.indexOf('.html')==-1?'.html':''), res, (html)=>{
+                	let labelPos = html.indexOf('iXBRL');
+                	if(labelPos === -1){
+                		console.log(edgarArchive + q.doc + '.html');
                         res.writeHead(200, {'Content-Type': contentType});
-                        res.write(html);
+                        res.write(repoint(html));
                         res.end();
 					} else {
-
+                		let resourceEnd = html.substring(0, labelPos).lastIndexOf('</a>');
+                		let resourceStart = html.substring(0, resourceEnd).lastIndexOf('>') + 1;
+                		let resourceFile = html.substring(resourceStart, resourceEnd);
+						let parts = q.doc.split('/');
+						parts.pop();
+						parts.push(resourceFile);
+                		console.log(edgarArchive + parts.join('/'));
+						fs.readFile('sec/'+fileName.replace('files/',''), 'utf8', function(err, body){
+							if(err){
+								console.log(req.url);
+								console.log('Error 404: ' + 'sec/' + fileName);
+								res.writeHead(404, {'Content-Type': contentType});
+							} else {
+								res.writeHead(200, {'Content-Type': contentType});
+								body = body
+									.replace('<?= $docIXBRL ?>', encodeURIComponent(edgarArchive + parts.join('/')))
+									.replace(/<\?php[\s\S]+?\?>/gi, '');
+								res.write(getSubTemplates(body));
+							}
+							res.end();
+						});
 					}
 
                 });
@@ -129,7 +160,7 @@ function repoint(html, url = 'https://www.sec.gov/'){
 function webGet(url, serverResponse, callback){
 	https.get(url, (resp) => {
 		let html = '';
-		resp.on('data', (chunk) => {html += chunk;})
+		resp.on('data', (chunk) => {html += chunk;});
 		resp.on('end', () => {
 			callback(html);
 		}); 
