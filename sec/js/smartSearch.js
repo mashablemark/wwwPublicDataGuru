@@ -8,7 +8,7 @@ var companyTicker = {
 };
 
 $(document).ready(function(){
-    $.getJSON('company_tickers.json', function(data){
+    $.getJSON('/sec/company_tickers.json', function(data){
         companyTickers = data;
     });
     //add key press to capture CR
@@ -21,22 +21,14 @@ $(document).ready(function(){
         event.stopPropagation();
     });
     $('.global-search-button').removeAttr('type');
-
-    //take over the search
-    takeOverSearch();
-
-    setTimeout(takeOverSearch, 100); //allow other script to run before double-checking the take-over
+    $('div.search-box-container span.button-label')
+        .removeClass('fa-search')
+        .html('<img src="/sec/global/images/search.png">');
+    $('#global-header .banner-org-name a').css("color","red").html('SEARCH DEMO: NOT OFFICIAL WEBSITE');
 
 
 });
 
-function takeOverSearch(){
-    document.body.removeEventListener
-    $(document.body).on('change', '#edit-field-meeting-category-value', function () {
-        $(this).closest('form').submit();
-    });
-
-}
 
 function smartSearch(searchTerms){
     var i, awaitingUserInput = false;
@@ -44,7 +36,7 @@ function smartSearch(searchTerms){
     //1.  check if accession number format
     if(searchTerms.search(/\b\d{10}-\d{2}-\d{6}\b/) != -1){
         $.get(
-            `/sec/getedgarfile.php?f=${encodeURIComponent('https://www.sec.gov/sws/edgar/filing/'+searchTerms+'/filerXref')}`,
+            `/sec/getWebDoc.php?f=${encodeURIComponent('https://www.sec.gov/sws/edgar/filing/'+searchTerms+'/filerXref')}`,
             function(data){
                 let $data = $(data);
                 confirmSmartChoice(searchTerms,
@@ -57,7 +49,7 @@ function smartSearch(searchTerms){
     //2.  check if CIK
     if(!isNaN(searchTerms) && parseInt(searchTerms).toString()==searchTerms  && parseInt(searchTerms)>1000 && parseInt(searchTerms)<5*1000*1000){
         $.get(
-            `/sec/getedgarfile.php?f=${encodeURIComponent('https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?page=detailed&cik='+parseInt(searchTerms)+'&main_back=2')}`,
+            `/sec/getWebDoc.php?f=${encodeURIComponent('https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?page=detailed&cik='+parseInt(searchTerms)+'&main_back=2')}`,
             function(data){
                 if(data.indexOf('The selected company was not found')==-1){
                     awaitingUserInput = true;
@@ -72,49 +64,36 @@ function smartSearch(searchTerms){
         );
         return;  //no more processing until user answers popup
     }
-    //3. check if matches ticker or company name
+    //3. check if matches (a) ticker or (b) company name
     if(companyTickers){
         var matches = [],
+            tickerMatch = false,  //separate the two so exact ticker matches are on top
             searchWords = searchTerms.replace(/\s+/g, ' ').split(' '),
             rgxes = [];
         for(i=0; i<searchWords.length; i++){
             rgxes.push(new RegExp('\\b' + searchWords[i] + '\\b', 'i'));
         }
         for(i=0; i<companyTickers.length; i++){
-            if(companyTickers[i][companyTicker.TICKER]==searchTerms.toUpperCase()){
-                matches.push(companyTickers[i]);
-                /*confirmSmartChoice(searchTerms,
-                    `Are you looking for the filings for ${companyTickers[i][companyTicker.COMPANY]} (${companyTickers[i][companyTicker.TICKER]})?`,
-                    `smartSearchCompanyLanding.php?CIK=${companyTickers[i][companyTicker.CIK]}`);
-                return;  //no more processing until user answers popup */
+            //ticker match check
+            if(companyTickers[i].ticker==searchTerms.toUpperCase()){
+                tickerMatch = companyTickers[i];
             }
-            for(var j=0;j<rgxes.length;j++){ //all keyword must be found
-                if(!companyTickers[i][companyTicker.COMPANY].match(rgxes[j])) {
-                    break;
-                } else {
-                    console.log(companyTickers[i][companyTicker.COMPANY]);
+            //company name search
+            if(searchWords.length>1 || searchWords.length==1 && searchWords[0].length>1){
+                for(var j=0;j<rgxes.length;j++){ //all keyword must be found
+                    if(!companyTickers[i].name.match(rgxes[j])) break;
                 }
+                if(j==rgxes.length) matches.push(companyTickers[i]);
             }
-            if(j==rgxes.length)
-                matches.push(companyTickers[i]);
         }
-        if(matches.length){
+        if(matches.length || tickerMatch){
             awaitingUserInput = true;
+            matches = matches.slice(0,9);
+            if(tickerMatch) matches.unshift(tickerMatch);
             confirmSmartChoice(searchTerms, 'Are you looking for filings for:', matches);
             return;  //no more processing until user answers popup
         }
     }
-    //4.  check if company name
-    /*if(searchTerms.length<=8 && companyTickers){
-        for(i=0; i<companyTickers.length; i++){
-            if(companyTickers[i][companyTicker.COMPANY].toLowerCase().indexOf(searchTerms.toLowerCase())!=-1){
-                awaitingUserInput = true;
-                confirmSmartChoice(searchTerms, `Are you looking for the filings for ${companyTickers[i][companyTicker.COMPANY]} (${companyTickers[i][companyTicker.TICKER]})?`,
-                    `smartSearchCompanyLanding.php?CIK=${companyTickers[i][companyTicker.CIK]}`);
-                return;  //no more processing until user answers popup
-            }
-        }
-    }*/
     //no special cases detected => normal search
     window.location.href = 'https://secsearch.sec.gov/search?utf8=%3F&affiliate=secsearch&query='+ encodeURI(searchTerms);
 }
@@ -124,7 +103,7 @@ function confirmSmartChoice(searchTerms, question, smartChoiceUrl) {
     $('body').unmask();
     var popup = {
         resizable: false,
-            height: "auto",
+        height: "auto",
         width: 400,
         modal: true,
         buttons: {}
@@ -133,12 +112,12 @@ function confirmSmartChoice(searchTerms, question, smartChoiceUrl) {
         return function(){
             $( this ).dialog( "close" );
             $('body').mask();
-            window.location.href =  `smartSearchCompanyLanding.php?CIK=${company[companyTicker.CIK]}`;
+            window.location.href =  `smartSearchCompanyLanding.php?CIK=${company.cik}`;
         }
     }
     if(Array.isArray(smartChoiceUrl)){
         for(var i=0;i<smartChoiceUrl.length;i++){
-            popup.buttons[smartChoiceUrl[i][companyTicker.COMPANY] + ' ('+smartChoiceUrl[i][companyTicker.TICKER]+')'] = buttonClick(smartChoiceUrl[i])
+            popup.buttons[smartChoiceUrl[i].name + ' ('+smartChoiceUrl[i].ticker+')'] = buttonClick(smartChoiceUrl[i])
         }
     } else {
         popup.buttons['Yes, search EDGAR filings'] = function(){
@@ -152,8 +131,13 @@ function confirmSmartChoice(searchTerms, question, smartChoiceUrl) {
         $('body').mask();
         window.location.href = 'https://secsearch.sec.gov/search?utf8=%3F&affiliate=secsearch&query='+ encodeURI(searchTerms);
     };
-    $('<div id="dialog-confirm" title="Search EDGAR archives or SEC web pages?"><p>'
+    var $dialog = $('<div id="dialog-confirm" title="Search EDGAR archives or SEC web pages?"><p>'
         + question + '</p></div>')
-        .dialog(popup);
+        .dialog(popup).closest('.ui-dialog');
+    $dialog.find('.ui-dialog-titlebar').attr('style', 'background-color:#273a56;color:white;');
+    $dialog.find('button').attr('style', 'display:block;');
+    $dialog.find('.ui-dialog-buttonpane .ui-dialog-buttonset').attr('style', 'float:left;');
+    $dialog.find('.ui-dialog-buttonpane').attr('style', 'border:none;margin-top:0;padding-top:0;');
+    $dialog.find('button:last').attr('style', 'display:block;background-color:#2e63b1;color:white');
 }
 
