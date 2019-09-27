@@ -24,21 +24,7 @@ $(document).ready(function(){
     $('div.search-box-container span.button-label')
         .removeClass('fa-search')
         .html('<img src="/sec/global/images/search.png">');
-    //take over the search
-    takeOverSearch();
-
-    setTimeout(takeOverSearch, 100); //allow other script to run before double-checking the take-over
-
-
 });
-
-function takeOverSearch(){
-    document.body.removeEventListener
-    $(document.body).on('change', '#edit-field-meeting-category-value', function () {
-        $(this).closest('form').submit();
-    });
-
-}
 
 function smartSearch(searchTerms){
     var i, awaitingUserInput = false;
@@ -58,48 +44,66 @@ function smartSearch(searchTerms){
     }
     //2.  check if CIK
     if(!isNaN(searchTerms) && parseInt(searchTerms).toString()==searchTerms  && parseInt(searchTerms)>1000 && parseInt(searchTerms)<5*1000*1000){
-        $.get(
-            `/sec/getWebDoc.php?f=${encodeURIComponent('https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?page=detailed&cik='+parseInt(searchTerms)+'&main_back=2')}`,
-            function(data){
-                if(data.indexOf('The selected company was not found')==-1){
-                    awaitingUserInput = true;
-                    var $results = $(data);
-                    var $companyTable = $results.find('table table table');
-                    var company = $companyTable.find('tr:eq(1) td.c2').html().trim();
-                    var cik = $companyTable.find('tr:eq(2) td.c2').html().trim();
-                    confirmSmartChoice(searchTerms, `Are you looking for the filings for ${company} (CIK ${cik})?`,
-                        `smartSearchCompanyLanding.php?CIK=${cik}`);
-                 }
+        //2a. check if in ticker symbols file = already downloaded = faster for most commonly requested CIKs
+        var searchCik = parseInt(searchTerms),
+            cikMatch = false;
+        if(companyTickers) {
+            for (i = 0; i < companyTickers.length; i++) {
+                //ticker match check
+                if (companyTickers[i].cik == searchCik) {
+                    cikMatch = companyTickers[i];
+                    break;
+                }
             }
-        );
+        }
+        if(cikMatch){
+            confirmSmartChoice(searchTerms, `Are you looking for the filings for ${cikMatch.name} (CIK ${cikMatch.cik})?`,
+                `smartSearchCompanyLanding.php?CIK=${cikMatch.cik}`);
+
+        } else {
+            //2b.  requested CIK not found in ticker file, so check SEC's edgarcompany search
+            $.get(
+                `/sec/getWebDoc.php?f=${encodeURIComponent('https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?page=detailed&cik='+ searchCik +'&main_back=2')}`,
+                function(data){
+                    if(data.indexOf('The selected company was not found')==-1 && data.indexOf('httpGet failed')==-1){
+                        awaitingUserInput = true;
+                        var $results = $(data);
+                        var $companyTable = $results.find('table table table');
+                        var company = $companyTable.find('tr:eq(1) td.c2').html().trim();
+                        var cik = $companyTable.find('tr:eq(2) td.c2').html().trim();
+                        confirmSmartChoice(searchTerms, `Are you looking for the filings for ${company} (CIK ${cik})?`,
+                            `smartSearchCompanyLanding.php?CIK=${cik}`);
+                    } else {
+                        window.location.href = 'https://secsearch.sec.gov/search?utf8=%3F&affiliate=secsearch&query='+ encodeURI(searchTerms);
+                    }
+                }
+            );
+        }
         return;  //no more processing until user answers popup
     }
     //3. check if matches (a) ticker or (b) company name
     if(companyTickers){
         var matches = [],
             tickerMatch = false,  //separate the two so exact ticker matches are on top
-            searchWords = searchTerms.replace(/\s+/g, ' ').split(' '),
-            rgxes = [];
-        for(i=0; i<searchWords.length; i++){
-            rgxes.push(new RegExp('\\b' + searchWords[i] + '\\b', 'i'));
-        }
+            searchWords = searchTerms.replace(/\s+/g, ' ').toUpperCase().split(' ');
         for(i=0; i<companyTickers.length; i++){
             //ticker match check
             if(companyTickers[i].ticker==searchTerms.toUpperCase()){
                 tickerMatch = companyTickers[i];
             }
-            //company name search
-            if(searchWords.length>1 || searchWords.length==1 && searchWords[0].length>1){
-                for(var j=0;j<rgxes.length;j++){ //all keyword must be found
-                    if(!companyTickers[i].name.match(rgxes[j])) break;
+            //company name match check
+            if(searchWords.length>1 || searchWords.length==1 && searchWords[0].length>1){  //if search phrase is a single letter, don't try to find name matches (only ticker matches)
+                var uName = ' ' + companyTickers[i].name.toUpperCase() + ' ';
+                for(var j=0; j<searchWords.length; j++){ //all keywords must be found
+                    if(uName.indexOf(' '+searchWords[j]+' ')==-1) break;
                 }
-                if(j==rgxes.length) matches.push(companyTickers[i]);
+                if(j==searchWords.length) matches.push(companyTickers[i]);
             }
         }
         if(matches.length || tickerMatch){
             awaitingUserInput = true;
             matches = matches.slice(0,9);
-            matches.unshift(tickerMatch);
+            if(tickerMatch) matches.unshift(tickerMatch);  //show exact ticker match first, if found
             confirmSmartChoice(searchTerms, 'Are you looking for filings for:', matches);
             return;  //no more processing until user answers popup
         }
