@@ -1,5 +1,6 @@
 "use strict";
 //simpleServer serves files and templates, replacing "<<fileName>>" with content of sub-template contained in the file
+//may require from Windows CMD> set NODE_TLS_UNAUTHORIZED=0
 //written for node 6.2.2
 var http = require('http');
 var https = require('https');
@@ -117,13 +118,14 @@ http.createServer(function (req, res) {
 			}
 			break;
 		default:	
-			fs.readFile('sec/'+fileName.replace('files/',''), 'utf8', function(err, body){
+			fs.readFile('sec/'+fileName.replace('files/',''), function(err, body){
+				console.log('sec/'+fileName.replace('files/',''));
 				if(err){
 					console.log(req.url);
 					console.log('Error 404: ' + 'sec/' + fileName);
 					res.writeHead(404, {'Content-Type': contentType});
 				} else {
-					res.writeHead(200, {'Content-Type': contentType});
+					res.writeHead(200, {'content-type': contentType});
 					res.write(getSubTemplates(body));
 				}
 				res.end();
@@ -158,6 +160,7 @@ function repoint(html, url = 'https://www.sec.gov/'){
 }
 
 function webGet(url, serverResponse, callback){
+	console.log(url);
 	https.get(url, (resp) => {
 		let html = '';
 		resp.on('data', (chunk) => {html += chunk;});

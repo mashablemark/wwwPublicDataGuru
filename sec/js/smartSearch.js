@@ -24,7 +24,11 @@ $(document).ready(function(){
     $('div.search-box-container span.button-label')
         .removeClass('fa-search')
         .html('<img src="/sec/global/images/search.png">');
+    $('#global-header .banner-org-name a').css("color","red").html('SEARCH DEMO: NOT OFFICIAL WEBSITE');
+
+
 });
+
 
 function smartSearch(searchTerms){
     var i, awaitingUserInput = false;
