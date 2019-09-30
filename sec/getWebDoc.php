@@ -13,6 +13,9 @@ if(isset($_REQUEST["repoint"]) && $_REQUEST["repoint"]=='true') {
 }
 $secPath = "https://www.sec.gov/";
 $edgarPath = $secPath . "Archives/edgar/data/";
+$urlParts = explode('/', $doc);
+array_pop($urlParts);
+$docPath = implode('/', $urlParts);
 $body = httpGet( $doc);
 echo $repoint ? repointHyperlinks($body): $body;
 
@@ -40,8 +43,11 @@ function httpGet($target, $timeout = 15){
 }
 
 function repointHyperlinks($html){
-    global $secPath ;
-    $repointedHTML = str_replace('href="/', 'href="' . $secPath . '/', $html);
+    global $secPath, $docPath;
+    //repoint source file relative links (e.g. local images) to SEC
+    $repointedHTML = preg_replace('/src="(\w+)/', 'src="' . $docPath. '/${1}', $html);
+    $repointedHTML = str_replace('href="/', 'href="' . $secPath . '/', $repointedHTML);
     $repointedHTML = str_replace('src="/', 'src="' . $secPath . '/', $repointedHTML);
+    $repointedHTML = str_replace('img="/', 'src="' . $secPath . '/', $repointedHTML);
     return $repointedHTML;
 }

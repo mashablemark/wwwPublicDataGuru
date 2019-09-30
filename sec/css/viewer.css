@@ -253,15 +253,13 @@ div.highcharts-tooltip {
     background-color: white;
     color: #003768;
     margin: 4px 3px 0px 10px;
-    height: 20px;
-    font-weight: bold;
+    height: 25px;
 }
 #fs-redline, #fs-go{
     background-color: white;
     color: #003768;
     margin: 2px;
     padding: 2px;
-    font-weight: bold;
 }
 .italic {
     font-style: italic;
@@ -284,3 +282,7 @@ table.dataTable thead th, table.dataTable thead td {
      border-bottom-right-radius: 3px;
      text-align: center;
  }
+iframe {
+    margin: 45px 0px;
+
+}
