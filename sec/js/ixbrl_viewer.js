@@ -4,10 +4,34 @@
  */
 
 $(document).ready(function() {
-    $('iframe').height(window.innerHeight)
+    $('iframe').height(window.innerHeight);
+
+    var aParams = location.search.substr(1).split('&'),
+        oQSParams = {}, tuplet, pathParts, path, filename;
+    for(var i=0;i<aParams.length;i++){
+        tuplet = aParams[i].split('=');
+        oQSParams[tuplet[0]] = tuplet[1];
+    }
+    if(oQSParams.doc){
+        pathParts = oQSParams.doc.split('/');
+        filename = pathParts.pop();
+        path = pathParts.join('/');
+        $.getJSON(
+            '/sec/getWebDoc.php?f='+encodeURIComponent('https://www.sec.gov/Archives/edgar/data/'+path+'/MetaLinks.json'),
+            function(data){
+                if(data && data.instance){
+                    ixbrlViewer.metaLinks = {};
+                    var tags = data.instance[filename+'.htm'].tag;
+                    for(var tag in tags){
+                        if(tags[tag].lang && tags[tag].lang["en-US"] && tags[tag].lang["en-US"].role && tags[tag].lang["en-US"].role.label){
+                            ixbrlViewer.metaLinks[tag] = tags[tag].lang["en-US"].role.label;
+                        }
+                    }
+                }
+            }
+        );
+    }
 });
-
-
 
 var ixbrlViewer = {  //single object of all viewer methods and properties
 
@@ -875,9 +899,11 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                 }
             }
             tagCombos.sort();
+            var ml = ixbrlViewer.metaLinks;
             for(i=0;i<tagCombos.length;i++){
                 var part = tagCombos[i].split(':');
-                tagOptions += '<option value="'+tagCombos[i]+'">'+part[0]+ ' ('+ self.durationNames[part[2].substr(2,1)] + ' in ' + part[1] + ')</option>';
+                var label = ml?ml['us-gaap_'+part[0]]||ml['ifrs_'+part[0]]||part[0]:part[0];
+                tagOptions += '<option value="'+tagCombos[i]+'">'+label+ ' ('+ self.durationNames[part[2].substr(2,1)] + ' in ' + part[1] + ')</option>';
             }
             var $frameTagSelector = $("#frameTagSelector").html(tagOptions).combobox({
                 select: function(){
@@ -1465,7 +1491,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
     rgxAllDash: /-/g,
     durationPrefix: 'DQ',  //after API update this will be 'DQ'
     standardTaxonomies: ['us-gaap','ifrs','dei','country','invest','currency','srt','exch','stpr','naics','rr','sic'],
-    //todo:  use MetaLinks.json to get names
+    metaLinks: false, //todo:  use MetaLinks.json to get names
     standardTagTree: {}, //filled on doc ready to provide choices in frame table viewer
     contextTree: {}, //filled on doc ready to provide period (duration) lookup
     unitTree: {} //filled on doc ready to provide units lookup
