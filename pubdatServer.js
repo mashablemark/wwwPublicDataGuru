@@ -161,6 +161,7 @@ function repoint(html, url = 'https://www.sec.gov/'){
 
 function webGet(url, serverResponse, callback){
 	console.log(url);
+	process.env["NODE_TLS_REJECT_UNAUTHORIZED"]=0;
 	https.get(url, (resp) => {
 		let html = '';
 		resp.on('data', (chunk) => {html += chunk;});
