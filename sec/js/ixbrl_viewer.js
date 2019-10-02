@@ -14,17 +14,19 @@ $(document).ready(function() {
     }
     if(oQSParams.doc){
         pathParts = oQSParams.doc.split('/');
-        filename = pathParts.pop();
+        filename = pathParts.pop();  //may be an  -index.html file
         path = pathParts.join('/');
         $.getJSON(
             '/sec/getWebDoc.php?f='+encodeURIComponent('https://www.sec.gov/Archives/edgar/data/'+path+'/MetaLinks.json'),
             function(data){
                 if(data && data.instance){
                     ixbrlViewer.metaLinks = {};
-                    var tags = data.instance[filename+'.htm'].tag;
-                    for(var tag in tags){
-                        if(tags[tag].lang && tags[tag].lang["en-US"] && tags[tag].lang["en-US"].role && tags[tag].lang["en-US"].role.label){
-                            ixbrlViewer.metaLinks[tag] = tags[tag].lang["en-US"].role.label;
+                    for(var filename in data.instance){  //in case of -index.html file is referenced
+                        var tags = data.instance[filename].tag;
+                        for(var tag in tags){
+                            if(tags[tag].lang && tags[tag].lang["en-US"] && tags[tag].lang["en-US"].role && tags[tag].lang["en-US"].role.label){
+                                ixbrlViewer.metaLinks[tag] = tags[tag].lang["en-US"].role.label;
+                            }
                         }
                     }
                 }
@@ -244,7 +246,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
 
     lookupSymbols: function() {
         var self = this,
-            userText = $('#user_symbols').val(),
+            userText = $('#user_symbols').blur().val(),
             terms = userText.toUpperCase().trim().replace(self.rgxSeparator, ' ').split(' '),
             numbers = [],
             alphas = [];
@@ -280,6 +282,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                 self.showComparedCompanies(compared);
                 $('#user_symbols').val(terms.length?'not_found: ' + terms.join(' '):'');
                 self.drawBarChart(self.vars);
+                if(data.matches.length>0) setTimeout(function(){$('#chart-options').fadeOut(500, function(){$('#chart-options .fancybox-close-small').click()})}, 1000);
             });
     },
     
@@ -381,7 +384,15 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                 if(!window.localStorage || !localStorage.getItem('columnClicked')){
                     $('#tschart .highcharts-container').prepend('<div class="tttip">click on columns for fact disclosures and links</div>');
                     setTimeout(function(){
-                        $('#tschart .tttip').fadeOut(1000, function(){$('#tschart .tttip').remove()});
+                        $('#tschart .tttip').animate({
+                                top: "0",
+                                left: "0",
+                                padding: "5px",
+                                "background-color": "transparent",
+                                "border-color": "transparent",
+                                "font-size": "10px"
+                            }
+                        , 1000);
                     }, 1000);
                 }
                 $('#popviz_durations, #popviz_units').change(function(){
@@ -1424,7 +1435,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
             '<div id="chart-options">' +
             '<h3>Compare to selected iXBRL fact with:</h3>' +
             '<div class="compare_companies_box">' +
-            'Enter CIKs or ticker symbols of companies to compare: <input id="user_symbols"><button id="lookup_user_symbols">lookup</button>' +
+            'Compare to other companies: <input id="user_symbols" placeholder=" enter ticker symbols or CIKs"><button id="lookup_user_symbols">compare</button>' +
             '<div id="compared"></div>' +
             '</div>' +
             '<div><table id="savedTimeSeries" class="display" width="100%"></table></div>' +
