@@ -89,7 +89,7 @@ function smartSearch(searchTerms){
     if(companyTickers){
         var matches = [],
             tickerMatch = false,  //separate the two so exact ticker matches are on top
-            searchWords = searchTerms.replace(/\s+/g, ' ').toUpperCase().split(' ');
+            searchWords = searchTerms.replace(/[\.;,&\s]+/g, ' ').toUpperCase().split(' ');
         for(i=0; i<companyTickers.length; i++){
             //ticker match check
             if(companyTickers[i].ticker==searchTerms.toUpperCase()){
@@ -97,7 +97,7 @@ function smartSearch(searchTerms){
             }
             //company name match check
             if(searchWords.length>1 || searchWords.length==1 && searchWords[0].length>1){  //if search phrase is a single letter, don't try to find name matches (only ticker matches)
-                var uName = ' ' + companyTickers[i].name.toUpperCase() + ' ';
+                var uName = ' ' + companyTickers[i].name.replace(/[\.;,&\s]+/g, ' ').toUpperCase() + ' ';
                 for(var j=0; j<searchWords.length; j++){ //all keywords must be found
                     if(uName.indexOf(' '+searchWords[j]+' ')==-1) break;
                 }
