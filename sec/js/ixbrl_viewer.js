@@ -12,6 +12,9 @@ $(document).ready(function() {
         tuplet = aParams[i].split('=');
         oQSParams[tuplet[0]] = tuplet[1];
     }
+    $.getJSON('/sec/company_tickers.json', function(data){
+        ixbrlViewer.companyTickers = data;
+    });
     if(oQSParams.doc){
         pathParts = oQSParams.doc.split('/');
         filename = pathParts.pop();  //may be an  -index.html file
@@ -248,42 +251,77 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
         var self = this,
             userText = $('#user_symbols').blur().val(),
             terms = userText.toUpperCase().trim().replace(self.rgxSeparator, ' ').split(' '),
+            flds = self.localStorageFields.comparedCompanies,
             numbers = [],
-            alphas = [];
-        for (var i = 0; i < terms.length; i++) {
+            alphas = [],
+            matches = [],
+            i,
+            j,
+            ct = ixbrlViewer.companyTickers,
+            compared = self.getComparedCompanies(),
+            add;
+        for (i = 0; i < terms.length; i++) {
             if (isNaN(terms[i])) {
                 alphas.push(terms[i]);
             } else {
                 numbers.push(terms[i]);
             }
         }
-        self.callAPI({
-                process: 'lookupCompanies',
-                ciks: numbers,
-                symbols: alphas
-            },
-            function (data) {
-                var compared = self.getComparedCompanies(),
-                    flds = self.localStorageFields.comparedCompanies,
-                    add;
-                for(var i=0; i<data.matches.length; i++){
-                    add = true;
-                    for(var j=0; j<compared.length && add; j++){
-                        if(compared[j][flds.cik] == data.matches[i][flds.cik]) add = false;
+        if(ct){  //new method = use company_tickers.JSON
+            if(alphas.length+numbers.length){
+                for(i=0; i<ct.length;i++){
+                    for(j=0;j<alphas.length;j++){
+                        if(ct[i].cik==numbers[j]) matches.push([ct[i].cik, ct[i].ticker, ct[i].name]);
                     }
-                    if(add) compared.push([data.matches[i][flds.cik], data.matches[i][flds.ticker], data.matches[i][flds.name]]);
+                    for(j=0;j<alphas.length;j++){
+                        if(ct[i].ticker==alphas[j]) matches.push([ct[i].cik, ct[i].ticker, ct[i].name]);
+                    }
+                }
+                for(i=0; i<matches.length; i++){
+                    add = true;
+                    for(j=0; j<compared.length && add; j++){
+                        if(compared[j][flds.cik] == matches[i][flds.cik]) add = false;
+                    }
+                    if(add) compared.push([matches[i][flds.cik], matches[i][flds.ticker], matches[i][flds.name]]);
                     //remove from user entries and leave only unfound stuff
-                    var index = terms.indexOf(data.matches[i][flds.cik]);
+                    var index = terms.indexOf(matches[i][flds.cik]);
                     if(index !== -1) terms.splice(index, 1);
-                    var index = terms.indexOf(data.matches[i][flds.ticker]);
-                    if(data.matches[i][flds.ticker] && index !== -1) terms.splice(index, 1);
+                    var index = terms.indexOf(matches[i][flds.ticker]);
+                    if(matches[i][flds.ticker] && index !== -1) terms.splice(index, 1);
                 }
                 self.saveComparedCompanies(compared);
                 self.showComparedCompanies(compared);
                 $('#user_symbols').val(terms.length?'not_found: ' + terms.join(' '):'');
                 self.drawBarChart(self.vars);
-                if(data.matches.length>0) setTimeout(function(){$('#chart-options').fadeOut(500, function(){$('#chart-options .fancybox-close-small').click()})}, 1000);
-            });
+                if(matches.length>0) setTimeout(function(){$('#chart-options').fadeOut(500, function(){$('#chart-options .fancybox-close-small').click()})}, 1000);
+            }
+        } else {
+            self.callAPI({  //old database driven method
+                    process: 'lookupCompanies',
+                    ciks: numbers,
+                    symbols: alphas
+                },
+                function (data) {
+                    for(var i=0; i<data.matches.length; i++){
+                        add = true;
+                        for(var j=0; j<compared.length && add; j++){
+                            if(compared[j][flds.cik] == data.matches[i][flds.cik]) add = false;
+                        }
+                        if(add) compared.push([data.matches[i][flds.cik], data.matches[i][flds.ticker], data.matches[i][flds.name]]);
+                        //remove from user entries and leave only unfound stuff
+                        var index = terms.indexOf(data.matches[i][flds.cik]);
+                        if(index !== -1) terms.splice(index, 1);
+                        var index = terms.indexOf(data.matches[i][flds.ticker]);
+                        if(data.matches[i][flds.ticker] && index !== -1) terms.splice(index, 1);
+                    }
+                    self.saveComparedCompanies(compared);
+                    self.showComparedCompanies(compared);
+                    $('#user_symbols').val(terms.length?'not_found: ' + terms.join(' '):'');
+                    self.drawBarChart(self.vars);
+                    if(data.matches.length>0) setTimeout(function(){$('#chart-options').fadeOut(500, function(){$('#chart-options .fancybox-close-small').click()})}, 1000);
+                });
+        }
+
     },
     
     getComparedCompanies: function(){
@@ -496,7 +534,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                                             +'/'+disclosure.adsh.replace(self.rgxAllDash,'')+'/'+ disclosure.adsh
                                             +'-index&u='+callingParams.uom+'&q='+callingParams.qtrs+'&d='+disclosure.end
                                             +'&t='+callingParams.tag
-                                            +'" style="color:blue;">'+disclosure.adsh + '</a>: ' + disclosure.rptForm
+                                            +'" target="_blank" style="color:blue;">'+disclosure.adsh + '</a>: ' + disclosure.rptForm
                                             + ' ' + disclosure.rptPeriod + ' reported ' + self.numberFormatter(disclosure.y, callingParams.uom));
                                     } else {
                                         disclosures.push(disclosure.adsh + ': ' +disclosure.rptForm + ' '
@@ -738,7 +776,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
             var tableData = false;  //fetchedFramesData will be used to array to populate frameTable
             var columnDefs = [
                 {   title: "Entity", export: false, className: "dt-body-left", render: function(data, type, row, meta){
-                        return '<a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + row[meta.col+2] + '">' + data + ' ('+row[meta.col+2] + ')</a>';
+                        return '<a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' + row[meta.col+2] + '" target="_blank">' + data + ' ('+row[meta.col+2] + ')</a>';
                     }},
                 {   title: "Entity Name", visible: false, export: true, className: "dt-body-left"},
                 {   title: "CIK", visible: false, export: true, className: "dt-body-right"},
@@ -836,7 +874,7 @@ var ixbrlViewer = {  //single object of all viewer methods and properties
                         {   title: "Disclosure", orderData: hiddenValColumn, export: false, className: "dt-body-right",  render: function(data, type, row, meta){
                                 var adsh = row[meta.col+4];
                                 return typeof(data)=='undefined' || data===null?'':'<a href="https://www.sec.gov/Archives/edgar/data/' + adsh + '/' + adsh.replace(/-/g,'')
-                                    + '/' + data + '-index.html">' + ixbrlViewer.numberFormatter(data, row[meta.col+2]) + '</a>'
+                                    + '/' + data + '-index.html" target="_blank">' + ixbrlViewer.numberFormatter(data, row[meta.col+2]) + '</a>'
                         }}, //this version of value includes the units is formatted with commas
                         {   title: frame.label, export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},  //unformatted clean version for export
                         {   title: "units", export: true, visible: false, render: function(data) {return typeof(data)=='undefined' || data===null?'':data}},
