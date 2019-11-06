@@ -41,25 +41,35 @@ after the last component file, the .txt archive always ends with
  */
 
 const fs = require('fs');
-const readline = require('readline');
+const readLine = require('readline');
 const common = require('common');  //custom set of common dB & S3 routines used by custom Lambda functions & Node programs
+const  AWS = require('aws-sdk');
+
+const region = 'us-east-1';
+const domain = 'search-edgar-fts-xej5y74lqs47mkuagdvgnoefbi'; // e.g. search-domain.region.es.amazonaws.com
+const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
+const index = 'submissions';
+const type = '_doc';
+
+//var es = new AWS.ES({apiVersion: '2015-01-01'});
 
 const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
 const rgxTags = /<[^>]+>/gm;
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 const lowChatterMode = true;
+var processNum = false;
+
 process.on('message', async (processInfo) => {
-    //console.log('CHILD got message:', processInfo);
+    const start = (new Date()).getTime();
     if(processNum && processNum != processInfo.processNum){
         console.log('changing process num from '+processNum + ' to ' + processInfo.processNum);
     }
     processNum = processInfo.processNum;
-
-    const fd = fs.openSync(processInfo.path + processInfo.name, 'r');
-    const readInterface = readline.createInterface({
-        input: fd
+    const stream = fs.createReadStream(processInfo.path + processInfo.name);
+    const readInterface = readLine.createInterface({
+        input: stream,
+        console: false
     });
-
 
 //preprocessors:
     function removeTags(text){return text.replace(rgxTags, ' ')}
@@ -72,133 +82,126 @@ process.on('message', async (processInfo) => {
         txt: {index: true},
         pdf: {index: false},  //todo: index PDFs
         gif: {index: false},
+        jpg: {index: false},
+        png: {index: false},
         fil: {index: false},
-        xsd: {index: false},
+        xsd: {index: false},  //eg. https://www.sec.gov/Archives/edgar/data/940944/000094094419000005
+        js: {index: false}, //show.js in 0000940944-19-000005.nc file
+        css: {index: false}, //report.css in 0000940944-19-000005.nc file
+        xlsx: {index: false}, //.eg https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+        zip: {index: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+        json: {index: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+
+
     };
-    let lineNumber = 0,
-        headerReadComplete = false,
-        lines = [],
+    let lines = [],
         fileMetadata = {};
 
     readInterface.on('line', function(line){
-        lines.push(line);
-        if(line=='</SEC-HEADER>'){  //process the header
+        if(line=='<DOCUMENT>' && !submissionMetadata){  //process the header  (note:  </SEC-HEADER> is not reliable
             let headerBody = lines.join('\n');
             lines = [];
             submissionMetadata = {
-                primaryDocumentName: headerInfo(headerBody, '<FILENAME>'),
                 acceptanceDateTime: headerInfo(headerBody, '<ACCEPTANCE-DATETIME>'),
                 adsh: headerInfo(headerBody, '<ACCESSION-NUMBER>'),
                 cik: headerInfo(headerBody, '<CIK>'),
                 form: headerInfo(headerBody, '<TYPE>'),
                 filingDate: headerInfo(headerBody, '<FILING-DATE>'),
-                timeStamp: now.getTime()
+                sic: headerInfo(headerBody, '<ASSIGNED-SIC>') || '',
+                state: headerInfo(headerBody, '<STATE-OF-INCORPORATION>') || headerInfo(headerBody, '<STATE>')  || '',
+                name: headerInfo(headerBody, '<CONFORMED-NAME>'),
+                timeStamp: (new Date()).getTime(),
             };
+            //console.log(processNum + '- processed submission header');
+            //console.log(submissionMetadata);
             if(!submissionMetadata.cik) console.log('failed to detect CIk in submissionMetadata');
         }
+        lines.push(line);
         if(line=='</DOCUMENT>'){  //process a component file
+            //console.log(processNum + '- processing a submission document');
+            //console.log(line);
             lines.pop();
-            if(lines.pop()!='</TEXT>') console.log('malformed document');
+            if(lines.pop()!='</TEXT>') console.log(processNum + '- malformed document');
             let fileHeader = lines.splice(0,6).join('\n');
-            let fileMetadata = {
+            fileMetadata = {
                 type: headerInfo(fileHeader, '<TYPE>'),
                 fileName: headerInfo(fileHeader, '<FILENAME>'),
                 description: headerInfo(fileHeader, '<DESCRIPTION>'),
             };
-            let ext = fileMetadata.fileName.split('.').pop().toLowerCase();
+            //console.log(fileHeader);
+            //console.log(fileMetadata);
+
+            let ext = fileMetadata.fileName.split('.').pop().toLowerCase().trim();
             if(indexedFileTypes[ext]){
                 if(indexedFileTypes[ext].index){
-                    let indexText = indexedFileTypes[ext].process ? indexedFileTypes[ext].process(lines.join('\n')) : lines.join('\n');
+                    let document = {
+                        doc_text: indexedFileTypes[ext].process ? indexedFileTypes[ext].process(lines.join('\n')) : lines.join('\n'),
+                        cik: submissionMetadata.cik,
+                        form: submissionMetadata.form,
+                        root_form: submissionMetadata.form.replace('/A',''),
+                        filingDate: `${submissionMetadata.filingDate.substr(0,4)}-${submissionMetadata.filingDate.substr(4,2)}-${submissionMetadata.filingDate.substr(6,2)}`,
+                        name: submissionMetadata.name,
+                        sic: submissionMetadata.sic,
+                        adsh: submissionMetadata.adsh,
+                        file: fileMetadata.fileName,
+                        description: fileMetadata.description,
+                    };
+                    let request = new AWS.HttpRequest(endpoint, region);
 
+                    request.method = 'PUT';
+                    request.path += `${index}/${type}/${submissionMetadata.adsh}_${fileMetadata.fileName}`;
+                    request.body = JSON.stringify(document);
+                    request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
+                    request.headers['Content-Type'] = 'application/json';
+                    // Content-Length is only needed for DELETE requests that include a request body
+                    var credentials = new AWS.EnvironmentCredentials('AWS');
+                    var signer = new AWS.Signers.V4(request, 'es');
+                    //signer.addAuthorization(credentials, new Date());
+
+                    //send to index
+                    var client = new AWS.HttpClient();
+                    client.handleRequest(request, null, function(response) {
+                        //console.log(response.statusCode + ' ' + response.statusMessage);
+                        var responseBody = '';
+                        response.on('data', function (chunk) {
+                            responseBody += chunk;
+                        });
+                        response.on('end', function (chunk) {
+                            try{
+                                let esResponse = JSON.parse(responseBody);
+                                if(response.statusCode>201 || esResponse._shards.successful!=1 || esResponse._shards.failed!=0){
+                                    console.log('Bad response code: ' + response.statusCode + responseBody);
+                                } else {
+                                    //console.log(request.path);  //for debug only
+                                }
+                            } catch (e) {
+                                console.log(response.statusCode);
+                            }
+                        });
+                    }, function(error) {
+                        console.log('Error: ' + error);
+                    });
                 }
             } else {
-                console.log('unrecognized file type '+ fileMetadata.fileName + ' in ' + submissionMetadata.adsh);
+                console.log('unrecognized file type of #'+ext+'# for '+ fileMetadata.fileName + ' in ' + submissionMetadata.adsh);
             }
+            lines = [];
         }
-        if(line=='</SEC-DOCUMENT>'){  //clean up
-            fs.closeSync(fd);
-            result = {
+        if(line=='</SUBMISSION>'){  //clean up
+            stream.close();
+            let result = {
                 status: 'ok',
                 cik: fileMetadata.cik,
-                form: fileMetadata.form,
-                processNum: processInfo.processNum
+                form: submissionMetadata.form,
+                processNum: processInfo.processNum,
+                processTime: (new Date()).getTime()-start,
             };
+            //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
             process.send(result);
         }
-
     });
-
-
-
-    var MAX_BUFFER = 250 * 1024;  //read first 250kb
-    let fileStats = fs.statSync(processInfo.path + processInfo.name),
-        //fd = fs.openSync(processInfo.path + processInfo.name, 'r'),
-        buf = Buffer.alloc(Math.min(MAX_BUFFER, fileStats.size)),
-        bytes = fs.readSync(fd, buf, 0, buf.length, 0),
-        fileBody = buf.slice(0, bytes).toString(),
-        now = new Date(),
-        filing = {
-            fileName: processInfo.name,
-            path: processInfo.path,
-            primaryDocumentName: headerInfo(fileBody, '<FILENAME>'),
-            acceptanceDateTime: headerInfo(fileBody, '<ACCEPTANCE-DATETIME>'),
-            adsh: headerInfo(fileBody, '<ACCESSION-NUMBER>'),
-            cik: headerInfo(fileBody, '<CIK>'),
-            form: headerInfo(fileBody, '<TYPE>'),
-            filingDate: headerInfo(fileBody, '<FILING-DATE>'),
-            timeStamp: now.getTime()
-        },
-        result,
-        q = common.q;
-    fs.closeSync(fd);
-
-    if(filing.adsh && filing.cik && filing.form && filing.filingDate){
-        let sql = 'replace into filings (adsh, cik, form, filedt) values ('+q(filing.adsh)+q(filing.cik)+q(filing.form)+q(filing.filingDate,true)+')';
-        await common.runQuery(sql);
-        if(OwnershipProcessor.ownershipForms[filing.form]){
-            var xmlBody = rgxXML.exec(fileBody);
-            //console.log('fileBody.length='+fileBody.length);
-            if(xmlBody===null){  //something went wrong in parse process:  log it but continue parse job
-                await common.logEvent("unable to find XML in " + filing.fileName,
-                    'FIRST 1000 CHARS:  ' + fileBody.substr(0,1000)+ '\nLAST 1000 CHARS: '+ fileBody.substr(-1000,1000), true);
-                filing.status = 'error finding XML';
-                filing.processNum = processInfo.processNum;
-                process.send(filing);
-            } else {
-                filing.xmlBody = xmlBody[0];
-                //console.log(filing.xmlBody);
-
-                filing.noS3Writes = true;
-                filing.lowChatterMode = true;
-                rootS3Folder
-                //MAIN CALL TO LAMBDA CODE:
-                result = await OwnershipProcessor.handler(filing);  //big call!!
-                result.form = result.documentType;
-                result.processNum = processInfo.processNum;
-                result.timeStamp = processInfo.timeStamp;
-                result.status = 'ok';
-            }
-        } else {
-            result = {
-                status: 'ok',
-                form: filing.form,
-                processNum: processInfo.processNum
-            }
-        }
-        let finished = new Date();
-        if(!lowChatterMode) ('child process '+result.processNum +' processed '+(filing.adsh)+' containing form '+result.form + ' in '+ (finished.getTime()-now.getTime())+'ms');
-    } else {
-        await common.logEvent('ERROR parseSubmissionTstFile: missing header info', processInfo.path + processInfo.name, true);
-        result = {
-            status: 'data error',
-            processNum: processInfo.processNum
-        };
-    }
-
-    process.send(result);
 });
 
-var processNum = false;
 
 function headerInfo(fileBody, tag){
     var tagStart = fileBody.indexOf(tag);
