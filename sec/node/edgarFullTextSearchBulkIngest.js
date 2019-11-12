@@ -27,13 +27,13 @@ Design uses two timers to monitor and kick off:
         a) each submission ingested by a spawned function running same code as production Lambda function on this instance
         b) each submission may contain multiple files of varying sizes
 
-Unzipping occurs on local drive using instances with local SSDs (e.g. md5.large), which requires formatting and mounting before use:
+Unzipping occurs on local drive using instances with local SSDs (rd5.large), which requires formatting and mounting before use:
    sudo mkfs -t xfs /dev/nvme1n1
 if new:
    sudo mkdir -m 777 /data
 else if exists:
-   sudo chmod 777 /data
    sudo mount /dev/nvme1n1 /data
+   sudo chmod 777 /data
 */
 
 var request = require('request');
@@ -47,23 +47,30 @@ var con,  //global db connection
     secDomain = 'https://www.sec.gov';
 
 const region = 'us-east-1';
-const domain = 'search-edgar-fts-xej5y74lqs47mkuagdvgnoefbi'; // e.g. search-domain.region.es.amazonaws.com
+const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
 const index = 'submissions';
 
 let  esMappings = {
     "mappings": {
+        "_source": {
+            "excludes": [
+                "doc_text"
+            ]
+        },
         "properties": {
             "doc_text": {
                 "type": "text",
-                "store": false, //this is the default value, but included to make explicit that a full copy is not stored
+                //"store": false, //this is the default value, but included to make explicit that a full copy is not stored
                 "similarity": "BM25", //this is the default value, but included to make explicit the boost algorithm. May need to investigate "boolean"
+                //"doc_values": false, //not retrievable
             },
-            "entity_name": {
+            "display_names": { //array of "conformed_nam (CIK)"
                 "type": "text",
                 "boost": 100,  //if the keyword appear in the name, boost it!
                 "fields": {
-                    "raw": {  //accessed as name.raw
-                        "type": "keyword"
+                    "raw": {  //accessed as entity_name.raw
+                        "type": "keyword",
+                        //"doc_values": true, //retrievable
                     }
                 }
             },
@@ -74,20 +81,29 @@ let  esMappings = {
             "file_description": {
                 "type": "keyword",
                 "index": false, // not searchable, but needed for display of results
+                //"doc_values": true, //retrievable
             },
             "filed": {
                 "type": "date",
                 "format": "yyyy-MM-dd",
+                //"doc_values": true, //retrievable
             },
-            "sic": {
-                "type": "integer"
+            "sics": {  //returning!
+                "type": "integer",
+                //"doc_values": true, //retrievable
             },
-            "cik": {
-                "type": "integer"
-            },
-            "form": {
+            "ciks": { //returning!
                 "type": "keyword",
-                "index": false, // not searchable, but needed for display of results
+                //"doc_values": true, //retrievable
+            },
+            "inc_states": { //returning!
+                "type": "keyword",
+                //"doc_values": true, //retrievable
+            },
+            "form": { //returning!
+                "type": "keyword",
+                "index": false, // not searchable (root_form is), but needed for display of results
+                //"doc_values": true,
             },
             "root_form": {
                 "type": "keyword",
@@ -98,7 +114,7 @@ let  esMappings = {
 
 
 var processControl = {
-    maxFileIngests: 2,  //internal processes to ingest local files leveraging Node's non-blocking model
+    maxFileIngests: 3,  //internal processes to ingest local files leveraging Node's non-blocking model
     maxQueuedDownloads: 4,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
@@ -113,9 +129,10 @@ var processControl = {
 
 (function (){  //entry point of this program
     //1. drop the entire index if it exists
-    exec(`curl -XDELETE \'https://${domain}.${region}.es.amazonaws.com/${index}'`).on('exit', ()=> {
-        const createMappings = `curl -XPUT \'https://${domain}.${region}.es.amazonaws.com/${index}' -H "Content-Type: application/json" -d '${JSON.stringify(esMappings)}'`;
+    const delIndex = `curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${index}'`;
+    exec(delIndex).on('exit', ()=> {
         //2. create the "submissions" index and set the mappings;
+        const createMappings = `curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${index}' -H "Content-Type: application/json" -d '${JSON.stringify(esMappings)}'`;
         exec(createMappings).on('exit', () => {
             //3. clear the any remains of last crawl in the /data directory
             exec('rm -r ' + processControl.directory + '*').on('exit', function (code) {
@@ -145,6 +162,9 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
     processControl.totalSubmissionsIndexed = 0;
     processControl.largeUnreadFileCount = 0;
     processControl.totalGBytesDownloaded = 0;
+    processControl.indexedByteCount = 0;
+    processControl.indexedDocumentCount = 0;
+    processControl.paths = {}; //distinct SGL property paths and max use of each path within a single submission
 
     var ingestingFlag = false;  //important state flag must be set at start of ingest and cleared when finished
     var tick = 0;
@@ -293,7 +313,7 @@ function processArchive(processControl, downloadNum, processArchiveCallback){
     var  fileStats = fs.statSync(processControl.directory + download.archiveName + '.nc.tar.gz');  //blocking call
     processControl.totalGBytesDownloaded += fileStats.size / (1024 * 1024 * 1024);
     exec('mkdir -m 777 ' + archiveDir).on('exit', function(code){
-        console.log(`unarchiving ${download.archiveName }`);
+        console.log(`${(new Date()).toISOString().substr(11, 10)} Unarchiving ${download.archiveName }`);
         var cmd = 'tar xzf ' + processControl.directory + download.archiveName + '.nc.tar.gz -C ' + archiveDir;
         exec(cmd).on('exit', function(code){
             if(code) {  //don't cancel.  Just log it.
@@ -321,15 +341,20 @@ function processArchive(processControl, downloadNum, processArchiveCallback){
 }
 
 function ingestDirectory(processControl, directory, ingestDirectoryCallback){
-    let slowestProcessingTime = 0, slowestForm, totalArchiveProcessingTime = 0, totalArchiveSubmissionsIndexed = 0;
-    
+    let slowestProcessingTime = 0,
+        slowestForm,
+        totalArchiveProcessingTime = 0,
+        totalArchiveSubmissionsIndexed = 0,
+        indexedByteCount = 0;
+
+    const startIndexTime = (new Date()).getTime();
     fs.readdir(directory, function(err, fileNames) {
         //starting on line the 11th line: CIK|Company Name|Form Type|Date Filed|txt File url part
         if(err) {
             common.logEvent("unable to read directory", directory, true);
             return false;
         } else {
-            common.logEvent('Start one-day files ingest: ' ,'directory ' + directory + ' (' + fileNames.length + ' files)', true);
+            common.logEvent((new Date()).toISOString().substr(11, 10) + ' Start one-day files ingest: ' ,'directory ' + directory + ' (' + fileNames.length + ' files)', true);
             var ingestFileNum = -1;
             processControl.processes = {ownshipsSubmissionsProcessed: 0}; //clear references to processes from last index scrap
             var ingestOverSeer = setInterval(overseeIngest, 100);  //master event loop kicks off and monitors ingest processes!
@@ -341,7 +366,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
             processControl.runningCount = 0;
             for(p=1; p<=processControl.maxFileIngests; p++){
                 if(!processControl.processes["p"+p]  || (processControl.processes["p"+p].status == 'finished')) { //start process
-                    let processInfo = procesNextFile(p);
+                    let processInfo = processNextFile(p);
                     if(processInfo) {
                         processControl.processes["p"+p] = processInfo;
                         processControl.runningCount++;
@@ -349,8 +374,8 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                 } else {  //check health
                     let now = new Date();
                     var runTime = now.getTime() - processControl.processes["p"+p].timeStamp;
-                    if(runTime>20 * 1000){ // > 20 seconds for one file
-                        common.logEvent('killing long 345 process', processControl.processes["p"+p].name);
+                    if(runTime>120 * 1000){ // > 120 seconds for one file
+                        console.log('killing long index process', processControl.processes["p"+p].name);
                         let submissionHandler = processControl.processes["p"+p].submissionHandler;
                         if(submissionHandler && submissionHandler.connected){
                             submissionHandler.removeAllListeners('message');
@@ -358,7 +383,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                             submissionHandler.disconnect()
                         }
                         delete processControl.processes["p"+p];  //process is dead to me
-                        let processInfo = procesNextFile(p);
+                        let processInfo = processNextFile(p);
                         if(processInfo) {
                             processControl.processes["p"+p] = processInfo;
                             processControl.runningCount++; //start a new process (with different control vars.)
@@ -370,18 +395,21 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
             }
 
             if(processControl.runningCount == 0) {
-                common.logEvent('Processed ownership files in '+ directory, 'Processed ' + processControl.processes.ownshipsSubmissionsProcessed + ' ownership submissions out of ' + fileNames.length + ' files'+(directFromProcessNum?' (called by processNum '+directFromProcessNum+')':''), true);
+
+                processControl.indexedByteCount += indexedByteCount;
+                common.logEvent('Indexed submissions for '+ directory, 'Indexed ' + processControl.indexedDocumentCount + ' documents in ' + fileNames.length + ' submission'+(directFromProcessNum?' (called by processNum '+directFromProcessNum+')':''));
                 clearInterval(ingestOverSeer); //finished processing this one-day; turn off overseer
                 ingestOverSeer = false;
                 if(slowestProcessingTime) {
                     console.log(`Longest processing was ${slowestProcessingTime}ms for ${slowestForm}`);
-                    console.log(`Average processing was ${Math.round(totalArchiveProcessingTime/totalArchiveSubmissionsIndexed)}ms across ${totalArchiveSubmissionsIndexed} submissions in ${directory}`);
+                    console.log(`Average processing was ${Math.round(totalArchiveProcessingTime/totalArchiveSubmissionsIndexed)}ms across ${processControl.indexedDocumentCount} files in ${totalArchiveSubmissionsIndexed} submissions in ${directory}`);
+                    console.log(`${Math.round(10*indexedByteCount/(1024*1024))/10}MB indexed for this day in ${Math.round(((new Date()).getTime()-startIndexTime)/100)/10}s; ${Math.round(10*processControl.indexedByteCount/(1024*1024))/10}MB in total`);
                 }
                 if(ingestDirectoryCallback) ingestDirectoryCallback(processControl);
             }
         }
 
-        function procesNextFile(processNum){  //the master index has reference to all submission; just get the next 3/4/5 ownership or false if none left to process
+        function processNextFile(processNum){  //the master index has reference to all submission; just get the next 3/4/5 ownership or false if none left to process
             var submissionHandler;
             while(ingestFileNum<fileNames.length-1) {
                 ingestFileNum++;
@@ -396,12 +424,15 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                         timeStamp: now.getTime()
                     };
                     //console.log(filing);
+                    filing.processedCount = processControl.processedCount; //used to save in MySQL 3 sample headers for each form type
                     if(processControl.processes['p'+processNum] && processControl.processes['p'+processNum].submissionHandler){
                         filing.submissionHandler = processControl.processes['p'+processNum].submissionHandler;
                         filing.submissionHandler.send(filing);
                     } else{
                         console.log('create child process for P'+processNum);
-                        submissionHandler = fork('edgarFullTextSearchSubmissionIngest');
+                        submissionHandler = fork('edgarFullTextSearchSubmissionIngest', {
+                            execArgv: ['--max-old-space-size=3072', '--expose-gc']  //3GB to handle very large files
+                        });
                         submissionHandler.on('message', submissionIndexed);
                         submissionHandler.on('error', err => {
                             console.log('ERROR parseSubmissionTxtFile', JSON.stringify(err));
@@ -426,14 +457,23 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                 if(result.status=='ok'){
                     //console.log('received results from process!!', result);
                     totalArchiveProcessingTime += result.processTime;
+                    indexedByteCount += result.indexedByteCount;
+                    processControl.indexedDocumentCount += result.indexedDocumentCount;
                     totalArchiveSubmissionsIndexed++;
                     if(result.processTime>slowestProcessingTime){
                         slowestProcessingTime = result.processTime;
                         slowestForm = result.form;
                     }
+                    if(!result.ciks){
+                        if(!processControl.cikNotFoundForms) processControl.cikNotFoundForms = [];
+                        processControl.cikNotFoundForms[result.form] = (processControl.cikNotFoundForms[result.form] || 0) + 1;
+                    }
                     processControl.totalSubmissionsIndexed++;
                     processControl.processes['p'+result.processNum].status = 'finishing';
-                    if(result.form) processControl.processedCount[result.form] = (processControl.processedCount[result.form]||0)+1;
+                    processControl.processedCount[result.form] = (processControl.processedCount[result.form] || 0)+1;
+                    for(let path in result.paths){ //anayltics disabled
+                        processControl.paths[path] = Math.max(processControl.paths[path]||0, result.paths[path]);
+                    }
                 } else {
                     console.log('ERROR parseSubmissionTxtFile', 'processNum ' + (result.processNum ? result.processNum : 'unknown'));
                     common.logEvent('ERROR parseSubmissionTxtFile', 'processNum ' + (result.processNum ? result.processNum : 'unknown'));
