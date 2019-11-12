@@ -72,8 +72,9 @@ process.on('message', async (processInfo) => {
         input: stream,
         console: false
     });
+    let streamState = 'open';
 
-//preprocessors:
+    //preprocessors:
     function removeTags(text){return text.replace(rgxTags, ' ').replace(/[\n\s]+/mg,' ')}
 
     const indexedFileTypes = {
@@ -110,9 +111,10 @@ process.on('message', async (processInfo) => {
         readingDocumentHeader = false,
         readingDocumentBody = false,
         indexableDocumentType = false,  //detect the doc extension up front and don't store lines in lines array for files that aren't indexed
-        indexedDocumentCount = 0;
+        indexedDocumentCount = 0,
+        isIndexing = false;  //state flag used to ensure message is sent back to parent process onl after all index is finished
 
-    readInterface.on('line', function(line){
+    readInterface.on('line', async function(line){
         let tLine = line.trim();
         if(!submissionMetadata.complete){ //still reading it in
             if(tLine=='<COMPANY-DATA>'  ||  tLine=='<OWNER-DATA>') entity = {};
@@ -176,7 +178,7 @@ process.on('message', async (processInfo) => {
                 lines.pop(); //was '</TEXT>' before extension specific processor
                 let document = {
                     doc_text: lines.join('\n'),
-                    cik: submissionMetadata.ciks,
+                    ciks: submissionMetadata.ciks,
                     form: submissionMetadata.form,
                     root_form: submissionMetadata.form.replace('/A',''),
                     filingDate: `${submissionMetadata.filingDate.substr(0,4)}-${submissionMetadata.filingDate.substr(4,2)}-${submissionMetadata.filingDate.substr(6,2)}`,
@@ -189,68 +191,81 @@ process.on('message', async (processInfo) => {
                 };
 
                 lines = [];
-                let request = new AWS.HttpRequest(endpoint, region);
-                request.method = 'PUT';
-                request.path += `${index}/${type}/${submissionMetadata.adsh}:${fileMetadata.fileName}`;
-                request.body = JSON.stringify(document);
-                request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
-                request.headers['Content-Type'] = 'application/json';
-                // Content-Length is only needed for DELETE requests that include a request body
-                var credentials = new AWS.EnvironmentCredentials('AWS');
-                var signer = new AWS.Signers.V4(request, 'es');
-                //signer.addAuthorization(credentials, new Date());
 
-                //send to index
-                var client = new AWS.HttpClient();
-                const doc_textLength = document.doc_text.length; //avoid closure below
-                client.handleRequest(request, null, function(response) {
-                    //console.log(response.statusCode + ' ' + response.statusMessage);
-                    var responseBody = '';
-                    response.on('data', function (chunk) {
-                        responseBody += chunk;
-                    });
-                    response.on('end', function (chunk) {
-                        try{
-                            let esResponse = JSON.parse(responseBody);
-                            if(response.statusCode>201 || esResponse._shards.failed!=0){
-                                console.log('Bad response. statusCode: ' + response.statusCode);
-                                console.log(responseBody);
-                            } else {
-                                indexedByteCount = indexedByteCount + (doc_textLength || 0);
-                                indexedDocumentCount++;
+                await new Promise((resolve, reject)=>{
+                    let request = new AWS.HttpRequest(endpoint, region);
+                    request.method = 'PUT';
+                    request.path += `${index}/${type}/${submissionMetadata.adsh}:${fileMetadata.fileName}`;
+                    request.body = JSON.stringify(document);
+                    request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
+                    request.headers['Content-Type'] = 'application/json';
+                    // Content-Length is only needed for DELETE requests that include a request body
+                    var credentials = new AWS.EnvironmentCredentials('AWS');
+                    var signer = new AWS.Signers.V4(request, 'es');
+                    //signer.addAuthorization(credentials, new Date());
+
+                    //send to index
+                    isIndexing = true;
+                    var client = new AWS.HttpClient();
+                    const doc_textLength = document.doc_text.length; //avoid closure below
+                    client.handleRequest(request, null, function(response) {
+                        //console.log(response.statusCode + ' ' + response.statusMessage);
+                        var responseBody = '';
+                        response.on('data', function (chunk) {
+                            responseBody += chunk;
+                        });
+                        response.on('end', function (chunk) {
+                            try{
+                                let esResponse = JSON.parse(responseBody);
+                                if(response.statusCode>201 || esResponse._shards.failed!=0){
+                                    console.log('Bad response. statusCode: ' + response.statusCode);
+                                    console.log(responseBody);
+                                } else {
+                                    indexedByteCount = indexedByteCount + (doc_textLength || 0);
+                                    indexedDocumentCount++;
+                                }
+                            } catch (e) {
+                                console.log(response.statusCode);
                             }
-                        } catch (e) {
-                            console.log(response.statusCode);
-                        }
+                            resolve(true)
+                        });
+                    }, function(error) {
+                        console.log('Error: ' + error);
+                        resolve(error);
                     });
-                }, function(error) {
-                    console.log('Error: ' + error);
+
+                    //while we are waiting for ElasticSearch callback, check free heap size and collect garbage if heap > 1GB free
+                    delete document; //but first free up any large arrays or strings
+                    let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
+                    if(memoryUsage.heapUsed > 1024*1024*1024) runGarbageCollection(processInfo);
+
                 });
 
-                //while we are waiting for ElasticSearch callback, check free heap size and collect garbage if heap > 1GB free
-                delete document; //but first free up any large arrays or strings
-                let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
-                if(memoryUsage.heapUsed > 1024*1024*1024) runGarbageCollection(processInfo);
             }
             lines = [];
         }
         if(line=='</SUBMISSION>'){  //clean up
             stream.close();
-            let result = {
-                status: 'ok',
-                ciks: fileMetadata.ciks,
-                form: submissionMetadata.form,
-                adsh: submissionMetadata.adsh,
-                indexedDocumentCount: indexedDocumentCount,
-                indexedByteCount: indexedByteCount,
-                processNum: processInfo.processNum,
-                processTime: (new Date()).getTime()-start,
-            };
-            //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
-            //console.log(result);
-            process.send(result);
+            streamState = 'closed';
+            if(!isIndexing) messageParentFinished();
         }
     });
+
+    function messageParentFinished(){
+        let result = {
+            status: 'ok',
+            ciks: submissionMetadata.ciks,
+            form: submissionMetadata.form,
+            adsh: submissionMetadata.adsh,
+            indexedDocumentCount: indexedDocumentCount,
+            indexedByteCount: indexedByteCount,
+            processNum: processInfo.processNum,
+            processTime: (new Date()).getTime()-start,
+        };
+        //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
+        //console.log(result);
+        process.send(result);
+    }
 });
 
 //used to analyze SGL path across all filing to ensure compliance
