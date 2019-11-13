@@ -72,7 +72,6 @@ process.on('message', async (processInfo) => {
         input: stream,
         console: false
     });
-    let streamState = 'open';
 
     //preprocessors:
     function removeTags(text){return text.replace(rgxTags, ' ').replace(/[\n\s]+/mg,' ')}
@@ -111,8 +110,7 @@ process.on('message', async (processInfo) => {
         readingDocumentHeader = false,
         readingDocumentBody = false,
         indexableDocumentType = false,  //detect the doc extension up front and don't store lines in lines array for files that aren't indexed
-        indexedDocumentCount = 0,
-        isIndexing = false;  //state flag used to ensure message is sent back to parent process onl after all index is finished
+        indexedDocumentCount = 0;
 
     readInterface.on('line', async function(line){
         let tLine = line.trim();
@@ -170,6 +168,7 @@ process.on('message', async (processInfo) => {
         }
 
         if(readingDocumentBody && line=='</DOCUMENT>'){  //process a component file
+            //readInterface.pause();  //pause the read file reading so that event don't stack up unnecessarily & consume memory
             //console.log(processNum + '- processing a submission document');
             readingDocumentHeader = false;
             readingDocumentBody = false;
@@ -192,6 +191,8 @@ process.on('message', async (processInfo) => {
 
                 lines = [];
 
+                console.log(`P${processNum} about to index a doc`);
+                const startIndexingTime = (new Date()).getTime();
                 await new Promise((resolve, reject)=>{
                     let request = new AWS.HttpRequest(endpoint, region);
                     request.method = 'PUT';
@@ -205,7 +206,6 @@ process.on('message', async (processInfo) => {
                     //signer.addAuthorization(credentials, new Date());
 
                     //send to index
-                    isIndexing = true;
                     var client = new AWS.HttpClient();
                     const doc_textLength = document.doc_text.length; //avoid closure below
                     client.handleRequest(request, null, function(response) {
@@ -227,34 +227,32 @@ process.on('message', async (processInfo) => {
                             } catch (e) {
                                 console.log(response.statusCode);
                             }
-                            resolve(true)
+                            resolve(true);
                         });
                     }, function(error) {
                         console.log('Error: ' + error);
                         resolve(error);
                     });
-
-                    //while we are waiting for ElasticSearch callback, check free heap size and collect garbage if heap > 1GB free
-                    delete document; //but first free up any large arrays or strings
-                    let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
-                    if(memoryUsage.heapUsed > 1024*1024*1024) runGarbageCollection(processInfo);
-
                 });
-
+                //while we are waiting for ElasticSearch callback, check free heap size and collect garbage if heap > 1GB free
+                delete document; //but first free up any large arrays or strings
+                let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
+                if(memoryUsage.heapUsed > 1.5*1024*1024*1024) runGarbageCollection(processInfo); //if more than 1.5GB used (out of 3GB)
+                //readInterface.resume();
+                console.log(`P${processNum} indexed a doc in ${(new Date()).getTime()-startIndexingTime}ms`);
             }
             lines = [];
         }
         if(line=='</SUBMISSION>'){  //clean up
             stream.close();
-            streamState = 'closed';
-            if(!isIndexing) messageParentFinished();
+            messageParentFinished();
         }
     });
 
     function messageParentFinished(){
         let result = {
             status: 'ok',
-            ciks: submissionMetadata.ciks,
+            entities: submissionMetadata.entities,
             form: submissionMetadata.form,
             adsh: submissionMetadata.adsh,
             indexedDocumentCount: indexedDocumentCount,

@@ -463,7 +463,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                         slowestProcessingTime = result.processTime;
                         slowestForm = result.form;
                     }
-                    if(!result.ciks.length){
+                    if(!result.entities.length){
                         if(!processControl.cikNotFoundForms) processControl.cikNotFoundForms = {};
                         processControl.cikNotFoundForms[result.form] = (processControl.cikNotFoundForms[result.form] || 0) + 1;
                     }
