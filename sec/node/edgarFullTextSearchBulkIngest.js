@@ -36,8 +36,8 @@ else if exists:
    sudo chmod 777 /data
 */
 
-var request = require('request');
-var util = require('util');
+//var request = require('request');
+//var util = require('util');
 var fs = require('fs');
 var exec = require('child_process').exec;
 var fork = require('child_process').fork;
@@ -114,7 +114,7 @@ let  esMappings = {
 
 
 var processControl = {
-    maxFileIngests: 3,  //internal processes to ingest local files leveraging Node's non-blocking model
+    maxFileIngests: 1,  //internal processes to ingest local files leveraging Node's non-blocking model
     maxQueuedDownloads: 4,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
