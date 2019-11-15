@@ -66,7 +66,7 @@ process.on('message', async (processInfo) => {
         console.log('changing process num from '+processNum + ' to ' + processInfo.processNum);
     }
     processNum = processInfo.processNum;
-
+console.log('new orders for P'+processNum);
     //preprocessors:
     function removeTags(text){return text.replace(rgxTags, ' ').replace(/[\n\s]+/mg,' ')}
 
@@ -107,6 +107,7 @@ process.on('message', async (processInfo) => {
             incorporationStates: [],
             sics: [],
             displayNames: [],
+            state: STATES.INIT,
         },
         entity = false,
         headerLineCount = 0,
@@ -118,29 +119,36 @@ process.on('message', async (processInfo) => {
 
     const stream = fs.createReadStream(processInfo.path + processInfo.name);
     stream
-        .on('readable', async function () {
-            let state = STATES.INIT,
-                chunk,
+        .on('readable', async function () { //fires whenever data is ready!!
+            console.log('readable fired!',processInfo);
+            let  chunk,
                 chunks = [];
             while (null !== (chunk = stream.read())) {
                 console.log(`readCount ${readCount++} (chunk length = ${chunk.length})`);
                 chunks.push(chunk);
                 let stateChanged = false;
                 do {
-                    if(state == STATES.INIT) stateChanged = stateChanged || processSubmissionHeaderChunk();
-                    if(state == STATES.DOC_HEADER) stateChanged = stateChanged || processDocHeaderChunk();
-                    if(state == STATES.DOC_BODY) stateChanged = stateChanged || await processDocChunk();
-                } while(stateChanged && state != STATES.READ_COMPLETE && state != STATES.DOC_BODY);
-                if(state == STATES.READ_COMPLETE) return;  //exit (stream has already been closed)
+                    if(submissionMetadata.state == STATES.INIT) stateChanged = processSubmissionHeaderChunk()|| stateChanged;
+                    if(submissionMetadata.state == STATES.DOC_HEADER) stateChanged =  processDocHeaderChunk() || stateChanged;
+                    if(submissionMetadata.state == STATES.DOC_BODY) stateChanged = await processDocChunk() || stateChanged;
+                } while(stateChanged && submissionMetadata.state != STATES.READ_COMPLETE);
+                if(submissionMetadata.state == STATES.READ_COMPLETE) return;  //exit (stream has already been closed)
             }
 
+            console.log('ERROR:  end of submission not detected for:', submissionMetadata);
+            console.log(chunks.join(''));
+            console.log('end of readable event');
+
+            //processor functions
             function processSubmissionHeaderChunk(){
                 let chunkLine = 0, lineStart = 0, lineEnd, assembledChunks = chunks.join('');
+                //console.log(assembledChunks);
                 while(-1 != (lineEnd=assembledChunks.indexOf('\n', lineStart))){  //process one line at a time
                     let tLine = assembledChunks.substring(lineStart, lineEnd).trim();
                     if(tLine=='<COMPANY-DATA>'  ||  tLine=='<OWNER-DATA>') entity = {};
                     if((tLine=='</COMPANY-DATA>'  ||  tLine=='</OWNER-DATA>') && entity && entity.cik) {
                         submissionMetadata.entities.push(entity);
+                        submissionMetadata.ciks.push(entity.cik);
                         if(entity.name) submissionMetadata.names.push(entity.name);
                         if(entity.incorporationState) submissionMetadata.incorporationStates.push(entity.incorporationState);
                         if(entity.sic) submissionMetadata.sics.push(entity.sic);
@@ -157,48 +165,30 @@ process.on('message', async (processInfo) => {
                     if(tLine.startsWith('<ACCEPTANCE-DATETIME>')) submissionMetadata.acceptanceDateTime = tLine.substr('<ACCEPTANCE-DATETIME>'.length);
                     if(tLine.startsWith('<ACCESSION-NUMBER>')) submissionMetadata.adsh = tLine.substr('<ACCESSION-NUMBER>'.length);
                     if(tLine.startsWith('<CIK>')) submissionMetadata.cik = tLine.substr('<CIK>'.length);
-                    lineStart = lineEnd+1;
                     //console.log(headerLineCount++, chunkLine++, tLine);
-                    if(tLine == '<DOCUMENT>'){
-                        console.log(submissionMetadata);
-                        state = STATES.DOC_HEADER;
+                    if(tLine == '<DOCUMENT>' || tLine == '</SUBMISSION>'){
+                        //console.log(submissionMetadata);
+                        submissionMetadata.state = STATES.DOC_HEADER;
                         break;
                     }
+                    lineStart = lineEnd+1;
                 }
                 if(assembledChunks.length>lineEnd)
-                    chunks = [assembledChunks.substr(lineEnd+1)];
+                    chunks = [assembledChunks.substr(lineStart)];
                 else
                     chunks = [];
-                return (state == STATES.DOC_HEADER);  //true is state advanced
+                return (submissionMetadata.state == STATES.DOC_HEADER);  //true is state advanced
             }
 
             function processDocHeaderChunk(){
-                console.log('processDocHeaderChunk');
                 let docHeaderLineCount = 0,
                     lineStart = 0,
                     lineEnd,
-                    assembledChunks = chunks.join(''); //the header is small enough to fully assemble each pass (not so with document bodies!)
-                while(-1 != (lineEnd=assembledChunks.indexOf('\n'))) { //found a line to process
+                    assembledChunks = chunks.join('')  || ''; //the header is small enough to fully assemble each pass (not so with document bodies!)
+                //console.log('assembledChunks length: ',assembledChunks.length);
+                while(-1 != (lineEnd=assembledChunks.indexOf('\n', lineStart))) { //found a line to process
                     let tLine = assembledChunks.substring(lineStart, lineEnd).trim();
-                    console.log(docHeaderLineCount++, tLine);
-                    if(tLine.startsWith('</SUBMISSION>')) {
-                        stream.close();
-                        let result = {
-                            status: 'ok',
-                            entities: submissionMetadata.entities,
-                            form: submissionMetadata.form,
-                            adsh: submissionMetadata.adsh,
-                            indexedDocumentCount: indexedDocumentCount,
-                            indexedByteCount: indexedByteCount,
-                            processNum: processInfo.processNum,
-                            processTime: (new Date()).getTime()-start,
-                        };
-                        console.log(`indexed form ${result.form} in ${result.processTime}ms`);
-                        console.log(result);
-                        process.send(result);
-                        state = STATES.READ_COMPLETE;
-                        return true;
-                    }
+                    //console.log(docHeaderLineCount++, tLine);
                     if(tLine.startsWith('<TYPE>')) fileMetadata.type = tLine.substr('<TYPE>'.length);
                     if(tLine.startsWith('<FILENAME>')) {
                         fileMetadata.fileName = tLine.substr('<FILENAME>'.length);
@@ -212,32 +202,56 @@ process.on('message', async (processInfo) => {
                     }
                     if(tLine.startsWith('<DESCRIPTION>')) fileMetadata.description = tLine.substr('<DESCRIPTION>'.length);
                     if(tLine == '<TEXT>'){
-                        state = STATES.DOC_BODY;
+                        submissionMetadata.state = STATES.DOC_BODY;
                         break;
                     }
-                    if(docHeaderLineCount==10) process.exit();
+                    if(tLine.startsWith('</SUBMISSION>')) {
+                        stream.close();
+                        let result = {
+                            status: 'ok',
+                            entities: submissionMetadata.entities,
+                            form: submissionMetadata.form,
+                            adsh: submissionMetadata.adsh,
+                            indexedDocumentCount: indexedDocumentCount,
+                            indexedByteCount: indexedByteCount,
+                            processNum: processInfo.processNum,
+                            processTime: (new Date()).getTime()-start,
+                        };
+                        console.log(`indexed form ${result.form} (${result.adsh}) in ${result.processTime}ms`);
+                        submissionMetadata.state = STATES.READ_COMPLETE;
+                        process.send(result);
+                        return true;
+                    }
+                    if(docHeaderLineCount==20) {
+                        console.log('long document header detected', chunks.join(''));
+                        process.exit();
+                    }
+                    lineStart = lineEnd+1;
                 }
                 if(assembledChunks.length>lineEnd && indexableDocumentType)
-                    chunks = [assembledChunks.substr(lineEnd+1)];
+                    chunks = [assembledChunks.substr(lineStart)];
                 else
                     chunks = [];
-                return (state == STATES.DOC_BODY);  //true is state advanced
+                return (submissionMetadata.state == STATES.DOC_BODY);  //true is state advanced
             }
 
             async function processDocChunk(){
+                //partialAssembly is a means of looking for the document end tags without create large strings for
+                //each chunk read, wich woudl cause frequent garbage collection and memory resource issues
                 const endTags = '\n</TEXT>\n</DOCUMENT>\n';
-                let endTagPosInPartial, endTagPosInFull, partialAssembly, fullAssembly;
+                let endTagPosInPartial, endTagPosInFull, partialAssembly, fullAssembly = false;
                 if(chunks.length>1){
                     partialAssembly = chunks[chunks.length-2] + chunks[chunks.length-1]
                 } else {
-                    partialAssembly = chunks[0];
+                    partialAssembly = chunks[0]  || '';
                 }
-                if(-1 == (endTagPosInPartial = partialDoc.indexOf(endTags))){
-                    if(!indexableDocumentType) chunks.pop();  //don't keep internal chunks of documents that will not be indexed
+                endTagPosInPartial = partialAssembly.indexOf(endTags);
+                if(-1 == endTagPosInPartial){
+                    if(!indexableDocumentType && chunks.length>1) chunks = [chunks.pop()];  //only keep last chunks of documents that will not be indexed
                 } else {
                     if(indexableDocumentType) {
                         //THIS IS THE POINT OF THE WHOLE ROUTINE:  TO ISOLATE AN INDEXABLE DOCUMENT!!!
-                        console.log(`P${processNum} about to index a doc`);
+                        //console.log(`P${processNum} about to index a doc`);
                         const startIndexingTime = (new Date()).getTime();
                         await new Promise((resolve, reject) => {
                             if(chunks.length > 2) {
@@ -246,8 +260,8 @@ process.on('message', async (processInfo) => {
                             }
                             let document = {
                                 doc_text: chunks.length > 2 ? //goal of awkward definition is to not create any more copies of large doc string than necessary
-                                    (indexedFileTypes[ext].process ? indexedFileTypes[ext].process(fullAssembly.substr(0,endTagPosInFull)) : fullAssembly.substr(0,endTagPos)) :
-                                    (indexedFileTypes[ext].process ? indexedFileTypes[ext].process(partialAssembly.substr(0, endTagPosInPartial)) : partialAssembly.substr(0, endTagPos)),
+                                    (indexedFileTypes[ext].process ? indexedFileTypes[ext].process(fullAssembly.substr(0,endTagPosInFull)) : fullAssembly.substr(0,endTagPosInFull)) :
+                                    (indexedFileTypes[ext].process ? indexedFileTypes[ext].process(partialAssembly.substr(0, endTagPosInPartial)) : partialAssembly.substr(0, endTagPosInPartial)),
                                 ciks: submissionMetadata.ciks,
                                 form: submissionMetadata.form,
                                 root_form: submissionMetadata.form.replace('/A', ''),
@@ -259,6 +273,7 @@ process.on('message', async (processInfo) => {
                                 file: fileMetadata.fileName,
                                 description: fileMetadata.description,
                             };
+                            //console.log(document);
                             let request = new AWS.HttpRequest(endpoint, region);
                             request.method = 'PUT';
                             request.path += `${index}/${type}/${submissionMetadata.adsh}:${fileMetadata.fileName}`;
@@ -296,39 +311,32 @@ process.on('message', async (processInfo) => {
                                 });
                             }, function (error) {
                                 console.log('Error: ' + error);
-                                resolve(error);
+                                reject(error);
                             });
                         });
                         //while we are waiting for ElasticSearch callback, check free heap size and collect garbage if heap > 1GB free
                         let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
                         if (memoryUsage.heapUsed > 1.5 * 1024 * 1024 * 1024) runGarbageCollection(processInfo); //if more than 1.5GB used (out of 3GB)
                         //readInterface.resume();
-                        console.log(`P${processNum} indexed a doc in ${(new Date()).getTime() - startIndexingTime}ms`);
+                        //console.log(`P${processNum} indexed a doc in ${(new Date()).getTime() - startIndexingTime}ms`);
                     }
 
-                    if(chunks.length>2)
-                        chunks = partialAssembly.length>=endTagPosInPartial+endTags.length ? [partialAssembly.substr(endTagPosInPartial+endTags.length)] :'';
-                    else
-                        chunks = fullAssembly.length>=endTagPosInPartial+endTags.length ? [fullAssembly.substr(endTagPosInPartial+endTags.length)] : '';
-                    state = STATES.DOC_HEADER;
+                    if(chunks.length>2){
+                        chunks = (fullAssembly.length >= (endTagPosInFull+endTags.length)) ? [fullAssembly.substr(endTagPosInFull+endTags.length)] : [];
+                    } else {
+                        chunks = (partialAssembly.length >= (endTagPosInPartial+endTags.length)) ? [partialAssembly.substr(endTagPosInPartial+endTags.length)] :[];
+                    }
+                    console.log('doc finished > changes state to DOC_HEADER=2');
+                    if(!chunks[0].startsWith('<DOCUMENT>')) {
+                        console.log('remainder after </DOCUMENT> for '+submissionMetadata.adsh, chunks[0]);
+                    }
+                    submissionMetadata.state = STATES.DOC_HEADER;
                 }
-                return (state == STATES.DOC_HEADER);  //true is state advanced
+                return (submissionMetadata.state == STATES.DOC_HEADER);  //true is state advanced
             }
         })
         .on('end', function () {
-            let result = {
-                status: 'ok',
-                entities: submissionMetadata.entities,
-                form: submissionMetadata.form,
-                adsh: submissionMetadata.adsh,
-                indexedDocumentCount: indexedDocumentCount,
-                indexedByteCount: indexedByteCount,
-                processNum: processInfo.processNum,
-                processTime: (new Date()).getTime()-start,
-            };
-            //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
-            //console.log(result);
-            process.send(result);
+            //handled instead by detection of </SUBMISSION> tag in processDocHeaderChunk
         });
 });
 
@@ -350,7 +358,7 @@ function findPaths(headerLines, partialPropertyTag, paths){
                     }
                 }
             }
-            path = path.join(':');
+            path = path.reverse().join(':');
             paths[path] = (paths[path] || 0) + 1;
         }
     });

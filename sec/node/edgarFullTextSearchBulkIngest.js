@@ -434,7 +434,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                         });
                         submissionHandler.on('message', submissionIndexed);
                         submissionHandler.on('error', err => {
-                            console.log('ERROR parseSubmissionTxtFile', JSON.stringify(err));
+                            console.log('ERROR parseSubmissionTxtFile from processNextFile', err, JSON.stringify(err));
                             common.logEvent('ERROR parseSubmissionTxtFile', JSON.stringify(err), true);
                         });
                         filing.submissionHandler = submissionHandler;
@@ -449,40 +449,39 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                 processControl.processes['p'+processNum].submissionHandler.disconnect();
                 delete processControl.processes['p'+processNum].submissionHandler;
             }
-
             return false;
+        }
 
-            function submissionIndexed(result) {
-                if(result.status=='ok'){
-                    //console.log('received results from process!!', result);
-                    totalArchiveProcessingTime += result.processTime;
-                    indexedByteCount += result.indexedByteCount;
-                    processControl.indexedDocumentCount += result.indexedDocumentCount;
-                    totalArchiveSubmissionsIndexed++;
-                    if(result.processTime>slowestProcessingTime){
-                        slowestProcessingTime = result.processTime;
-                        slowestForm = result.form;
-                    }
-                    if(!result.entities.length){
-                        if(!processControl.cikNotFoundForms) processControl.cikNotFoundForms = {};
-                        processControl.cikNotFoundForms[result.form] = (processControl.cikNotFoundForms[result.form] || 0) + 1;
-                    }
-                    processControl.totalSubmissionsIndexed++;
-                    processControl.processes['p'+result.processNum].status = 'finishing';
-                    processControl.processedCount[result.form] = (processControl.processedCount[result.form] || 0) + 1;
-                    for(let path in result.paths){ //anayltics disabled
-                        processControl.paths[path] = Math.max(processControl.paths[path]||0, result.paths[path]);
-                    }
-                } else {
-                    console.log('ERROR parseSubmissionTxtFile', 'processNum ' + (result.processNum ? result.processNum : 'unknown'));
-                    common.logEvent('ERROR parseSubmissionTxtFile', 'processNum ' + (result.processNum ? result.processNum : 'unknown'));
-                    if(result.status && result.processNum) processControl.processes['p'+result.processNum].status = result.status;
+        //helper function with access to processNextFile vars
+        function submissionIndexed(result) {
+            if(result.status=='ok'){
+                //console.log('received results from process!!', result);
+                totalArchiveProcessingTime += result.processTime;
+                indexedByteCount += result.indexedByteCount;
+                processControl.indexedDocumentCount += result.indexedDocumentCount;
+                totalArchiveSubmissionsIndexed++;
+                if(result.processTime>slowestProcessingTime){
+                    slowestProcessingTime = result.processTime;
+                    slowestForm = result.form;
                 }
-                setTimeout(()=>{
-                    processControl.processes['p'+result.processNum].status = 'finished';
-                    overseeIngest(result.processNum);
-                }, 5);  //give garbage collection a chance
+                if(!result.entities.length){
+                    if(!processControl.cikNotFoundForms) processControl.cikNotFoundForms = {};
+                    processControl.cikNotFoundForms[result.form] = (processControl.cikNotFoundForms[result.form] || 0) + 1;
+                }
+                processControl.totalSubmissionsIndexed++;
+                processControl.processes['p'+result.processNum].status = 'finishing';
+                processControl.processedCount[result.form] = (processControl.processedCount[result.form] || 0) + 1;
+                for(let path in result.paths){ //analytics disabled and not returned, so loop doesn't execute
+                    processControl.paths[path] = Math.max(processControl.paths[path]||0, result.paths[path]);
+                }
+            } else {
+                console.log('ERROR from edgarFullTextSearchSubmissionIngest', result, 'processNum ' + (result.processNum ? result.processNum : 'unknown'));
+                common.logEvent('ERROR from edgarFullTextSearchSubmissionIngest', 'processNum ' + (result.processNum ? result.processNum : 'unknown') + JSON.stringify(result));
             }
+            setTimeout(()=>{
+                processControl.processes['p'+result.processNum].status = 'finished';
+                overseeIngest(result.processNum);
+            }, 5);  //give garbage collection a chance
         }
     });
 }
