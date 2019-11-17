@@ -24,7 +24,6 @@
 <SEC-HEADER>0001041061-16-000056.hdr.sgml : 20160215
 ** SEC header body goes here **
 </SEC-HEADER>
-
 the following lines contain the component files delimited by:
 <DOCUMENT>
 <TYPE>EX-101.LAB
@@ -35,14 +34,14 @@ the following lines contain the component files delimited by:
 ** component file body goes here **
 </TEXT>
 </DOCUMENT>
-
 after the last component file, the .txt archive always ends with
 </SEC-DOCUMENT>
  */
 
 const fs = require('fs');
+const readLine = require('readline');
 const common = require('common');  //custom set of common dB & S3 routines used by custom Lambda functions & Node programs
-const  AWS = require('aws-sdk');
+const AWS = require('aws-sdk');
 
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
@@ -53,291 +52,313 @@ const type = '_doc';
 //var es = new AWS.ES({apiVersion: '2015-01-01'});
 
 const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
-const rgxTags = /<[^>]+>/gm;
+const rgxTagsAndExtraSpaces = /(<[^>]+>|[\n\s]{2,})/gm;
+const rgxExtraSpaces = /[\n\s]{2,}/mg;
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 const lowChatterMode = true;
+const READ_STATES = {
+        INIT: 'INIT',
+        DOC_HEADER: 'HEAD',
+        DOC_BODY: 'BODY',
+        DOC_FOOTER: 'FOOTER',
+        READ_COMPLETE: 'READ_COMPLETE',
+        MESSAGED_PARENT: 'MESSAGED_PARENT',
+    };
+const INDEX_STATES = {  //can't collide with READ_STATES!
+        FREE: 'FREE',
+        INDEXING: 'INDEXING',
+        INDEXED: 'INDEXED',
+        SKIPPED: 'SKIPPED',
+        INDEX_FAILED: 'INDEX_FAILED',
+    };
 var processNum = false;
+var submission;
+let submissionCount = 0;
+let processStart = (new Date()).getTime();
+let start;
 
-
-process.on('message', async (processInfo) => {
-    var indexedByteCount = 0;
-    const start = (new Date()).getTime();
+process.on('message', (processInfo) => {
+    //debug: console.log('child get the message:', processInfo);
+    let indexedByteCount = 0;
+    submissionCount++;
+    start = (new Date()).getTime();
     if(processNum && processNum != processInfo.processNum){
         console.log('changing process num from '+processNum + ' to ' + processInfo.processNum);
     }
     processNum = processInfo.processNum;
-console.log('new orders for P'+processNum);
+    const stream = fs.createReadStream(processInfo.path + processInfo.name);
+    const readInterface = readLine.createInterface({
+        input: stream,
+        console: false
+    });
+
     //preprocessors:
-    function removeTags(text){return text.replace(rgxTags, ' ').replace(/[\n\s]+/mg,' ')}
+    function removeTags(text){return text.replace(rgxTagsAndExtraSpaces, ' ');}
 
     const indexedFileTypes = {
-        htm: {index: true, process: removeTags},
-        html: {index: true, process: removeTags},
-        xml: {index: true, process: removeTags},
-        txt: {index: true},
-        pdf: {index: false},  //todo: index PDFs
-        gif: {index: false},
-        jpg: {index: false},
-        png: {index: false},
-        fil: {index: false},
-        xsd: {index: false},  //eg. https://www.sec.gov/Archives/edgar/data/940944/000094094419000005
-        js: {index: false}, //show.js in 0000940944-19-000005.nc file
-        css: {index: false}, //report.css in 0000940944-19-000005.nc file
-        xlsx: {index: false}, //.eg https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
-        zip: {index: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
-        json: {index: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
-        paper: {index: false}  //todo: verify paper is not indexable
+        htm: {indexable: true, process: removeTags},
+        html: {indexable: true, process: removeTags},
+        xml: {indexable: true, process: removeTags},
+        txt: {indexable: true},
+        pdf: {indexable: false},  //todo: indexable PDFs
+        gif: {indexable: false},
+        jpg: {indexable: false},
+        png: {indexable: false},
+        fil: {indexable: false},
+        xsd: {indexable: false},  //eg. https://www.sec.gov/Archives/edgar/data/940944/000094094419000005
+        js: {indexable: false}, //show.js in 0000940944-19-000005.nc file
+        css: {indexable: false}, //report.css in 0000940944-19-000005.nc file
+        xlsx: {indexable: false}, //.eg https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+        zip: {indexable: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+        json: {indexable: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+        paper: {indexable: false}  //todo: verify paper is not indexable
     };
-    const TAGS = {
-        DOC: '<DOCUMENT>',
-
+    submission = { //module level scope to be able to report out when killed
+        entities: [],
+        ciks: [],
+        names: [],
+        incorporationStates: [],
+        sics: [],
+        displayNames: [],
+        docs: [],
+        readState: READ_STATES.INIT,
+        indexState: INDEX_STATES.FREE,
+        indexed: false,
     };
-    const STATES = {
-        INIT: 1,
-        DOC_HEADER: 2,
-        DOC_BODY: 3,
-        DOC_FOOTER: 4,
-        READ_COMPLETE: 5
-    };
-
-    let submissionMetadata = {
-            entities: [],
-            ciks: [],
-            names: [],
-            incorporationStates: [],
-            sics: [],
-            displayNames: [],
-            state: STATES.INIT,
-        },
-        entity = false,
-        headerLineCount = 0,
-        readCount = 0,
-        fileMetadata = {},
+    
+    let entity,
         ext = false,
-        indexableDocumentType = false,  //detect the doc extension up front and don't store lines in lines array for files that aren't indexed
         indexedDocumentCount = 0;
 
-    const stream = fs.createReadStream(processInfo.path + processInfo.name);
-    stream
-        .on('readable', async function () { //fires whenever data is ready!!
-            console.log('readable fired!',processInfo);
-            let  chunk,
-                chunks = [];
-            while (null !== (chunk = stream.read())) {
-                console.log(`readCount ${readCount++} (chunk length = ${chunk.length})`);
-                chunks.push(chunk);
-                let stateChanged = false;
-                do {
-                    if(submissionMetadata.state == STATES.INIT) stateChanged = processSubmissionHeaderChunk()|| stateChanged;
-                    if(submissionMetadata.state == STATES.DOC_HEADER) stateChanged =  processDocHeaderChunk() || stateChanged;
-                    if(submissionMetadata.state == STATES.DOC_BODY) stateChanged = await processDocChunk() || stateChanged;
-                } while(stateChanged && submissionMetadata.state != STATES.READ_COMPLETE);
-                if(submissionMetadata.state == STATES.READ_COMPLETE) return;  //exit (stream has already been closed)
-            }
+    readInterface.on('line', async function(line) {
+        let tLine = line.trim();
+        //console.log(submission.readState, tLine);
+        if (submission.readState == READ_STATES.INIT) { //still reading it in
+            if (tLine == '<COMPANY-DATA>' || tLine == '<OWNER-DATA>') entity = {};
+            if ((tLine == '</COMPANY-DATA>' || tLine == '</OWNER-DATA>') && entity.cik) {
+                submission.entities.push(entity);
+                if (entity.name) submission.names.push(entity.name);
+                if (entity.incorporationState) submission.incorporationStates.push(entity.incorporationState);
+                if (entity.sic) submission.sics.push(entity.sic);
+                submission.ciks.push(entity.cik);
+                submission.displayNames.push(`${entity.name || ''} (${entity.cik})`);
+            }  //ignores <DEPOSITOR-CIK> && <OWNER-CIK> (see path analysis below)
+            if (tLine.startsWith('<CIK>')) entity.cik = tLine.substr('<CIK>'.length);
+            if (tLine.startsWith('<ASSIGNED-SIC>')) entity.sic = tLine.substr('<ASSIGNED-SIC>'.length);
+            if (tLine.startsWith('<STATE-OF-INCORPORATION>')) entity.incorporationState = tLine.substr('<STATE-OF-INCORPORATION>'.length);
+            if (tLine.startsWith('<CONFORMED-NAME>')) entity.name = tLine.substr('<CONFORMED-NAME>'.length);
 
-            console.log('ERROR:  end of submission not detected for:', submissionMetadata);
-            console.log(chunks.join(''));
-            console.log('end of readable event');
+            if (tLine.startsWith('<TYPE>')) submission.form = tLine.substr('<TYPE>'.length);
+            if (tLine.startsWith('<FILING-DATE>')) submission.filingDate = tLine.substr('<FILING-DATE>'.length);
+            if (tLine.startsWith('<ACCEPTANCE-DATETIME>')) submission.acceptanceDateTime = tLine.substr('<ACCEPTANCE-DATETIME>'.length);
+            if (tLine.startsWith('<ACCESSION-NUMBER>')) submission.adsh = tLine.substr('<ACCESSION-NUMBER>'.length);
+            if (tLine.startsWith('<CIK>')) submission.cik = tLine.substr('<CIK>'.length);
+            if (tLine == '<DOCUMENT>') submission.readState = READ_STATES.DOC_HEADER;
+        }
 
-            //processor functions
-            function processSubmissionHeaderChunk(){
-                let chunkLine = 0, lineStart = 0, lineEnd, assembledChunks = chunks.join('');
-                //console.log(assembledChunks);
-                while(-1 != (lineEnd=assembledChunks.indexOf('\n', lineStart))){  //process one line at a time
-                    let tLine = assembledChunks.substring(lineStart, lineEnd).trim();
-                    if(tLine=='<COMPANY-DATA>'  ||  tLine=='<OWNER-DATA>') entity = {};
-                    if((tLine=='</COMPANY-DATA>'  ||  tLine=='</OWNER-DATA>') && entity && entity.cik) {
-                        submissionMetadata.entities.push(entity);
-                        submissionMetadata.ciks.push(entity.cik);
-                        if(entity.name) submissionMetadata.names.push(entity.name);
-                        if(entity.incorporationState) submissionMetadata.incorporationStates.push(entity.incorporationState);
-                        if(entity.sic) submissionMetadata.sics.push(entity.sic);
-                        submissionMetadata.displayNames.push(`${entity.name||''} (${entity.cik})`);
-                        entity = false;
-                    }  //ignores <DEPOSITOR-CIK> && <OWNER-CIK> (see path analysis below)
-                    if(tLine.startsWith('<CIK>') && entity) entity.cik = tLine.substr('<CIK>'.length);
-                    if(tLine.startsWith('<ASSIGNED-SIC>') && entity) entity.sic = tLine.substr('<ASSIGNED-SIC>'.length);
-                    if(tLine.startsWith('<STATE-OF-INCORPORATION>') && entity) entity.incorporationState = tLine.substr('<STATE-OF-INCORPORATION>'.length);
-                    if(tLine.startsWith('<CONFORMED-NAME>') && entity) entity.name = tLine.substr('<CONFORMED-NAME>'.length);
+        if (submission.readState == READ_STATES.DOC_FOOTER) { //ordered above the DOC_HEADER processing section to <DOCUMENT> in both
+            if (tLine == '<DOCUMENT>') submission.readState = READ_STATES.DOC_HEADER;
+            if (tLine == '</SUBMISSION>') submission.readState = READ_STATES.READ_COMPLETE;
+        }
 
-                    if(tLine.startsWith('<TYPE>')) submissionMetadata.form = tLine.substr('<TYPE>'.length);
-                    if(tLine.startsWith('<FILING-DATE>')) submissionMetadata.filingDate = tLine.substr('<FILING-DATE>'.length);
-                    if(tLine.startsWith('<ACCEPTANCE-DATETIME>')) submissionMetadata.acceptanceDateTime = tLine.substr('<ACCEPTANCE-DATETIME>'.length);
-                    if(tLine.startsWith('<ACCESSION-NUMBER>')) submissionMetadata.adsh = tLine.substr('<ACCESSION-NUMBER>'.length);
-                    if(tLine.startsWith('<CIK>')) submissionMetadata.cik = tLine.substr('<CIK>'.length);
-                    //console.log(headerLineCount++, chunkLine++, tLine);
-                    if(tLine == '<DOCUMENT>' || tLine == '</SUBMISSION>'){
-                        //console.log(submissionMetadata);
-                        submissionMetadata.state = STATES.DOC_HEADER;
-                        break;
-                    }
-                    lineStart = lineEnd+1;
+        if (submission.readState == READ_STATES.DOC_BODY) {  //ordered above the DOC_HEADER processing section to avoid fall through of <TEXT>
+            const d = submission.docs.length - 1;
+            if (tLine == '</TEXT>') {
+                submission.readState = READ_STATES.DOC_FOOTER;
+                submission.docs[d].state = READ_STATES.READ_COMPLETE;
+                //file complete; send to ElasticSearch if not already processing a previous file
+                if (submission.indexState == INDEX_STATES.FREE) { //will only be free if all existing indexable doc have been indexed;
+                    indexWithElasticSearch(d);
                 }
-                if(assembledChunks.length>lineEnd)
-                    chunks = [assembledChunks.substr(lineStart)];
-                else
-                    chunks = [];
-                return (submissionMetadata.state == STATES.DOC_HEADER);  //true is state advanced
-            }
-
-            function processDocHeaderChunk(){
-                let docHeaderLineCount = 0,
-                    lineStart = 0,
-                    lineEnd,
-                    assembledChunks = chunks.join('')  || ''; //the header is small enough to fully assemble each pass (not so with document bodies!)
-                //console.log('assembledChunks length: ',assembledChunks.length);
-                while(-1 != (lineEnd=assembledChunks.indexOf('\n', lineStart))) { //found a line to process
-                    let tLine = assembledChunks.substring(lineStart, lineEnd).trim();
-                    //console.log(docHeaderLineCount++, tLine);
-                    if(tLine.startsWith('<TYPE>')) fileMetadata.type = tLine.substr('<TYPE>'.length);
-                    if(tLine.startsWith('<FILENAME>')) {
-                        fileMetadata.fileName = tLine.substr('<FILENAME>'.length);
-                        ext = fileMetadata.fileName.split('.').pop().toLowerCase().trim();
-                        if(indexedFileTypes[ext]){
-                            indexableDocumentType = indexedFileTypes[ext].index;
-                        } else {
-                            indexableDocumentType = false;
-                            console.log('unrecognized file type of #'+ext+'# for '+ fileMetadata.fileName + ' in ' + submissionMetadata.adsh);
-                        }
-                    }
-                    if(tLine.startsWith('<DESCRIPTION>')) fileMetadata.description = tLine.substr('<DESCRIPTION>'.length);
-                    if(tLine == '<TEXT>'){
-                        submissionMetadata.state = STATES.DOC_BODY;
-                        break;
-                    }
-                    if(tLine.startsWith('</SUBMISSION>')) {
-                        stream.close();
-                        let result = {
-                            status: 'ok',
-                            entities: submissionMetadata.entities,
-                            form: submissionMetadata.form,
-                            adsh: submissionMetadata.adsh,
-                            indexedDocumentCount: indexedDocumentCount,
-                            indexedByteCount: indexedByteCount,
-                            processNum: processInfo.processNum,
-                            processTime: (new Date()).getTime()-start,
-                        };
-                        console.log(`indexed form ${result.form} (${result.adsh}) in ${result.processTime}ms`);
-                        submissionMetadata.state = STATES.READ_COMPLETE;
-                        process.send(result);
-                        return true;
-                    }
-                    if(docHeaderLineCount==20) {
-                        console.log('long document header detected', chunks.join(''));
-                        process.exit();
-                    }
-                    lineStart = lineEnd+1;
+            } else {
+                if (submission.docs[d].lines && tLine.length) { //determined above to have a valid ext and be indexable (and not blank)
+                    const fileTypeProcessor = indexedFileTypes[submission.docs[d].ext].process;
+                    let processedLine = fileTypeProcessor ? fileTypeProcessor(tLine).trim() : tLine;
+                    if(processedLine.length) submission.docs[d].lines.push(processedLine);
                 }
-                if(assembledChunks.length>lineEnd && indexableDocumentType)
-                    chunks = [assembledChunks.substr(lineStart)];
-                else
-                    chunks = [];
-                return (submissionMetadata.state == STATES.DOC_BODY);  //true is state advanced
             }
+        }
 
-            async function processDocChunk(){
-                //partialAssembly is a means of looking for the document end tags without create large strings for
-                //each chunk read, wich woudl cause frequent garbage collection and memory resource issues
-                const endTags = '\n</TEXT>\n</DOCUMENT>\n';
-                let endTagPosInPartial, endTagPosInFull, partialAssembly, fullAssembly = false;
-                if(chunks.length>1){
-                    partialAssembly = chunks[chunks.length-2] + chunks[chunks.length-1]
-                } else {
-                    partialAssembly = chunks[0]  || '';
-                }
-                endTagPosInPartial = partialAssembly.indexOf(endTags);
-                if(-1 == endTagPosInPartial){
-                    if(!indexableDocumentType && chunks.length>1) chunks = [chunks.pop()];  //only keep last chunks of documents that will not be indexed
-                } else {
-                    if(indexableDocumentType) {
-                        //THIS IS THE POINT OF THE WHOLE ROUTINE:  TO ISOLATE AN INDEXABLE DOCUMENT!!!
-                        //console.log(`P${processNum} about to index a doc`);
-                        const startIndexingTime = (new Date()).getTime();
-                        await new Promise((resolve, reject) => {
-                            if(chunks.length > 2) {
-                                fullAssembly = chunks.join('');
-                                endTagPosInFull = fullAssembly.indexOf(endTags);
-                            }
-                            let document = {
-                                doc_text: chunks.length > 2 ? //goal of awkward definition is to not create any more copies of large doc string than necessary
-                                    (indexedFileTypes[ext].process ? indexedFileTypes[ext].process(fullAssembly.substr(0,endTagPosInFull)) : fullAssembly.substr(0,endTagPosInFull)) :
-                                    (indexedFileTypes[ext].process ? indexedFileTypes[ext].process(partialAssembly.substr(0, endTagPosInPartial)) : partialAssembly.substr(0, endTagPosInPartial)),
-                                ciks: submissionMetadata.ciks,
-                                form: submissionMetadata.form,
-                                root_form: submissionMetadata.form.replace('/A', ''),
-                                filingDate: `${submissionMetadata.filingDate.substr(0, 4)}-${submissionMetadata.filingDate.substr(4, 2)}-${submissionMetadata.filingDate.substr(6, 2)}`,
-                                display_names: submissionMetadata.displayNames,
-                                sics: submissionMetadata.sics,
-                                inc_states: submissionMetadata.incorporationStates,
-                                adsh: submissionMetadata.adsh,
-                                file: fileMetadata.fileName,
-                                description: fileMetadata.description,
-                            };
-                            //console.log(document);
-                            let request = new AWS.HttpRequest(endpoint, region);
-                            request.method = 'PUT';
-                            request.path += `${index}/${type}/${submissionMetadata.adsh}:${fileMetadata.fileName}`;
-                            request.body = JSON.stringify(document);
-                            request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
-                            request.headers['Content-Type'] = 'application/json';
-                            // Content-Length is only needed for DELETE requests that include a request body
-                            var credentials = new AWS.EnvironmentCredentials('AWS');
-                            var signer = new AWS.Signers.V4(request, 'es');
-                            //signer.addAuthorization(credentials, new Date());
-
-                            //send to index
-                            var client = new AWS.HttpClient();
-                            const doc_textLength = document.doc_text.length; //avoid closure below
-                            client.handleRequest(request, null, function (response) {
-                                //console.log(response.statusCode + ' ' + response.statusMessage);
-                                var responseBody = '';
-                                response.on('data', function (chunk) {
-                                    responseBody += chunk;
-                                });
-                                response.on('end', function (chunk) {
-                                    try {
-                                        let esResponse = JSON.parse(responseBody);
-                                        if (response.statusCode > 201 || esResponse._shards.failed != 0) {
-                                            console.log('Bad response. statusCode: ' + response.statusCode);
-                                            console.log(responseBody);
-                                        } else {
-                                            indexedByteCount = indexedByteCount + (doc_textLength || 0);
-                                            indexedDocumentCount++;
-                                        }
-                                    } catch (e) {
-                                        console.log(response.statusCode);
-                                    }
-                                    resolve(true);
-                                });
-                            }, function (error) {
-                                console.log('Error: ' + error);
-                                reject(error);
-                            });
-                        });
-                        //while we are waiting for ElasticSearch callback, check free heap size and collect garbage if heap > 1GB free
-                        let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
-                        if (memoryUsage.heapUsed > 1.5 * 1024 * 1024 * 1024) runGarbageCollection(processInfo); //if more than 1.5GB used (out of 3GB)
-                        //readInterface.resume();
-                        //console.log(`P${processNum} indexed a doc in ${(new Date()).getTime() - startIndexingTime}ms`);
-                    }
-
-                    if(chunks.length>2){
-                        chunks = (fullAssembly.length >= (endTagPosInFull+endTags.length)) ? [fullAssembly.substr(endTagPosInFull+endTags.length)] : [];
+        if (submission.readState == READ_STATES.DOC_HEADER) {
+            if (tLine == '<DOCUMENT>') {
+                submission.docs.push({});
+                //console.log(`created doc #${submission.docs.length}`);
+            } else {
+                const d = submission.docs.length - 1;
+                if (tLine.startsWith('<TYPE>')) submission.docs[d].type = tLine.substr('<TYPE>'.length);
+                if (tLine.startsWith('<FILENAME>')) {
+                    submission.docs[d].fileName = tLine.substr('<FILENAME>'.length);
+                    submission.docs[d].ext = submission.docs[d].fileName.split('.').pop().toLowerCase().trim();
+                    if (indexedFileTypes[submission.docs[d].ext]) {
+                        if (indexedFileTypes[submission.docs[d].ext].indexable) submission.docs[d].lines = [];
                     } else {
-                        chunks = (partialAssembly.length >= (endTagPosInPartial+endTags.length)) ? [partialAssembly.substr(endTagPosInPartial+endTags.length)] :[];
+                        console.log(`unrecognized file type of #${submission.docs[d].ext}# for ${submission.docs[d].fileName} in ${submission.adsh}`);
                     }
-                    console.log('doc finished > changes state to DOC_HEADER=2');
-                    if(!chunks[0].startsWith('<DOCUMENT>')) {
-                        console.log('remainder after </DOCUMENT> for '+submissionMetadata.adsh, chunks[0]);
-                    }
-                    submissionMetadata.state = STATES.DOC_HEADER;
                 }
-                return (submissionMetadata.state == STATES.DOC_HEADER);  //true is state advanced
+                if (tLine.startsWith('<DESCRIPTION>')) submission.docs[d].description = tLine.substr('<DESCRIPTION>'.length);
+                if (tLine == '<TEXT>') {
+                    submission.readState = READ_STATES.DOC_BODY;
+                    if(submission.docs[d].description == 'IDEA: XBRL DOCUMENT')submission.docs[d].lines = false; //don't index the DERA docs
+                }
             }
-        })
-        .on('end', function () {
-            //handled instead by detection of </SUBMISSION> tag in processDocHeaderChunk
-        });
+        }
+
+
+        if (submission.readState == READ_STATES.READ_COMPLETE) {
+            const d = submission.docs.length - 1;
+            if(submission.indexed == d && (submission.docs[d].state == INDEX_STATES.INDEXED || submission.docs[d].state == INDEX_STATES.SKIPPED || submission.docs[d].state == INDEX_STATES.INDEX_FAILED )){
+                messageParentFinished('ok');
+            }
+        }
+    });
+
+    function indexWithElasticSearch(d) {
+        if(submission.docs[d].state == READ_STATES.READ_COMPLETE){
+            submission.indexState = INDEX_STATES.INDEXING;
+            submission.indexed = d;
+            if(submission.docs[d].lines && submission.docs[d].lines.length){
+                submission.docs[d].state = INDEX_STATES.INDEXING;
+                const fileTypeProcessor = indexedFileTypes[submission.docs[d].ext].process;
+                readInterface.pause();  //does not immediately stop the line events.  A few more might come, but this stops the torrent
+                let doc_textLength = 0;
+                //console.log(submission.docs[d].lines);
+                for(let i=0;i<submission.docs[d].lines.length;i++) doc_textLength += submission.docs[d].lines[i].length;
+                //console.log(`P${processNum} about to index a doc`);
+                const startIndexingTime = (new Date()).getTime();
+                let request = new AWS.HttpRequest(endpoint, region);
+                request.method = 'PUT';
+                request.path += `${index}/${type}/${submission.adsh}:${submission.docs[d].fileName}`;
+                request.body = JSON.stringify({  //try not to create unnecessary copies of the document text in memory
+                    doc_text: fileTypeProcessor ? fileTypeProcessor(submission.docs[d].lines.join('\n')) : submission.docs[d].lines.join('\n'),
+                    ciks: submission.ciks,
+                    form: submission.form,
+                    root_form: submission.form.replace('/A', ''),
+                    filingDate: `${submission.filingDate.substr(0, 4)}-${submission.filingDate.substr(4, 2)}-${submission.filingDate.substr(6, 2)}`,
+                    display_names: submission.displayNames,
+                    sics: submission.sics,
+                    inc_states: submission.incorporationStates,
+                    adsh: submission.adsh,
+                    file: submission.fileName,
+                    description: submission.description,
+                });
+                //console.log(JSON.parse(request.body));
+                request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
+                request.headers['Content-Type'] = 'application/json';
+                // Content-Length is only needed for DELETE requests that include a request body
+                var credentials = new AWS.EnvironmentCredentials('AWS');
+                var signer = new AWS.Signers.V4(request, 'es');
+                //signer.addAuthorization(credentials, new Date());
+
+                //send to index
+                let client = new AWS.HttpClient();
+                /*let timeoutTimer = setTimeout(function(){
+                    console.log('retrying ES timed out call for :', submission.fileName, submission.docs[d].fileName, 'length =',doc_textLength);
+                    request.
+                }, 10000); //set less than parent process's kill time of 60s*/
+                client.handleRequest(request, {connectTimeout: 100, timeout: 20000}, function(response) {
+                    //console.log(response.statusCode + ' ' + response.statusMessage);
+                    var responseBody = '';
+                    response.on('data', function (chunk) {
+                        responseBody += chunk;
+                        /*try{
+                            let esResponse = JSON.parse(responseBody);
+                            if(esResponse._shards.failed==0 && esResponse._shards.total==esResponse._shards.successful){
+                                clearTimeout(timeoutTimer);
+                                indexedByteCount = indexedByteCount + (doc_textLength || 0);
+                                indexedDocumentCount++;
+                                submission.docs[d].state == INDEX_STATES.INDEXED;
+                                response.removeAllListeners('data');
+                                response.removeAllListeners('end');
+                                nextDoc();
+                            }
+                        } catch (e) {
+                            //in progress
+                            submission.docs[d].state = responseBody;
+                        }*/
+                    });
+                    response.on('end', function (chunk) {
+                        if(submission.docs[d].tries) console.log('success on retry #'+submission.docs[d].tries);
+                        try{
+                            let esResponse = JSON.parse(responseBody);
+                            if(response.statusCode>201 || esResponse._shards.failed!=0){
+                                console.log('Bad response. statusCode: ' + response.statusCode);
+                                console.log(responseBody);
+                            } else {
+                                indexedByteCount = indexedByteCount + (doc_textLength || 0);
+                                indexedDocumentCount++;
+                            }
+                        } catch (e) {
+                            console.log(response.statusCode);
+                        }
+                        submission.docs[d].state = INDEX_STATES.INDEXED;
+                        nextDoc();
+                    });
+                }, function(error) {
+                    console.log('Error: ' + error);
+                    submission.docs[d].state = INDEX_STATES.INDEX_FAILED;
+                    submission.docs[d].tries = (submission.docs[d].tries||1)+1;
+                    if(submission.docs[d].tries<=3){
+                        indexWithElasticSearch(d);
+                    } else {
+                        nextDoc();
+                    }
+                });
+                //while we are waiting for ElasticSearch callback, check free heap size and collect garbage if heap > 1GB free
+                submission.docs[d].lines = 'removed after sending to index'; //but first free up any large arrays or strings
+                let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
+                if(memoryUsage.heapUsed > 1.5*1024*1024*1024) runGarbageCollection(processInfo); //if more than 1.5GB used (out of 3GB)
+                //readInterface.resume();
+                //console.log(`P${processNum} indexed a doc #${d} from submission #${submissionCount} in ${(new Date()).getTime()-startIndexingTime}ms`);
+            } else {
+                //console.log(`skipping document #${d} ${submission.docs[d].fileName} in processing of ${submission.adsh}`);
+                submission.docs[d].state = INDEX_STATES.SKIPPED;
+                nextDoc();
+            }
+        }
+        function nextDoc() {
+            if(submission.docs.length-1>d) {
+                if(submission.docs[d+1].state==READ_STATES.READ_COMPLETE) {
+                    indexWithElasticSearch(d + 1);
+                } else {
+                    submission.indexState = INDEX_STATES.FREE;
+                    //console.log('resuming (doc not complete)');
+                    readInterface.resume();
+                }
+            } else {
+                if(submission.readState==READ_STATES.READ_COMPLETE) {
+                    messageParentFinished('ok');
+                } else {
+                    submission.indexState = INDEX_STATES.FREE;
+                    if(submission.readState!=READ_STATES.MESSAGED_PARENT) {
+                        //console.log('resuming (submission  not complete)');
+                        readInterface.resume();
+                    }
+                }
+            }
+        }
+    }
+
+    function messageParentFinished(status){
+        //console.log(`submission complete; messaging parent`);
+        submission.readState = READ_STATES.MESSAGED_PARENT;
+        readInterface.close();
+        stream.close();
+        let result = {
+            status: status,
+            filePath: processInfo.path,
+            fileName: processInfo.name,
+            entities: submission.entities,
+            form: submission.form,
+            adsh: submission.adsh,
+            indexedDocumentCount: indexedDocumentCount,
+            indexedByteCount: indexedByteCount,
+            processNum: processInfo.processNum,
+            processTime: (new Date()).getTime()-start,
+        };
+        //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
+        //console.log(result);
+        process.send(result);
+    }
 });
 
 //used to analyze SGL path across all filing to ensure compliance
@@ -358,7 +379,7 @@ function findPaths(headerLines, partialPropertyTag, paths){
                     }
                 }
             }
-            path = path.reverse().join(':');
+            path = path.join(':');
             paths[path] = (paths[path] || 0) + 1;
         }
     });
@@ -373,10 +394,20 @@ process.on('disconnect', async () => {
                 console.log('closed mysql connection held by parseSubmissionTxtFile (processNum ' +processNum+')');
                 common.con = false;
                 common.con = false;
-                console.log('child process disconnected and shutting down');
             }
         });
     }
+    console.log(`${(new Date()).toISOString().substr(11, 10)} child process P${processNum} disconnected and shutting down`);
+    if(submission.readState != READ_STATES.MESSAGED_PARENT) {
+        submission.submissionCount = submissionCount;
+        submission.processRunTime = ((new Date()).getTime()-processStart)/1000;
+        submission.lastSubmissionRunTime = ((new Date()).getTime() - start)/1000;
+        submission.process = 'P'+processNum;
+        if(submission.lastSubmissionRunTime>60){
+            console.log(submission.process, submission.lastSubmissionRunTime, submission.adsh, submission.readState, submission.indexState, submission.indexed, submission.docs[submission.indexed].state);
+        }
+    }
+    process.exit();
 });
 
 function runGarbageCollection(processInfo){
@@ -465,5 +496,4 @@ function runGarbageCollection(processInfo){
 73: "<SUBMISSION>:<SUBJECT-COMPANY>:<COMPANY-DATA>:<CONFORMED-NAME>"
 74: "<SUBMISSION>:<SUBJECT-COMPANY>:<COMPANY-DATA>:<STATE-OF-INCORPORATION>"
 75: "<SUBMISSION>:<SUBJECT-COMPANY>:<FORMER-COMPANY>:<FORMER-CONFORMED-NAME>"
-
  */
