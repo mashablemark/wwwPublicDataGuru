@@ -114,7 +114,7 @@ let  esMappings = {
 
 
 var processControl = {
-    maxFileIngests: 1,  //internal processes to ingest local files leveraging Node's non-blocking model
+    maxFileIngests: 4,  //internal processes to ingest local files leveraging Node's non-blocking model
     maxQueuedDownloads: 4,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
@@ -201,7 +201,7 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
                 var runTime = Date.now() - processControl.activeDownloads["d" + d].timeStamp;
                 var status = processControl.activeDownloads["d" + d].status;
                 if ((runTime > (10 * 60 * 1000)) && (status == 'downloading' || status == 'unarchiving')) { // > 10 minutes for one gz archive
-                    common.logEvent('killing long ' + status + ' process', processControl.activeDownloads["d" + d].url);
+                    common.logEvent(`${(new Date()).toISOString().substr(11, 10)} killing long '${status} process`, processControl.activeDownloads["d" + d].url);
                     addDayToReprocess(processControl.activeDownloads["d" + d].archiveDate, processControl.activeDownloads["d" + d].status);
                     delete processControl.activeDownloads["d" + d];  //if process actually returns, it will gracefully end without proper control reference
                     processControl.killedProcessCount++;  //will be restarted on next timer tick
@@ -373,8 +373,9 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                 } else {  //check health
                     let now = new Date();
                     var runTime = now.getTime() - processControl.processes["p"+p].timeStamp;
-                    if(runTime>120 * 1000){ // > 120 seconds for one file
-                        console.log('killing long index process', processControl.processes["p"+p].name);
+                    if(runTime>60 * 1000){ // > 60 seconds for one file.  Note: child process has its own timeout time for a unresponsive ES call of 20s per call
+                        console.log(`${(new Date()).toISOString().substr(11, 10)} killing long index process ${processControl.processes["p"+p].name}`);
+                        //process.exit();
                         let submissionHandler = processControl.processes["p"+p].submissionHandler;
                         if(submissionHandler && submissionHandler.connected){
                             submissionHandler.removeAllListeners('message');
@@ -394,9 +395,8 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
             }
 
             if(processControl.runningCount == 0) {
-
                 processControl.indexedByteCount += indexedByteCount;
-                common.logEvent('Indexed submissions for '+ directory, 'Indexed ' + processControl.indexedDocumentCount + ' documents in ' + fileNames.length + ' submission'+(directFromProcessNum?' (called by processNum '+directFromProcessNum+')':''), true);
+                common.logEvent(`${(new Date()).toISOString().substr(11, 10)} Indexed submissions for ${directory}`, `Indexed ${processControl.indexedDocumentCount} documents in ${fileNames.length} submissions${directFromProcessNum ? ' (called by processNum '+directFromProcessNum+')' : ''}`, true);
                 clearInterval(ingestOverSeer); //finished processing this one-day; turn off overseer
                 ingestOverSeer = false;
                 if(slowestProcessingTime) {
@@ -408,7 +408,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
             }
         }
 
-        function processNextFile(processNum){  //the master index has reference to all submission; just get the next 3/4/5 ownership or false if none left to process
+        function processNextFile(processNum){  //the master index has reference to all submission; send the next files or false if none left to process
             var submissionHandler;
             while(ingestFileNum<fileNames.length-1) {
                 ingestFileNum++;
@@ -423,12 +423,11 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                         timeStamp: now.getTime()
                     };
                     //console.log(filing);
-                    filing.processedCount = processControl.processedCount; //used to save in MySQL 3 sample headers for each form type
                     if(processControl.processes['p'+processNum] && processControl.processes['p'+processNum].submissionHandler){
                         filing.submissionHandler = processControl.processes['p'+processNum].submissionHandler;
                         filing.submissionHandler.send(filing);
                     } else{
-                        console.log('create child process for P'+processNum);
+                        //console.log('create child process for P'+processNum);
                         submissionHandler = fork('edgarFullTextSearchSubmissionIngest', {
                             execArgv: ['--max-old-space-size=3072', '--expose-gc']  //3GB to handle very large files
                         });

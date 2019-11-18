@@ -136,7 +136,7 @@ function processQuarterlyIndex(processControl, callback){
                         if(lineNum) {
                             processControl.runningCount++;
                             process345Submission(i, lineNum);  //start a new process with different control vars.
-                        } 
+                        }
                     }
                 }
                 if(processControl.runningCount==0) callback(processControl)  //finished processing this quarterly
@@ -403,12 +403,12 @@ function save345Submission(s){
     for(var t=0; t<s.transactions.length;t++){
         var trans = s.transactions[t];
         sql ='INSERT INTO ownership_transaction (adsh, num, isderivative, formtype, security, price, transdt, transcode, equityswap, shares, '
-        + ' pricepershare, acquiredisposed, underlyingsecurity, underlyingshares, sharesownedafter,  directindirect, footnotes)'
-        + ' value ('+q(s.adsh)+(t+1)+','+trans.derivative+','+q(trans.formType)+ q(trans.securityTitle)+q(trans.conversionOrExercisePrice)
-        + q(trans.transactionDate)+q(trans.transactionCode)+q(trans.equitySwap)+q(trans.transactionShares)
-        + q(trans.transactionPricePerShare)+ q(trans.transactionAcquiredDisposedCode)+ q(trans.underlyingSecurityTitle)
-        + q(trans.underlyingSecurityShares)+ q(trans.sharesOwnedFollowingTransaction)+ q(trans.directOrIndirectOwnership)
-        + q(trans.footnotes.join('; '), true) + ')';
+            + ' pricepershare, acquiredisposed, underlyingsecurity, underlyingshares, sharesownedafter,  directindirect, footnotes)'
+            + ' value ('+q(s.adsh)+(t+1)+','+trans.derivative+','+q(trans.formType)+ q(trans.securityTitle)+q(trans.conversionOrExercisePrice)
+            + q(trans.transactionDate)+q(trans.transactionCode)+q(trans.equitySwap)+q(trans.transactionShares)
+            + q(trans.transactionPricePerShare)+ q(trans.transactionAcquiredDisposedCode)+ q(trans.underlyingSecurityTitle)
+            + q(trans.underlyingSecurityShares)+ q(trans.sharesOwnedFollowingTransaction)+ q(trans.directOrIndirectOwnership)
+            + q(trans.footnotes.join('; '), true) + ')';
         runQuery(sql);
     }
 }

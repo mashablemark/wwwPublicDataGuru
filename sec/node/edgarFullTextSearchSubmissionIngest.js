@@ -49,10 +49,10 @@ const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
 const index = 'submissions';
 const type = '_doc';
 
-//var es = new AWS.ES({apiVersion: '2015-01-01'});
-
+//const es = new AWS.ES({apiVersion: '2015-01-01'});
 const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
-const rgxTagsAndExtraSpaces = /(<[^>]+>|[\n\s]{2,})/gm;
+const rgxTagsAndExtraSpaces = /(<[^>]+>|[\n\s]{2,})/gm;  //removes html and xml tags and extra white space
+const rgxTagsExtraSpacesAndNumbers = /(<[^>]+>|[\n\s]{2,}|\$?-?\b[0-9,.]+\b)/gm;  //removes number words (but not alphanumeric words!) in addition to html and xml tags and extra white space
 const rgxExtraSpaces = /[\n\s]{2,}/mg;
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 const lowChatterMode = true;
@@ -93,7 +93,7 @@ process.on('message', (processInfo) => {
     });
 
     //preprocessors:
-    function removeTags(text){return text.replace(rgxTagsAndExtraSpaces, ' ');}
+    function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
 
     const indexedFileTypes = {
         htm: {indexable: true, process: removeTags},
@@ -397,7 +397,7 @@ process.on('disconnect', async () => {
             }
         });
     }
-    console.log(`${(new Date()).toISOString().substr(11, 10)} child process P${processNum} disconnected and shutting down`);
+    //console.log(`${(new Date()).toISOString().substr(11, 10)} child process P${processNum} disconnected and shutting down`);
     if(submission.readState != READ_STATES.MESSAGED_PARENT) {
         submission.submissionCount = submissionCount;
         submission.processRunTime = ((new Date()).getTime()-processStart)/1000;

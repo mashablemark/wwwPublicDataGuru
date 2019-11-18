@@ -49,15 +49,15 @@ exports.searchEFTS = async (r, context) => {
                     "size": 30
                 }
             },
-            "cik_filter": {
+            "entity_filter": {
                 "terms": {
-                    "field": "ciks",
+                    "field": "display_names.raw",
                     "size": 30
                 }
             },
             "sic_filter": {
                 "terms": {
-                    "field": "sic",
+                    "field": "sics",
                     "size": 30
                 }
             },
