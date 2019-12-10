@@ -306,7 +306,7 @@ process.on('message', (processInfo) => {
                 //while we are waiting for ElasticSearch callback, check free heap size and collect garbage if heap > 1GB free
                 submission.docs[d].lines = 'removed after sending to index'; //but first free up any large arrays or strings
                 let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
-                if(memoryUsage.heapUsed > 1.5*1024*1024*1024) runGarbageCollection(processInfo); //if more than 1.5GB used (out of 3GB)
+                if(memoryUsage.heapUsed > 0.75*1024*1024*1024) runGarbageCollection(processInfo); //if more than 0.75GB used (out of 1GB)
                 //readInterface.resume();
                 //console.log(`P${processNum} indexed a doc #${d} from submission #${submissionCount} in ${(new Date()).getTime()-startIndexingTime}ms`);
             } else {

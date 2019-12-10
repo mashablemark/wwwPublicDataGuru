@@ -38,17 +38,28 @@ else if exists:
 
 //var request = require('request');
 //var util = require('util');
-var fs = require('fs');
-var exec = require('child_process').exec;
-var fork = require('child_process').fork;
-var common = require('common');
-
-var con,  //global db connection
-    secDomain = 'https://www.sec.gov';
+const fs = require('fs');
+const exec = require('child_process').exec;
+const fork = require('child_process').fork;
+const common = require('common');
+const secDomain = 'https://www.sec.gov';
 
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
 const index = 'submissions';
+const processControl = {
+    maxFileIngests: 4,  //internal processes to ingest local files leveraging Node's non-blocking model
+    maxQueuedDownloads: 4,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
+    maxRetries: 3,
+    retries: {},  // record of retried archive downloads / unzips
+    start: new Date("2019-01-01"),  //restart date.  If none, the lesser of the max(filedt) and 2008-01-01 is used
+    end: new Date("2019-03-31"), //if false or not set, scrape continues up to today
+    days: [
+    ], //ingest specific days (also used as retry queue) e.g. ['2013-08-12', '2013-08-14', '2013-11-13', '2013-11-15', '2014-03-04', '2014-08-04', '2014-11-14', '2015-03-31','2015-04-30', '2016-02-18', '2016-02-26', '2016-02-29', '2017-02-24', '2017-02-28', '2017-04-27','2017-05-10', '2017-08-03', '2017-08-04', '2017-08-08', '2017-10-16', '2017-10-23', '2017-10-30', '2017-11-03','2017-11-06', '2017-12-20', '2018-04-26', '2018-04-27', '2018-04-30', '2018-05-01', '2018-11-14']],
+    processes: {},
+    activeDownloads: {},
+    directory: '/data/' //use local 75GB SSD mounted at /data instead of './dayfiles/' on full EBS
+};
 
 let  esMappings = {
     "mappings": {
@@ -110,21 +121,6 @@ let  esMappings = {
             },
         }
     }
-};
-
-
-var processControl = {
-    maxFileIngests: 4,  //internal processes to ingest local files leveraging Node's non-blocking model
-    maxQueuedDownloads: 4,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
-    maxRetries: 3,
-    retries: {},  // record of retried archive downloads / unzips
-    start: new Date("2019-01-01"),  //restart date.  If none, the lesser of the max(filedt) and 2008-01-01 is used
-    end: new Date("2019-03-31"), //if false or not set, scrape continues up to today
-    days: [
-    ], //ingest specific days (also used as retry queue) e.g. ['2013-08-12', '2013-08-14', '2013-11-13', '2013-11-15', '2014-03-04', '2014-08-04', '2014-11-14', '2015-03-31','2015-04-30', '2016-02-18', '2016-02-26', '2016-02-29', '2017-02-24', '2017-02-28', '2017-04-27','2017-05-10', '2017-08-03', '2017-08-04', '2017-08-08', '2017-10-16', '2017-10-23', '2017-10-30', '2017-11-03','2017-11-06', '2017-12-20', '2018-04-26', '2018-04-27', '2018-04-30', '2018-05-01', '2018-11-14']],
-    processes: {},
-    activeDownloads: {},
-    directory: '/data/' //use local 75GB SSD mounted at /data instead of './dayfiles/' on full EBS
 };
 
 (function (){  //entry point of this program
@@ -429,7 +425,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                     } else{
                         //console.log('create child process for P'+processNum);
                         submissionHandler = fork('edgarFullTextSearchSubmissionIngest', {
-                            execArgv: ['--max-old-space-size=3072', '--expose-gc']  //3GB to handle very large files
+                            execArgv: ['--max-old-space-size=1024', '--expose-gc']  //3072(3GB) to handle very large files -- trying 1GB
                         });
                         submissionHandler.on('message', submissionIndexed);
                         submissionHandler.on('error', err => {
