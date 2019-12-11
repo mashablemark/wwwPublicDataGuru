@@ -20,18 +20,12 @@ exports.searchEFTS = async (r, context) => {
     //todo: add screens for malicious of prohibited actions
     if(!r.q || r.q.trim().length<2 || r.q.trim()[0]=='*') return {error: 'text search query must include a keyword longer then 2 characters'};
 
-    const formsFilter = r.forms.length ? ' (form: ' + r.forms.join(' OR form: ') + ')' : '';
-    const sicFilter = r.sic ? ` sic:${r.sic}` : '';
-    const cikFiler = r.sic ? ` cik:${r.cik}` : '';
-    //todo: const dateFilter = r.startdt || r.enddt ? ';
-
-    const query = JSON.stringify({
+    const query = {
         "query": {
-            "query_string": {
-                "query": r.q+formsFilter+cikFiler+sicFilter,
-                "default_operator": "AND",
-                "default_field": "doc_text"
-            }
+            "bool": {
+                "must": [],
+                "filter": []
+            },
         },
         "docvalue_fields": [
             "ciks",
@@ -68,7 +62,18 @@ exports.searchEFTS = async (r, context) => {
                 }
             }
         }
-    });
+    };
+    const keywords = r.q.split(' ');
+    for(let i=0;i<keywords.length;i++){
+        if(keywords[i].length>2) query.query.bool.must.push( {"match": { "doc_text": keywords[i]}})
+    }
+    if(r.forms && r.forms.length) query.query.bool.filter.push( {"terms": { "root_form": r.forms}});
+    if(r.sic) query.query.bool.filter.push( {"term": { "sics": {"value": r.sic}}});
+    if(r.cik)query.query.bool.filter.push( {"term": { "ciks": {"value": r.cik}}});
+    //todo: const dateFilter = r.startdt || r.enddt ? ';
+
+    const querystring = JSON.stringify(query);
+console.log(querystring); //debug only
     const options = {
         hostname: `${domain}.${region}.es.amazonaws.com`,
         port: 443,
@@ -76,7 +81,7 @@ exports.searchEFTS = async (r, context) => {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Content-Length': query.length
+            'Content-Length': querystring.length
         }
     };
     return await new Promise((resolve, reject)=>{
@@ -96,7 +101,7 @@ exports.searchEFTS = async (r, context) => {
             reject(error);
         });
 
-        request.write(query);  //send payload
+        request.write(querystring);  //send payload
         request.end(); //end the request and wait for the response (handled in callback above, which resolved the promise)
     });
 };
