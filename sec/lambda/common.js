@@ -6,13 +6,27 @@ const mysql = require('mysql');
 const AWS = require('aws-sdk');
 AWS.config.update({region: 'us-east-1'});
 const secure = require('./secure');  //DO NOT COMMIT!
+/*secure.js template:
+module.exports = {
+    secdata: function () {
+        return {
+            host: "localhost or domain or ip",
+            uid: "secdata",
+            password: "xxxxxxx",
+            database: "secdata"
+        }
+    }
+};
+
+ */
+
 let dbInitializationFlag = false; //set on first connection wth console.log for debugging
 let s3InitializationFlag = false; //set on first initialization wth console.log for debugging
 let s3 = false,  //error can occur if s3 object created from AWS SDK is old & unused
     s3Age = false;
 const s3MaxAge = 100000; //get a new S3 object every 100s to avoid credentials timing out.
 let dynamodb = false;
-process.on('unhandledRejection', (reason, promise) => { console.log('Unhandled rejection at: ', reason.stack|| reason)});  //outside of handler = run once
+process.on('unhandledRejection', (reason, promise) => { console.log('Unhandled rejection at: ', reason.stack || reason)});  //outside of handler = run once
 
 let me = {
     con: false,  //global db connection
