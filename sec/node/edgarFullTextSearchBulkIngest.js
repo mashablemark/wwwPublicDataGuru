@@ -26,14 +26,6 @@ Design uses two timers to monitor and kick off:
   2. ingestOverSeer controls the rate submissions are indexed (10/s).
         a) each submission ingested by a spawned function running same code as production Lambda function on this instance
         b) each submission may contain multiple files of varying sizes
-
-Unzipping occurs on local drive using instances with local SSDs (rd5.large), which requires formatting and mounting before use:
-   sudo mkfs -t xfs /dev/nvme1n1
-if new:
-   sudo mkdir -m 777 /data
-else if exists:
-   sudo mount /dev/nvme1n1 /data
-   sudo chmod 777 /data
 */
 
 //var request = require('request');
@@ -123,7 +115,12 @@ let  esMappings = {
     }
 };
 
-(function (){  //entry point of this program
+(async function (){  //entry point of this program
+    //Unzipping occurs on local drive using instances with local SSDs (=75 GB for rd5.large), which requires formatting and mounting before use
+    await asyncExec("sudo mkfs -t xfs /dev/nvme1n1");
+    await asyncExec("sudo mkdir -m 777 /data");  //may dive error
+    await asyncExec("sudo mount /dev/nvme1n1 /data");
+    await asyncExec("sudo chmod 777 /data");
     //1. drop the entire index if it exists
     const delIndex = `curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${index}'`;
     exec(delIndex).on('exit', ()=> {
@@ -169,24 +166,24 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
         var lastfiledt = (result.data&&result.data[0])?result.data[0].lastfiledt:'20080101';
         processControl.start = new Date(lastfiledt.substr(0,4)+'-'+lastfiledt.substr(4,2)+'-'+lastfiledt.substr(6,2));
     }
-    downloadOverSeer = setInterval(overseeDownloads, 2000);  //master event loop kicks off, queues, and monitors downloads and manages uncompressed and file deletions
+    downloadOverSeer = setInterval(overseeDownloads, 1000);  //master event loop kicks off, queues, and monitors downloads and manages uncompressed and file deletions
 
     function overseeDownloads() {
-        var downloadDate, d;
+        let downloadDate, d;
         //1. check for available process slots and (and restart dead activeDownloads)
         tick++;
-        if(tick/100 == Math.floor(tick/100)) console.log(processControl);
-        var downloadingCount = 0;
+        if(tick/300 == Math.floor(tick/300)) console.log(processControl);  //write status every 5 minutes to console
+        let downloadingCount = 0;
         for (d = 1; d <= processControl.maxQueuedDownloads; d++) {
             if (!processControl.activeDownloads["d" + d]  || processControl.activeDownloads["d" + d].status=='504') { //start new download process
                 downloadDate = nextWeekday();
                 if(downloadDate) {
                     console.log(downloadDate);
                     downloadingCount++;
-                    downloadDailyArchive(d, downloadDate, function(downloadControl){//callback invoked by "downloadDailyArchiveCallback" in subroutine
-                        if(downloadControl.status=='downloaded'){
+                    downloadAndUntarDailyArchive(d, downloadDate, function(downloadControl){//callback invoked by "downloadDailyArchiveCallback" in subroutine
+                        if(downloadControl.status=='untar error'){
                             if(!processControl.activeDownloads["d" + downloadControl.d] || downloadControl.ts != processControl.activeDownloads["d" + downloadControl.d].ts){
-                                //I was killed!  -> requeue
+                                //I was killed!  -> requeue for up to 3 retries
                                 addDayToReprocess(downloadControl.archiveDate, downloadControl.status);
                             }
                         }
@@ -202,19 +199,15 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
                     delete processControl.activeDownloads["d" + d];  //if process actually returns, it will gracefully end without proper control reference
                     processControl.killedProcessCount++;  //will be restarted on next timer tick
                 } else {
-                    if(!ingestingFlag && processControl.activeDownloads["d" + d].status == 'downloaded'){ //only ingest one archive at a time
+                    if(!ingestingFlag && processControl.activeDownloads["d" + d].status == 'unarchived'){ //only index one directory at a time
                         ingestingFlag = true;
-                        processArchive(processControl, d, function(downloadControl){
-                            //this callback invoke by function "processArchiveCallback" in subroutine
+                        indexDirectory(processControl, d, function(downloadControl){
+                            //this callback invoked when indexDirectory has completely index the directory or errored out
                             switch(downloadControl.status){
-                                case("untar error"):
-                                    addDayToReprocess(downloadControl.archiveDate, downloadControl.status);
-                                    processControl.untarFailures++;
-                                    break;
                                 case("ingested"):
                                     processControl.dailyArchivesProcessed++
                             }
-                            delete processControl.activeDownloads["d" + downloadControl.d];  //if process actually returns, it will gracefully end without proper control reference
+                            delete processControl.activeDownloads["d" + downloadControl.d];  //next download or inject starts on next tick
                             ingestingFlag = false;
                         });
                     }
@@ -265,20 +258,22 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
             }
         }
 
-        function downloadDailyArchive(d, archiveDate, downloadDailyArchiveCallback) {
-            var ts = Date.now(),
-                archiveName = archiveDate.toISOString().substr(0, 10).replace(/-/g, ''),
-                url = 'https://www.sec.gov/Archives/edgar/Feed/' + archiveDate.getFullYear()
-                    + '/QTR' + (Math.floor(archiveDate.getUTCMonth() / 3) + 1) + '/' + archiveName + '.nc.tar.gz',
-                downloadControl = {
+        function downloadAndUntarDailyArchive(d, archiveDate, downloadAndUntarDailyArchiveCallback) {
+            //1. download the archive  
+            const ts = Date.now();
+            const archiveName = archiveDate.toISOString().substr(0, 10).replace(/-/g, '');
+            const url = 'https://www.sec.gov/Archives/edgar/Feed/' + archiveDate.getFullYear()
+                + '/QTR' + (Math.floor(archiveDate.getUTCMonth() / 3) + 1) + '/' + archiveName + '.nc.tar.gz';
+            const downloadControl = {
                     timeStamp: ts,
                     d: d,
                     archiveDate: archiveDate,
                     archiveName: archiveName,
                     url: url,
                     status: 'downloading'
-                },
-                cmd = 'wget "'+url+'" -q -O ' + processControl.directory + archiveName + '.nc.tar.gz';
+                };
+            const cmd = 'wget "'+url+'" -q -O ' + processControl.directory + archiveName + '.nc.tar.gz';
+            //sample cmd: wget "https://www.sec.gov/Archives/edgar/Feed/2019/QTR1/20190315.nc.tar.gz" -q -O /data/20190315.nc.tar.gz
             processControl.activeDownloads["d" + d] = downloadControl;  //could be replaced if long running process killed!!!
             
             exec(cmd).on('exit', function(code){
@@ -287,79 +282,72 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
                     common.logEvent('unable to download archive (federal holiday?) code: ' + code, archiveName + ' ('+cmd+')', true);
                     downloadControl.status = '504';
                     exec('rm '+processControl.directory + archiveName + '.nc.tar.gz');  //remove any remains
+                    if(downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
                 } else {
                     console.log('downloaded '+ archiveName+'.nc.tar.gz with code '+code);
                     processControl.downloadCount++;
-                    downloadControl.status = 'downloaded';
+                    
+                    //2. decompress archive
+                    downloadControl.status = 'unarchiving';
+                    downloadControl.timeStamp = Date.now();  //reset timeout timeStamp for unarchiving big files
+                    const  fileStats = fs.statSync(processControl.directory + downloadControl.archiveName + '.nc.tar.gz');  //blocking call
+                    processControl.totalGBytesDownloaded += fileStats.size / (1024 * 1024 * 1024);
+                    const archiveDir = processControl.directory + downloadControl.archiveName;
+                    exec('mkdir -m 777 ' + archiveDir).on('exit', function(code) {
+                        console.log(`${(new Date()).toISOString().substr(11, 10)} Unarchiving ${downloadControl.archiveName }`);
+                        const cmd = 'tar xzf ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz -C ' + archiveDir;
+                        exec(cmd).on('exit', function (code) {
+                            if (code) {  //don't cancel.  Just log it.
+                                common.logEvent("untar error", code + ' return code for: ' + cmd + ' size in bytes: ' + fileStats.size, true);
+                                exec('rm ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz');  //don't let bad files build up
+                                exec('rm ' + archiveDir + '/*').on('exit', function (code) {
+                                    exec('rmdir ' + archiveDir);
+                                    downloadControl.status = 'untar error';
+                                    if (downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
+                                });
+                            } else {
+                                common.logEvent("downloaded and unarchived " + downloadControl.archiveName + '.nc.tar.gz', 'size:  ' + (Math.round(fileStats.size / (1024 * 1024))) + ' MB');
+                                exec('rm ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz');  //delete tar file (async, but no need to t wait for completion)
+                                downloadControl.status = 'unarchived';
+                                if (downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
+                            }
+                        });
+                    });
                 }
-                if(downloadDailyArchiveCallback) downloadDailyArchiveCallback(downloadControl);
             });
         }
     }
 }
 
-//inflate into new dir, rm tar file, call ingestDirectory and clean up after (removing files and directory)
-function processArchive(processControl, downloadNum, processArchiveCallback){
-    var download = processControl.activeDownloads['d'+downloadNum],
-        archiveDir = processControl.directory + download.archiveName;
-    download.status = 'unarchiving';
-    download.timeStamp = Date.now();  //reset timeout timer for unarchiving big files
-
-    var  fileStats = fs.statSync(processControl.directory + download.archiveName + '.nc.tar.gz');  //blocking call
-    processControl.totalGBytesDownloaded += fileStats.size / (1024 * 1024 * 1024);
-    exec('mkdir -m 777 ' + archiveDir).on('exit', function(code){
-        console.log(`${(new Date()).toISOString().substr(11, 10)} Unarchiving ${download.archiveName }`);
-        var cmd = 'tar xzf ' + processControl.directory + download.archiveName + '.nc.tar.gz -C ' + archiveDir;
-        exec(cmd).on('exit', function(code){
-            if(code) {  //don't cancel.  Just log it.
-                common.logEvent("untar error", code + ' return code for: ' + cmd + ' size in bytes: ' + fileStats.size, true);
-                exec('rm '+processControl.directory+download.archiveName+'.nc.tar.gz');  //don't let bad files build up
-                exec('rm '+archiveDir+'/*').on('exit', function(code){
-                    exec('rmdir '+ archiveDir);
-                    download.status = 'untar error';
-                    if(processArchiveCallback) processArchiveCallback(download);
-                });
-            } else {
-                common.logEvent("downloaded archive " + download.archiveName + '.nc.tar.gz', 'size:  ' + (Math.round(fileStats.size/(1024*1024)))+' MB');
-                download.status = 'ingesting';
-                exec('rm '+processControl.directory+download.archiveName+'.nc.tar.gz');  //delete tar file (async)
-                ingestDirectory(processControl, archiveDir, function(){
-                    exec('rm '+archiveDir+'/*').on('exit', function(code){
-                        exec('rmdir '+ archiveDir);
-                    });
-                    download.status = 'ingested';
-                    if(processArchiveCallback) processArchiveCallback(download);
-                });
-            }
-        });
-    });
-}
-
-function ingestDirectory(processControl, directory, ingestDirectoryCallback){
+function indexDirectory(processControl, downloadNum, ingestDirectoryCallback){
+    const downloadControl = processControl.activeDownloads['d'+downloadNum];
+    const directory = processControl.directory + downloadControl.archiveName;
+    const startIndexTime = (new Date()).getTime();
     let slowestProcessingTime = 0,
         slowestForm,
         totalArchiveProcessingTime = 0,
         totalArchiveSubmissionsIndexed = 0,
         indexedByteCount = 0;
 
-    const startIndexTime = (new Date()).getTime();
+    downloadControl.status = 'indexing';
     fs.readdir(directory, function(err, fileNames) {
-        //starting on line the 11th line: CIK|Company Name|Form Type|Date Filed|txt File url part
+        let ingestFileNum, ingestOverSeer;
         if(err) {
             common.logEvent("unable to read directory", directory, true);
             return false;
         } else {
             common.logEvent((new Date()).toISOString().substr(11, 10) + ' Start one-day files ingest: ' ,'directory ' + directory + ' (' + fileNames.length + ' files)', true);
-            var ingestFileNum = -1;
-            processControl.processes = {ownshipsSubmissionsProcessed: 0}; //clear references to processes from last index scrap
-            var ingestOverSeer = setInterval(overseeIngest, 100);  //master event loop kicks off and monitors ingest processes!
+            ingestFileNum = -1;
+            processControl.processes = {}; //clear references to processes from last directory ingest
+
+            //EVENT TIMER FOR MASTER PROCESS KICKOFF AND MONITOR LOOP:
+            ingestOverSeer = setInterval(overseeIngest, 100);
         }
 
         function overseeIngest(directFromProcessNum){
-            var filing, p;
             //1. check for available process slots and (and restart dead processes)
             processControl.runningCount = 0;
-            for(p=1; p<=processControl.maxFileIngests; p++){
+            for(let p=1; p<=processControl.maxFileIngests; p++){
                 if(!processControl.processes["p"+p]  || (processControl.processes["p"+p].status == 'finished')) { //start process
                     let processInfo = processNextFile(p);
                     if(processInfo) {
@@ -367,8 +355,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                         processControl.runningCount++;
                     }
                 } else {  //check health
-                    let now = new Date();
-                    var runTime = now.getTime() - processControl.processes["p"+p].timeStamp;
+                    let runTime = (new Date()).getTime() - processControl.processes["p"+p].timeStamp;
                     if(runTime>60 * 1000){ // > 60 seconds for one file.  Note: child process has its own timeout time for a unresponsive ES call of 20s per call
                         console.log(`${(new Date()).toISOString().substr(11, 10)} killing long index process ${processControl.processes["p"+p].name}`);
                         //process.exit();
@@ -400,7 +387,8 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                     console.log(`Average processing was ${Math.round(totalArchiveProcessingTime/totalArchiveSubmissionsIndexed)}ms across ${processControl.indexedDocumentCount} files in ${totalArchiveSubmissionsIndexed} submissions in ${directory}`);
                     console.log(`${Math.round(10*indexedByteCount/(1024*1024))/10}MB indexed for this day in ${Math.round(((new Date()).getTime()-startIndexTime)/100)/10}s; ${Math.round(10*processControl.indexedByteCount/(1024*1024))/10}MB in total`);
                 }
-                if(ingestDirectoryCallback) ingestDirectoryCallback(processControl);
+                downloadControl.status = 'indexed';
+                if(ingestDirectoryCallback) ingestDirectoryCallback(downloadControl);
             }
         }
 
@@ -411,12 +399,11 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                 var fileName = fileNames[ingestFileNum];
                 if (fileName.indexOf('.nc') != -1) {
                     //todo: understand .corrr01 files such as 0000914475-15-000080.corr01 in 20160119
-                    let now = new Date();
                     let filing = {
                         path: directory + '/',
                         name: fileName,
                         processNum: processNum,
-                        timeStamp: now.getTime()
+                        timeStamp: (new Date()).getTime()
                     };
                     //console.log(filing);
                     if(processControl.processes['p'+processNum] && processControl.processes['p'+processNum].submissionHandler){
@@ -425,7 +412,7 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                     } else{
                         //console.log('create child process for P'+processNum);
                         submissionHandler = fork('edgarFullTextSearchSubmissionIngest', {
-                            execArgv: ['--max-old-space-size=1024', '--expose-gc']  //3072(3GB) to handle very large files -- trying 1GB
+                            execArgv: ['--max-old-space-size=1024', '--expose-gc']  // = 1GB container
                         });
                         submissionHandler.on('message', submissionIndexed);
                         submissionHandler.on('error', err => {
@@ -469,14 +456,26 @@ function ingestDirectory(processControl, directory, ingestDirectoryCallback){
                 for(let path in result.paths){ //analytics disabled and not returned, so loop doesn't execute
                     processControl.paths[path] = Math.max(processControl.paths[path]||0, result.paths[path]);
                 }
+                exec(`rm ${directory}/${result.fileName}`);  //remove submission files as processed
             } else {
                 console.log('ERROR from edgarFullTextSearchSubmissionIngest', result, 'processNum ' + (result.processNum ? result.processNum : 'unknown'));
                 common.logEvent('ERROR from edgarFullTextSearchSubmissionIngest', 'processNum ' + (result.processNum ? result.processNum : 'unknown') + JSON.stringify(result));
             }
-            setTimeout(()=>{
+            setTimeout(()=>{ //give garbage collection a chance
                 processControl.processes['p'+result.processNum].status = 'finished';
                 overseeIngest(result.processNum);
-            }, 5);  //give garbage collection a chance
+            }, 5);
         }
+    });
+}
+
+//asyncExec allows execution of Linux/OS commands using await syntax instead of nested callbacks
+function asyncExec(commandLineString) {
+    return new Promise((resolve, reject) => {
+        exec(commandLineString).on('exit', (code) => {
+            resolve(code)
+        }).on('error', () => {
+            resolve('error')
+        });
     });
 }
