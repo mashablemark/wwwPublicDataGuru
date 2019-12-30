@@ -51,8 +51,8 @@ const type = '_doc';
 
 //const es = new AWS.ES({apiVersion: '2015-01-01'});
 const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
-const rgxTagsAndExtraSpaces = /(<[^>]+>|[\n\s]{2,})/gm;  //removes html and xml tags and extra white space
-const rgxTagsExtraSpacesAndNumbers = /(<[^>]+>|[\n\s]{2,}|\$?-?\b[0-9,.]+\b)/gm;  //removes number words (but not alphanumeric words!) in addition to html and xml tags and extra white space
+const rgxTagsAndExtraSpaces = /([\n\s]*<[^>]+>[\n\s]*|[\n\s]{2,})+/gm;  //removes html and xml tags and extra white space
+const rgxTagsExtraSpacesAndNumbers = /([\n\s]*(<[^>]+>|[\n\s]{2,}|-?\$?-?\b[0-9,\.]+\b)[\n\s]*)+/gm;  //removes number words (but not alphanumeric words!) in addition to html and xml tags and extra white space
 const rgxExtraSpaces = /[\n\s]{2,}/mg;
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 const lowChatterMode = true;
@@ -233,12 +233,12 @@ process.on('message', (processInfo) => {
                     ciks: submission.ciks,
                     form: submission.form,
                     root_form: submission.form.replace('/A', ''),
-                    filingDate: `${submission.filingDate.substr(0, 4)}-${submission.filingDate.substr(4, 2)}-${submission.filingDate.substr(6, 2)}`,
+                    file_date: `${submission.filingDate.substr(0, 4)}-${submission.filingDate.substr(4, 2)}-${submission.filingDate.substr(6, 2)}`,
                     display_names: submission.displayNames,
                     sics: submission.sics,
                     inc_states: submission.incorporationStates,
                     adsh: submission.adsh,
-                    file: submission.fileName,
+                    file_name: submission.fileName,
                     description: submission.description,
                 });
                 //console.log(JSON.parse(request.body));
@@ -282,7 +282,8 @@ process.on('message', (processInfo) => {
                             let esResponse = JSON.parse(responseBody);
                             if(response.statusCode>201 || esResponse._shards.failed!=0){
                                 console.log('Bad response. statusCode: ' + response.statusCode);
-                                console.log(responseBody);
+                                console.log(responseBody + ' for ' + submission.fileName + ' in ' + submission.adsh);
+                                console.log(request.body.substr(0,2000));
                             } else {
                                 indexedByteCount = indexedByteCount + (doc_textLength || 0);
                                 indexedDocumentCount++;

@@ -67,7 +67,7 @@ let  esMappings = {
                 "similarity": "BM25", //this is the default value, but included to make explicit the boost algorithm. May need to investigate "boolean"
                 //"doc_values": false, //not retrievable
             },
-            "display_names": { //array of "conformed_nam (CIK)"
+            "display_names": { //array of "conformed_name (CIK)"
                 "type": "text",
                 "boost": 100,  //if the keyword appear in the name, boost it!
                 "fields": {
@@ -86,13 +86,16 @@ let  esMappings = {
                 "index": false, // not searchable, but needed for display of results
                 //"doc_values": true, //retrievable
             },
-            "filed": {
+            "file_type": {  //for searching exhibit types attached to a form
+                "type": "keyword",
+            },
+            "file_date": {
                 "type": "date",
                 "format": "yyyy-MM-dd",
                 //"doc_values": true, //retrievable
             },
             "sics": {  //returning!
-                "type": "integer",
+                "type": "keyword",
                 //"doc_values": true, //retrievable
             },
             "ciks": { //returning!
