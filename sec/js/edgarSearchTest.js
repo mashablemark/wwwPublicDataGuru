@@ -108,10 +108,10 @@ function executeSearch(){
     var start = new Date();
     $('#results').html('');
     $.ajax({
-        data: setHashValues(),
+        data: JSON.stringify(setHashValues()),
         dataType: 'JSON',
-        type: 'post',
-        url: 'https://search.publicdata.guru/',
+        type: 'POST',
+        url: 'https://search.publicdata.guru/search-index',
         success: function (data, status) {
             let end = new Date();
             console.log('successfully talked to Lambda function!');
