@@ -4,14 +4,14 @@ var entity = false;  //holds the entity info once selected
 $(document).ready(function() {
     const hashValues = getHashValues();
     //configure company hints event on both keywords and company text boxes
-    $('#keywords').keydown(function(event){
+    $('#keywords').keyup(function(event){
         const keywords = $(this).val();
         if(keywords.length<10 && !entity){
             getCompanyHints(this, keywords)
         }
         if(keywords.length>15) hideCompanyHints()
     });
-    $('#company').keydown(function(event){
+    $('#company').keyup(function(event){
         getCompanyHints(this, $(this).val())
     });
     //load form categories and configure selection event
@@ -96,7 +96,27 @@ function setHashValues(){
 }
 
 function getCompanyHints(control, keysTyped){
-
+    const hintsURL = 'https://search.publicdata.guru/typing-hints';
+    console.time('ajax call to ' + hintsURL + ' for "' + keysTyped + '"');
+    var start = new Date();
+    $('#results').html('');
+    $.ajax({
+        data: JSON.stringify({keysTyped: keysTyped}),
+        dataType: 'JSON',
+        type: 'POST',
+        url: hintsURL,
+        success: function (data, status) {
+            let end = new Date();
+            console.log('successfully talked to Lambda function!');
+            console.timeEnd('ajax call');
+            $('#results').html(JSON.stringify(data));
+            console.log('sucessful roundtrip execution time for '+hintsURL+ ' = '+((new Date()).getTime()-start.getTime())+' ms');
+        },
+        error: function (jqXHR, textStatus, errorThrown) {
+            console.log(textStatus);
+            throw(errorThrown);
+        }
+    });
 }
 
 function hideCompanyHints(){

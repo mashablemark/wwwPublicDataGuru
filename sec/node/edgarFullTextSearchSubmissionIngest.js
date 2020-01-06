@@ -95,6 +95,7 @@ process.on('message', (processInfo) => {
 
     //preprocessors:
     function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
+    function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
     function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
 
     const indexedFileTypes = {
@@ -297,13 +298,18 @@ process.on('message', (processInfo) => {
                             if(response.statusCode>201 || esResponse._shards.failed!=0){
                                 console.log('Bad response. statusCode: ' + response.statusCode);
                                 console.log(responseBody + ' for ' + submission.docs[d].fileName + ' in ' + submission.adsh);
-                                console.log(request.body.substr(0,2000));
+                                request.bodyTuncated = request.body.substr(0,2000);
+                                delete request.body;
+                                common.logEvent('failed ElasticSearch index', JSON.stringify(request), true);
                             } else {
                                 indexedByteCount = indexedByteCount + (doc_textLength || 0);
                                 indexedDocumentCount++;
                             }
                         } catch (e) {
-                            console.log(response.statusCode);
+                            request.bodyTuncated = request.body.substr(0,2000);
+                            delete request.body;
+                            request.responseCode = response.statusCode;
+                            common.logEvent('ElasticSearch index error', JSON.stringify(request), true);
                         }
                         submission.docs[d].state = INDEX_STATES.INDEXED;
                         nextDoc();
@@ -315,6 +321,10 @@ process.on('message', (processInfo) => {
                     if(submission.docs[d].tries<=3){
                         indexPromises.push(indexWithElasticSearch(d));
                     } else {
+                        request.bodyTuncated = request.body.substr(0,2000);
+                        delete request.body;
+                        request.error = error;
+                        common.logEvent('ElasticSearch communication error', JSON.stringify(request));
                         nextDoc();
                     }
                 });

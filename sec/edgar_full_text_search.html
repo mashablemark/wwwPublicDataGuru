@@ -1,0 +1,76 @@
+<!-- single page response EDGAR full text search application using jQuery mobile and an API Gateway / ElasticSearch backend
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title>Edgar Full Text Search Test Page</title>
+
+    <!--CSS files-->
+    <link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" type="text/css" />
+    <link  rel="stylesheet" href="global/js/loadmask/jquery.loadmask.css" />
+    <link  rel="stylesheet" href="css/edgarSearchTest.css" />
+    <!-- open source javascript libraries -->
+    <script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>
+    <script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>
+    <script type="text/javascript" src="global/js/loadmask/jquery.loadmask.min.js"></script>
+    <script type="text/javascript" src="global/js/signals/signals.js"></script>
+    <script type="text/javascript" src="global/js/hasher/hasher.min.js"></script>
+    <script src="js/edgarSearchTest.js"></script>
+</head>
+<body>
+
+<h2>EDGAR Full Text Search Prototype using Elastic Search</h2>
+
+<div id="search_form">
+    keywords: <input id="keywords" type="text" placeholder="keywords to search on">
+    <div id="filter">company: <input id="company" type="text" placeholder="name, ticker symbol or CIK">
+    <div id="form_filter"><select id="form-category"></select> or <input id="forms" type="text" placeholder="enter fom(s) types"></div>
+    <select id="location"></select>
+    </div>
+    <div id="date-controls">
+        <div id="date-range">search back:
+            <input type="radio" id="date-range-last-month" name="date-range" value="last-month" checked="checked">
+            <label for="date-range-last-month">1 month</label>
+
+            <input type="radio" id="date-range-last-year" name="date-range"  value="last-year">
+            <label for="date-range-last-year">1 year</label>
+
+            <input type="radio" id="date-range-last-10-years" name="date-range" value="last-10-years">
+            <label for="date-range-last-10-years">10 years</label>
+            
+            <input type="radio" id="date-range-custom" name="date-range" value="custom">
+            <label for="date-range-custom">custom</label>
+        </div>
+        <div id="date-range-custom-pickers">
+            <div class="datapicker">from <input type="text" id="datepicker_from"></div>
+            <div class="datapicker">to <input type="text" id="datepicker_to"></div>
+        </div>
+    </div>
+    <button id="search">search</button>
+    <button id="clear">clear</button>
+</div>
+<div id="results">
+    <div id="tags"></div>
+    <div id="facets">
+        <div id="facet-entities" class="facet">
+            <div class="facet-title">Entities</div>
+            <div class="facets"></div>
+        </div>
+        <div id="facet-forms" class="facet">
+            <div class="facet-title">Forms</div>
+            <div class="facets"></div>
+        </div>
+        <div id="facet-states" class="facet">
+            <div class="facet-title">Incorporated In</div>
+            <div class="facets"></div>
+        </div>
+        <i>document counts shown in []</i>
+    </div>
+    <div id="hits"></div>
+
+</div>
+
+</div>
+</body>
+
+

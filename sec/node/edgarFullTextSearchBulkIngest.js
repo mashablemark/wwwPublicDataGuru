@@ -45,7 +45,7 @@ const processControl = {
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
     start: new Date("2019-01-01"),  //restart date.  If none, the lesser of the max(filedt) and 2008-01-01 is used
-    end: new Date("2019-03-31"), //if false or not set, scrape continues up to today
+    end: new Date("2019-12-31"), //if false or not set, scrape continues up to today
     days: [
     ], //ingest specific days (also used as retry queue) e.g. ['2013-08-12', '2013-08-14', '2013-11-13', '2013-11-15', '2014-03-04', '2014-08-04', '2014-11-14', '2015-03-31','2015-04-30', '2016-02-18', '2016-02-26', '2016-02-29', '2017-02-24', '2017-02-28', '2017-04-27','2017-05-10', '2017-08-03', '2017-08-04', '2017-08-08', '2017-10-16', '2017-10-23', '2017-10-30', '2017-11-03','2017-11-06', '2017-12-20', '2018-04-26', '2018-04-27', '2018-04-30', '2018-05-01', '2018-11-14']],
     processes: {},
@@ -134,8 +134,7 @@ let  esMappings = {
             exec('rm -r ' + processControl.directory + '*').on('exit', function (code) {
                 startDownloadManager(processControl, function () {
                     //this callback is fired when download manager is completely down with all downloads
-                    console.log(processControl);
-                    common.logEvent('processing finished', JSON.stringify(processControl), true);
+                    common.logEvent('ElasticSearch bulk indexing', JSON.stringify(processControl), true);
                     process.exit();  //exit point of this program
                 });
             });
@@ -228,16 +227,13 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
             if(Array.isArray(processControl.days)) {
                 var strRetryDate = retryDate.toISOString().substr(0,10); //date part only
                 if(!processControl.retries) processControl.retries = {};
-                if(!processControl.retries[strRetryDate]) {
-                    processControl.retries[strRetryDate] = 1
-                } else {
-                    processControl.retries[strRetryDate]++
-                }
+                processControl.retries[strRetryDate] = (processControl.retries[strRetryDate] || 0) + 1;
                 if(processControl.retries[strRetryDate] <= processControl.maxRetries) {
-                    common.logEvent('archive retry for '+cause, 'retry #'+processControl.retries[strRetryDate], true);
-
+                    common.logEvent('ElasticSearch retry for '+retryDate, 'retry #'+processControl.retries[strRetryDate]+' due to '+cause, true);
                     processControl.days.push(strRetryDate);
                     processControl.dailyArchivesSubmittedForRetry++;
+                } else {
+                    common.logEvent('ElasticSearch failure after 3 retries for '+retryDate, ' due to '+cause, true);
                 }
             }  //queue for retry
         }
@@ -280,9 +276,9 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
             processControl.activeDownloads["d" + d] = downloadControl;  //could be replaced if long running process killed!!!
             
             exec(cmd).on('exit', function(code){
-                if(code===null) common.logEvent('wget returned null for ' + archiveName, cmd, true);
+                if(code===null) common.logEvent('ElasticSearch bulk indexer wget returned null for ' + archiveName, cmd, true);
                 if(code){
-                    common.logEvent('unable to download archive (federal holiday?) code: ' + code, archiveName + ' ('+cmd+')', true);
+                    common.logEvent('ElasticSearch bulk indexer unable to download archive (federal holiday?) code: ' + code, archiveName + ' ('+cmd+')', true);
                     downloadControl.status = '504';
                     exec('rm '+processControl.directory + archiveName + '.nc.tar.gz');  //remove any remains
                     if(downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
@@ -301,7 +297,7 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
                         const cmd = 'tar xzf ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz -C ' + archiveDir;
                         exec(cmd).on('exit', function (code) {
                             if (code) {  //don't cancel.  Just log it.
-                                common.logEvent("untar error", code + ' return code for: ' + cmd + ' size in bytes: ' + fileStats.size, true);
+                                common.logEvent("ElasticSearch bulk indexer untar error", code + ' return code for: ' + cmd + ' size in bytes: ' + fileStats.size, true);
                                 exec('rm ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz');  //don't let bad files build up
                                 exec('rm ' + archiveDir + '/*').on('exit', function (code) {
                                     exec('rmdir ' + archiveDir);
