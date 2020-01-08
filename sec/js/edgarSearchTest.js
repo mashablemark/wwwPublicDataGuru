@@ -6,7 +6,7 @@ $(document).ready(function() {
     //configure company hints event on both keywords and company text boxes
     $('#keywords').keyup(function(event){
         const keywords = $(this).val();
-        if(keywords.length<10 && !entity){
+        if(keywords.length<=15 && !entity){
             getCompanyHints(this, keywords)
         }
         if(keywords.length>15) hideCompanyHints()
@@ -97,7 +97,8 @@ function setHashValues(){
 
 function getCompanyHints(control, keysTyped){
     const hintsURL = 'https://search.publicdata.guru/typing-hints';
-    console.time('ajax call to ' + hintsURL + ' for "' + keysTyped + '"');
+    const label = 'ajax call to ' + hintsURL + ' for "' + keysTyped + '"';
+    console.time(label);
     var start = new Date();
     $('#results').html('');
     $.ajax({
@@ -108,7 +109,7 @@ function getCompanyHints(control, keysTyped){
         success: function (data, status) {
             let end = new Date();
             console.log('successfully talked to Lambda function!');
-            console.timeEnd('ajax call');
+            console.timeEnd(label);
             $('#results').html(JSON.stringify(data));
             console.log('sucessful roundtrip execution time for '+hintsURL+ ' = '+((new Date()).getTime()-start.getTime())+' ms');
         },
@@ -124,7 +125,8 @@ function hideCompanyHints(){
 }
 
 function executeSearch(){
-    console.time('ajax call');
+    const label = 'EFTS ajax call';
+    console.time(label);
     var start = new Date();
     $('#results').html('');
     $.ajax({
@@ -135,7 +137,7 @@ function executeSearch(){
         success: function (data, status) {
             let end = new Date();
             console.log('successfully talked to Lambda function!');
-            console.timeEnd('ajax call');
+            console.timeEnd(label);
             $('#results').html(JSON.stringify(data));
         },
         error: function (jqXHR, textStatus, errorThrown) {

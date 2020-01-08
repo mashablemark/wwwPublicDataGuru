@@ -1,5 +1,6 @@
 #search_form {
-    background-color: darkblue;
+    background-color: #0c213a;
+    background-image: linear-gradient(45deg, #143658, #0c213a);
     color: white;
 }
 
@@ -13,4 +14,30 @@
     opacity: 0;
     position: fixed;
     width: 0;
+}
+
+#form-container {
+    padding: 10px;
+    margin-top: 20px;
+    background-color: rgba(256, 256, 256, 0.1) ;
+}
+
+.btn-circle.btn-sm {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin-left: 10px;
+    top: -3px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 0.5;
+    text-align: center;
+    vertical-align: top;
+    background-color: #3d9ee9;
+    color: #143658
+}
+label {
+    font-weight: 400;
+    font-size: 16px;
 }
