@@ -6,13 +6,11 @@
     <title>Edgar Full Text Search Test Page</title>
 
     <!--CSS files-->
-    <link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" type="text/css" />
-    <link  rel="stylesheet" href="global/js/loadmask/jquery.loadmask.css" />
-    <link  rel="stylesheet" href="css/edgarSearchTest.css" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+    <link  rel="stylesheet" href="css/edgar_full_text_search.css" />
     <!-- open source javascript libraries -->
     <script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>
-    <script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>
-    <script type="text/javascript" src="global/js/loadmask/jquery.loadmask.min.js"></script>
+
     <script type="text/javascript" src="global/js/signals/signals.js"></script>
     <script type="text/javascript" src="global/js/hasher/hasher.min.js"></script>
     <script src="js/edgarSearchTest.js"></script>
@@ -20,34 +18,76 @@
 <body>
 
 <h2>EDGAR Full Text Search Prototype using Elastic Search</h2>
-
-<div id="search_form">
-    keywords: <input id="keywords" type="text" placeholder="keywords to search on">
-    <div id="filter">company: <input id="company" type="text" placeholder="name, ticker symbol or CIK">
-    <div id="form_filter"><select id="form-category"></select> or <input id="forms" type="text" placeholder="enter fom(s) types"></div>
-    <select id="location"></select>
-    </div>
-    <div id="date-controls">
-        <div id="date-range">search back:
-            <input type="radio" id="date-range-last-month" name="date-range" value="last-month" checked="checked">
-            <label for="date-range-last-month">1 month</label>
-
-            <input type="radio" id="date-range-last-year" name="date-range"  value="last-year">
-            <label for="date-range-last-year">1 year</label>
-
-            <input type="radio" id="date-range-last-10-years" name="date-range" value="last-10-years">
-            <label for="date-range-last-10-years">10 years</label>
-            
-            <input type="radio" id="date-range-custom" name="date-range" value="custom">
-            <label for="date-range-custom">custom</label>
+<div  id="search_form" class="efstsearch-form">
+    <div class="form-group row">
+        <div class="col-sm-1 col-xl-2"></div>
+        <div class="col-sm-1">
+            <label for="keywords">Keywords:</label>
         </div>
-        <div id="date-range-custom-pickers">
-            <div class="datapicker">from <input type="text" id="datepicker_from"></div>
-            <div class="datapicker">to <input type="text" id="datepicker_to"></div>
+        <div class="col-sm-9 col-xl-7">
+            <input id="keywords" type="text" class="form-control" placeholder="keywords to search on">
         </div>
+        <div class="col-sm-1 col-xl-2"></div>
     </div>
-    <button id="search">search</button>
-    <button id="clear">clear</button>
+    <div class="form-group row">
+        <div class="col-sm-1 col-xl-2"></div>
+        <div class="col-sm-1 ">
+            <label for="company">Entity:</label>
+        </div>
+        <div class="col-sm-3  col-xl-2">
+            <input id="company" type="text"  class="form-control" placeholder="Company name, ticker symbol, reporter last name or CIK">
+        </div>
+        <div class="col-sm-1 ">
+            <label for="date-range-select">date range:</label>
+        </div>
+        <div class="col-sm-5 col-xl-4 form-inline">
+            <select name="date-range-select" id="date-range-select" class="custom-select">
+                <option value="30d">last 30 days</option>
+                <option value="1y" selected>last year</option>
+                <option value="5y">last 5 years</option>
+                <option value="all">since 1994</option>
+                <option value="custom">custom</option>
+            </select>
+            <div class="input-group date hidden" data-provide="datepicker">
+                <input type="text" class="form-control">
+                <div class="input-group-addon">
+                    <span class="glyphicon glyphicon-th"></span>
+                </div>
+                <input id="date-from" type="text"  class="form-control" placeholder="pick starting date">
+                to
+                <input id="dat-10" type="text"  class="form-control" placeholder="pick ending date">
+            </div>
+            <div id="show-actual-dates">actual dates</div>
+        </div>
+        <div class="col-sm-1 col-xl-2"></div>
+    </div>
+    <div class="form-group row">
+        <div class="col-sm-1 col-xl-2"></div>
+        <div class="col-sm-1 form-inline">
+            Form filter:
+        </div>
+        <div class="col-sm-9  col-xl-7 form-inline">
+            <div id="form-filter-mode" class="btn-group  form-inline">
+                <button type="button" class="btn btn-primary">by category</button>
+                <button type="button" class="btn btn-secondary">individual forms</button>
+            </div>
+            <select name="form-category" id="form-category" class="custom-select">
+                <option value="all" selected>all form</option>
+                <option value="reports">Annual reports, quarterly reports, and financial statement</option>
+            </select>
+            <input id="forms" type="text"  class="form-control" placeholder="enter form types to filter on (<i>optional</i>)">
+            <div id="show-actual-forms">actual dates</div>
+        </div>
+        <div class="col-sm-1 col-xl-2"></div>
+    </div>
+    <div class="form-group row">
+        <div class="col-sm-2  col-xl-3"></div>
+        <div class="col-sm-9  col-xl-7 form-inline">
+            <button type="submit" id="search" class="btn btn-primary btn-warning">search</button>
+            <button id="clear" class="btn btn-light">clear</button>
+        </div>
+        <div class="col-sm-1 col-xl-2"></div>
+    </div>
 </div>
 <div id="results">
     <div id="tags"></div>
