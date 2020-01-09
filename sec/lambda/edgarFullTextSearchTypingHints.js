@@ -11,15 +11,15 @@ exports.handler = async (req, context) => {
         const start = new Date();
         let result = await common.runQuery(`call eftsTypingHintsLookup(${common.q(req.keysTyped, true)})`);
         const hints = result.data[0][0];
-        hints.execTime = start.getTime() - (new Date()).getTime();
         hints.status = 'ok';
-        try{
+        try {
             hints.branchTopHints = JSON.parse(hints.branchTopHints);
         } catch(ex) {
             console.log('JSON parsing error', hints.branchTopHints);
             hints.status = 'JSON parsing error';
         }
         //console.log(JSON.stringify(hints));
+        hints.execTimeMS = (new Date()).getTime() - start.getTime();
         return JSON.stringify(hints);
     }
 };

@@ -45,8 +45,92 @@ label {
 #search {
     padding: 6px 12px;
     color: #0c213a;
-    background-color: yellow;
+    background-color: #FED069;
     border-radius: 36px;
     font-size: 16px;
     font-weight: 600;
+}
+
+#clear {
+    padding: 6px 12px;
+    color: white;
+    background-color: #12659c;
+    border-radius: 36px;
+    font-size: 13px;
+    font-weight: 400;
+    border: none;
+}
+
+#clear:hover {
+    background-color: rgb(34,127,199);
+}
+
+.browse {
+    color: #FED069;
+    float: right;
+    margin-top: 12px;
+}
+.browse:hover {
+    text-decoration: underline;
+}
+
+.border-onfocus:focus {
+    border: solid 2px #273e54;
+    box-shadow: 0 0 0 2px #fdcf70;
+}
+
+.searching-overlay{
+    width: 100%;
+    height: 100%;
+    z-index: 1000;
+    background-color: rgba(50,50,50,0.7);
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+}
+
+label {
+    font-weight: 400;
+    font-size: 16px;
+    margin-top: 12px;
+}
+
+.popover {
+    color: #ffffff;
+    background-color: #296da6;
+    border-radius: .4rem;
+    line-height: 1.9rem;
+    font-size: 1.6rem;
+    display: block  !important;
+    width: 400px !important;
+    border: none !important;
+}
+
+.rel-none{
+    position: relative;
+    top: -20px;
+    padding: 0;
+    border: none;
+    margin: 0;
+    height: 0;
+    width: 100%;
+}
+div.entity-hints {
+    color: #1e1e1e;
+    background-color: white;
+    border-color: darkgray;
+    position: absolute;
+    top: 20px;
+    left: 10px;
+    width: 80%;
+    z-index: 1000;
+    display: none;
+}
+table.entity-hints tr.hint{
+    margin: 5px 10px;
+    cursor: pointer;
+}
+table.entity-hints tr.hint:hover{
+    background-color: grey;
 }
