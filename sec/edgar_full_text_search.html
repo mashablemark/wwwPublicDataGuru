@@ -24,7 +24,7 @@
     <div id="form-container" class="container">
         <div class="form-group row">
             <div class="col-8">
-                <label for="keywords">Word or Phase</label> <button type="button" class="btn btn-primary btn-circle btn-sm">?</button>
+                <label for="keywords">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm">?</button>
                 <input id="keywords" type="text" class="form-control" placeholder="keywords to search on">
                 <label for="company">Company Name, Ticker, CIK Number or Report's last name</label>
                 <input id="company" type="text"  class="form-control" placeholder="Company name, ticker symbol, reporter last name or CIK">
@@ -52,89 +52,23 @@
                         <input type="text" class="form-control">
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-        <div class="col-sm-1 col-xl-2"></div>
-            <div class="col-sm-1">
-                <label for="keywords">Keywords:</label>
-            </div>
-            <div class="col-sm-9 col-xl-7">
-                <input id="keywords" type="text" class="form-control" placeholder="keywords to search on">
-            </div>
-            <div class="col-sm-1 col-xl-2"></div>
-        </div>
-
-
-
-        <div class="form-group row">
-            <div class="col-sm-1 col-xl-2"></div>
-            <div class="col-sm-1">
-                <label for="keywords">Keywords:</label>
-            </div>
-            <div class="col-sm-9 col-xl-7">
-                <input id="keywords" type="text" class="form-control" placeholder="keywords to search on">
-            </div>
-            <div class="col-sm-1 col-xl-2"></div>
-        </div>
-        <div class="form-group row">
-            <div class="col-sm-1 col-xl-2"></div>
-            <div class="col-sm-1 ">
-                <label for="company">Entity:</label>
-            </div>
-            <div class="col-sm-3  col-xl-2">
-                <input id="company" type="text"  class="form-control" placeholder="Company name, ticker symbol, reporter last name or CIK">
-            </div>
-            <div class="col-sm-1 ">
-                <label for="date-range-select">date range:</label>
-            </div>
-            <div class="col-sm-5 col-xl-4 form-inline">
-                <select name="date-range-select" id="date-range-select" class="custom-select">
-                    <option value="30d">last 30 days</option>
-                    <option value="1y" selected>last year</option>
-                    <option value="5y">last 5 years</option>
-                    <option value="all">since 1994</option>
-                    <option value="custom">custom</option>
+                <label for="loction-select">State</label><button type="button" id="help-tips-state" class="btn btn-primary btn-circle btn-sm">?</button>
+                <select name="loction-select" id="loction-select" class="custom-select">
+                    <option value="all">View All</option>
                 </select>
-                <div class="input-group date hidden" data-provide="datepicker">
-                    <input type="text" class="form-control">
-                    <div class="input-group-addon">
-                        <span class="glyphicon glyphicon-th"></span>
-                    </div>
-                    <input id="date-from" type="text"  class="form-control" placeholder="pick starting date">
-                    to
-                    <input id="dat-10" type="text"  class="form-control" placeholder="pick ending date">
-                </div>
-                <div id="show-actual-dates">actual dates</div>
-            </div>
-            <div class="col-sm-1 col-xl-2"></div>
-        </div>
-        <div class="form-group row">
-            <div class="col-sm-1 col-xl-2"></div>
-            <div class="col-sm-1 form-inline">
-                Form filter:
-            </div>
-            <div class="col-sm-9  col-xl-7 form-inline">
-                <div id="form-filter-mode" class="btn-group  form-inline">
-                    <button type="button" class="btn btn-primary">by category</button>
-                    <button type="button" class="btn btn-secondary">individual forms</button>
-                </div>
-                <select name="form-category" id="form-category" class="custom-select">
-                    <option value="all" selected>all form</option>
-                    <option value="reports">Annual reports, quarterly reports, and financial statement</option>
+                <label for="loction-select">State</label><button type="button" id="help-tips-state" class="btn btn-primary btn-circle btn-sm">?</button>
+                <select name="loction-select" id="loction-select" class="custom-select">
+                    <option value="all">View All</option>
                 </select>
-                <input id="forms" type="text"  class="form-control" placeholder="enter form types to filter on (<i>optional</i>)">
-                <div id="show-actual-forms">show forms</div>
+                <label>Display</label><button type="button" id="help-tips-insider" class="btn btn-primary btn-circle btn-sm">?</button><br />
+                <input type="checkbox" id="include-insider" class="form-conxtrol"> <label for="loction-select">Include Ownership Filings</label>
             </div>
-            <div class="col-sm-1 col-xl-2"></div>
         </div>
         <div class="form-group row">
-            <div class="col-sm-2  col-xl-3"></div>
-            <div class="col-sm-9  col-xl-7 form-inline">
-                <button type="submit" id="search" class="btn btn-primary btn-warning">search</button>
-                <button id="clear" class="btn btn-light">clear</button>
+            <div class="col">
+                <button id="clear" class="btn btn-light">Clear All</button>
+                <button type="submit" id="search" class="btn float-md-right">S E A R C H</button>
             </div>
-            <div class="col-sm-1 col-xl-2"></div>
         </div>
     </div>
 </div>
