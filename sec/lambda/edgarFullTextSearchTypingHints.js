@@ -20,7 +20,7 @@ exports.handler = async (req, context) => {
         }
         //console.log(JSON.stringify(hints));
         hints.execTimeMS = (new Date()).getTime() - start.getTime();
-        return JSON.stringify(hints);
+        return hints;
     }
 };
 

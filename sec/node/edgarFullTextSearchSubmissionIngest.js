@@ -214,8 +214,6 @@ process.on('message', (processInfo) => {
                 }
             }
         }
-
-
         if (submission.readState == READ_STATES.READ_COMPLETE) {
             const d = submission.docs.length - 1;
             if(submission.indexed == d && (submission.docs[d].state == INDEX_STATES.INDEXED || submission.docs[d].state == INDEX_STATES.SKIPPED || submission.docs[d].state == INDEX_STATES.INDEX_FAILED )){
@@ -228,10 +226,15 @@ process.on('message', (processInfo) => {
         if(submission.docs[d].state == READ_STATES.READ_COMPLETE){
             submission.indexState = INDEX_STATES.INDEXING;
             submission.indexed = d;
+            let indexedText;
             if(submission.docs[d].lines && submission.docs[d].lines.length){
+                const fileTypeProcessor = indexedFileTypes[submission.docs[d].fileExtension].process;
+                indexedText = fileTypeProcessor ? fileTypeProcessor(submission.docs[d].lines.join('\n')) : submission.docs[d].lines.join('\n');
+                submission.docs[d].lengthIndexed = indexedText.length;
+            }
+            if(submission.docs[d].lengthIndexed && submission.docs[d].lengthIndexed > 1){ //skipp
                 submission.docs[d].lengthRaw += submission.docs[d].lines.length;  //account for carriage returns
                 submission.docs[d].state = INDEX_STATES.INDEXING;
-                const fileTypeProcessor = indexedFileTypes[submission.docs[d].fileExtension].process;
                 readInterface.pause();  //does not immediately stop the line events.  A few more might come, but this stops the torrent
                 let doc_textLength = 0;
                 //console.log(submission.docs[d].lines);
@@ -239,8 +242,7 @@ process.on('message', (processInfo) => {
                 //console.log(`P${processNum} about to index a doc`);
                 const startIndexingTime = (new Date()).getTime();
                 let request = new AWS.HttpRequest(endpoint, region);
-                const indexedText = fileTypeProcessor ? fileTypeProcessor(submission.docs[d].lines.join('\n')) : submission.docs[d].lines.join('\n');
-                submission.docs[d].lengthIndexed = indexedText.length;
+
                 request.method = 'PUT';
                 request.path += `${index}/${type}/${submission.adsh}:${submission.docs[d].fileName}`;
                 request.body = JSON.stringify({  //try not to create unnecessary copies of the document text in memory

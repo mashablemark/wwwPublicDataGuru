@@ -92,7 +92,12 @@ console.log(querystring); //debug only
                 chunks.push(d);
             });
             response.on('end', () => {
-                resolve(chunks.join());
+                try{
+                    resolve(JSON.parse(chunks.join()));
+                } catch (e) {
+
+                    resolve('invlaid JSON in: '+(chunks.join()));
+                }
             });
         });
 

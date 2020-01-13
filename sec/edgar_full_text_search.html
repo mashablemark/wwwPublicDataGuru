@@ -13,6 +13,8 @@
     <!-- open source javascript libraries -->
     <script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>
     <script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js"></script>
 
     <script type="text/javascript" src="global/js/signals/signals.js"></script>
     <script type="text/javascript" src="global/js/hasher/hasher.min.js"></script>
@@ -24,47 +26,48 @@
 </div>
 <div  id="search_form" class="efstsearch-form">
 <h2>EDGAR Full Text Search Prototype using Elastic Search</h2>
-    <div id="form-container" class="container">
+    <div id="form-container" class="container rounded-lg mb-4">
+        <form autocomplete="off">
         <div class="form-group row">
-            <div class="col-8">
+            <div class="col-sm-8">
                 <label for="keywords">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
-                <input id="keywords" type="text" class="form-control border-onfocus" placeholder="keywords to search on">
-                <label for="company">Company Name, Ticker, CIK Number or Reporter's last name</label>
-                <input id="company" type="text"  class="form-control border-onfocus" placeholder="Company name, ticker symbol, reporter last name or CIK">
+                <input id="keywords" type="text" class="company form-control border-onfocus" placeholder="keywords to search on" autocomplete="false">
+                <label>Company Name, Ticker, CIK Number or Reporter's last name</label>
+                <input type="text"  class="entity form-control border-onfocus" placeholder="Company name, ticker symbol, reporter last name or CIK" autocomplete="false">
                 <div class="rel-none container">
                     <div class="entity-hints border border-dark border-top-0 rounded-bottom">
                         <table id="asdf" class="table table-hover entity-hints"></table>
                     </div>
                 </div>
                 <label for="category-select">Filing Type Category</label>
-                <select name="category-select" id="category-select" class="custom-select border-onfocus">
+                <select name="category-select" id="category-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all" selected>all forms</option>
                     <option value="reports">Annual reports, quarterly reports, and financial statement</option>
                 </select>
                 <label for="filing-types">Filing Types</label><span id="browse-filing-types" class="browse">Browse Filing Types</span>
-                <input id="filing-types" type="text"  class="form-control border-onfocus">
+                <input id="filing-types" type="text"  class="form-control border-onfocus" autocomplete="false">
             </div>
-            <div class="col-4">
+            <div class="col-sm-4">
                 <label for="date-range-select">Date Range</label>
-                <select name="date-range-select" id="date-range-select" class="custom-select border-onfocus">
-                    <option value="30d">last 30 days</option>
-                    <option value="1y" selected>last year</option>
-                    <option value="5y">last 5 years</option>
-                    <option value="all">all (since 1994)</option>
-                    <option value="custom">custom</option>
+                <select name="date-range-select" id="date-range-select" class="custom-select border-onfocus" autocomplete="false">
+                    <option value="30d">Last 30 Days</option>
+                    <option value="1y" selected>Last Year</option>
+                    <option value="5y">Last 5 Years</option>
+                    <option value="all">All (since 1994)</option>
+                    <option value="custom">Custom</option>
                 </select>
                 <label>Custom Date Range</label>
                 <div class="input-group mb3">
                     <div class="input-group-prepend">
-                        <input type="text" id="date-from" class="form-control border-onfocus"> <span> to </span> <input type="text" id="date-to" class="form-control border-onfocus">
+                        <input type="text" id="date-from" class="form-control border-onfocus" autocomplete="false"> <span class="mt-1 ml-3 mr-3"> to </span> <input type="text" id="date-to" class="form-control border-onfocus" autocomplete="false">
                     </div>
                 </div>
                 <label for="location-select">State</label><button type="button" id="help-tips-state" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search for the primary location associated with a filing.  The location could be a US state or territory, a Canadian province, or a country.">?</button>
-                <select name="loction-select" id="location-select" class="custom-select border-onfocus">
+                <select name="loction-select" id="location-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all">View All</option>
                 </select>
                 <label for="sic_code-select">SIC Codes</label><button type="button" id="help-tips-sic-codes" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="The US Standard Industrial Classification (SIC) code system is used to classify the primary activities of a corporation.">?</button><span id="browse-sic-codes" class="browse">Browse SIC Codes</span>
-                <select name="sic_code-select" id="sic_code-select" class="custom-select border-onfocus">
+                <select name="sic_code-select" id="sic_code-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all">View All</option>
                 </select>
                 <!--label>Display</label><button type="button" id="help-tips-insider" class="btn btn-primary btn-circle btn-sm">?</button><br />
@@ -73,34 +76,73 @@
         </div>
         <div class="form-group row">
             <div class="col">
-                <button id="clear" class="btn btn-light">Clear All</button>
-                <button type="submit" id="search" class="btn float-md-right border-onfocus">SEARCH</button>
+                <button type="reset" id="clear" class="btn btn-light">Clear All</button>
+                <button type="submit" id="search" class="btn  border-onfocus">SEARCH</button>
             </div>
         </div>
+        </form>
     </div>
 </div>
-<div id="results">
-    <div id="tags"></div>
-    <div id="facets">
-        <div id="facet-entities" class="facet">
-            <div class="facet-title">Entities</div>
-            <div class="facets"></div>
+<div id="results" class="container mw-100 p-lg-4">
+    <div id="tags" class="row">
+        <div id="facets" class="col-md-4 col-lg-3">
+            <div id="entity_filter" class="facet">
+                <div class="facet-title">Entity</div>
+                <div class="facets"></div>
+            </div>
+            <div id="form_filter" class="facet">
+                <div class="facet-title">Form Type</div>
+                <div class="facets"></div>
+            </div>
+            <div id="inc_states_filter" class="facet">
+                <div class="facet-title">Location Incorporated</div>
+                <div class="facets"></div>
+            </div>
+            <div id="sic_filter" class="facet">
+                <div class="facet-title">SIC Codes</div>
+                <div class="facets"></div>
+            </div>
+            <i>document counts shown in []</i>
         </div>
-        <div id="facet-forms" class="facet">
-            <div class="facet-title">Forms</div>
-            <div class="facets"></div>
+        <div id="hits" class="col-md-8 col-lg-9">
+            <table class="table ">
+                <thead>
+                    <tr><th class="file-name">File Name</th><th class="name">Entity Name</th><th class="filing-type">Filing Type</th><th class="filed">Filed</th><th class="file-number">File Number</th><th class="cik">CIK</th><th class="sic">SIC</th></tr>
+                </thead>
+                <tbody>
+                </tbody>
+            </table>
         </div>
-        <div id="facet-states" class="facet">
-            <div class="facet-title">Incorporated In</div>
-            <div class="facets"></div>
-        </div>
-        <i>document counts shown in []</i>
     </div>
-    <div id="hits"></div>
+</div>
+<div class="footer">footer nav</div>
+<div class="modal" id="previewer">
+    <div class="modal-dialog  h-100 w-100">
+        <div class="modal-content h-75 w-75 mx-auto">
 
+            <!-- Modal Header -->
+            <div class="modal-header">
+                <h4 class="modal-title mx-auto">
+                    Finding s<strong>users keywords</strong> in <span class="modal-file-name">filename.html</span>
+                    <button type="button" id="highligh-previous" class="btn btn-primary btn-sm m-sm-1">&#8249; Previous</button> <span class="find-counter">1 of 12</span> <button type="button" id="highligh-next" class="btn btn-primary btn-sm m-sm-2">Next &#8250;</button>
+                </h4><button type="button" class="close" data-dismiss="modal">&times;</button>
+            </div>
+
+            <!-- Modal body -->
+            <div class="modal-body" style="height: 90%;overflow: auto;">
+            </div>
+
+            <!-- Modal footer -->
+            <div class="modal-footer">
+                <a id="open-file"><button type="button" class="btn btn-warning">Open File</button></a>
+                <a id="open-submission"><button type="button" class="btn btn-warning">Open Submission</button></a>
+                <button type="button" class="btn btn-light btn-outline-dark" data-dismiss="modal">Close</button>
+            </div>
+
+        </div>
+    </div>
 </div>
 
-</div>
 </body>
 
 
