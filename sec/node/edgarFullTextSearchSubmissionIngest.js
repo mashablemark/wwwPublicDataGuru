@@ -95,7 +95,6 @@ process.on('message', (processInfo) => {
 
     //preprocessors:
     function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
-    function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
     function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
 
     const indexedFileTypes = {
@@ -141,7 +140,7 @@ process.on('message', (processInfo) => {
             if ((tLine == '</COMPANY-DATA>' || tLine == '</OWNER-DATA>') && entity.cik) {
                 submission.entities.push(entity);
                 if (entity.name) submission.names.push(entity.name);
-                if (entity.incorporationState) submission.incorporationStates.push(entity.incorporationState);
+                if (entity.incorporationState && entity.incorporationState.toString().length==2) submission.incorporationStates.push(entity.incorporationState);
                 if (entity.sic) submission.sics.push(entity.sic);
                 submission.ciks.push(entity.cik);
                 submission.displayNames.push(`${entity.name || ''} (${entity.cik})`);

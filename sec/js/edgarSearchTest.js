@@ -7,7 +7,7 @@ var edgarLocations = {};
 
 $(document).ready(function() {
     $('[data-toggle="tooltip"]').tooltip({classes: {"ui-tooltip":"popover"}});
-    const hashValues = getHashValues();
+    const hashValues = getHashAsObject();
     //load the state / locations drop down
 
     setDatesFromRange();
@@ -83,6 +83,9 @@ $(document).ready(function() {
         setTimeout(setDatesFromRange, 10) //allow default reset behavior to occur first
     });
 
+    $('#highlight-previous').click(function(){showHighlight (-1)});
+    $('#highlight-next').click(function(){showHighlight (1)});
+
     function setDatesFromRange(){
         var startDate = new Date(),
             endDate = new Date();
@@ -108,8 +111,15 @@ $(document).ready(function() {
 
 });
 
-function getHashValues(){
-
+function getHashAsObject(){
+    var hashString = location.href.split('#/').pop(),
+        hashTupletes = hashString.split('&'),
+        hashObject = {};
+    for(var i=0;i<hashTupletes.length;i++){
+        var hashPairs =  hashTupletes[i].split('=');
+        hashObject[hashPairs[0]]  = decodeURIComponent(hashPairs[1]);
+    }
+    return hashObject;
 }
 
 function setHashValues(){
@@ -293,6 +303,48 @@ function formatCIK(unpaddedCIK){ //accept int or string and return string with p
     return '0'.repeat(10-unpaddedCIK.toString().length) + unpaddedCIK.toString()
 }
 
+function keywordStringToPhrases(keywords){
+    keywords = keywords.trim().replace(/\s+/,' ');  //remove extra spaces
+    var phrases = [], phrase = '', inQuotes = false;
+    for(var i=0;i<keywords.length;i++){
+        switch(keywords[i]){
+            case '"':
+                if(phrase.trim().length) {
+                    phrases.push(phrase);
+                    phrase = '';
+                }
+                inQuotes = !inQuotes;
+                break;
+            case ' ':
+                if(!inQuotes){
+                    if(phrase.trim().length) {
+                        phrases.push(phrase);
+                        phrase = '';
+                        break;
+                    }
+                }
+            default:
+                phrase += keywords[i];
+        }
+    }
+    if(phrase.trim().length) phrases.push(phrase); //final word/phrase
+    return phrases;
+}
+
+function highlightMatchingPhases(text, phrases, isMarkupLanguage){
+    var rgxPhrase ;
+    for(var i=0;i<phrases.length;i++) {
+        if(isMarkupLanguage){
+            rgxPhrase = new RegExp('>([^<]*)\\b('+ phrases[i] + ')\\b', 'gmi');
+            text = text.replace(rgxPhrase, '>$1<span class="sect-efts-search-match-khjdickkwg">$2</span>');
+        } else {
+            rgxPhrase = new RegExp('\\b('+ phrases[i] + ')\\b', 'gmi');
+            text = text.replace(rgxPhrase, '><span class="sect-efts-search-match-khjdickkwg">$1</span>');
+        }
+    }
+    return text;
+}
+
 function previewFile(evt){
     if(evt) evt.preventDefault();
     var $a = $(this),
@@ -305,19 +357,41 @@ function previewFile(evt){
         function(data){
             var bodyOpen = data.search(/<body.*>/i),
                 bodyClose= data.search(/<\/body>/i),
+                ext = fileName.split('.').pop().toLowerCase(),
+                isText = ext == 'txt',
+                isHTML = ext == 'htm' || ext == 'html',
+                hashValues = getHashAsObject(),
+                searchedKeywords = hashValues.q,
                 html;
-
-            if(bodyOpen!=-1 && bodyClose!=-1) {
-                html = data.substring(data.search('>', bodyOpen), bodyClose-1).replace(/<img src="/gi, '<img src="'+submissionRoot)
+            if(isHTML){
+                if(bodyOpen!=-1 && bodyClose!=-1) {
+                    html = data.substring(data.search('>', bodyOpen)+1, bodyClose-1).replace(/<img src="/gi, '<img src="'+submissionRoot);
+                    $('#previewer div.modal-body').html(highlightMatchingPhases(html, keywordStringToPhrases(searchedKeywords), isHTML));
+                } else {
+                    $('#previewer div.modal-body').html('');
+                }
+            } else {
+                $('#previewer div.modal-body').html('<pre>' + highlightMatchingPhases(html, keywordStringToPhrases(searchedKeywords), isHTML) + '</pre>');
             }
-            //todo: add highlights spans
-            $('#previewer div.modal-body').html(html);
+
+            $('#previewer h4.modal-title strong').html(hashValues.q);
+            $('#previewer .modal-file-name').html(fileName);
+            $('#previewer h4.modal-title span.find-counter').html('<span id="showing-highlight">1</span> of '+ $('span.sect-efts-search-match-khjdickkwg').length);
             $('#open-file').attr('href', submissionRoot + fileName);
             $('#open-submission').attr('href',submissionRoot + adsh + '-index.html');
             $searchingOverlay.hide();
             $('#previewer').modal();
+            showHighlight(0);
         }
     );
+}
+
+function showHighlight (change){
+        var $highlights = $('span.sect-efts-search-match-khjdickkwg'),
+            hightlightCount = $highlights.length,
+            newShowing = Math.min(Math.max(1, parseInt($('#showing-highlight').html())+change), $highlights.length);
+        $('#showing-highlight').html(newShowing);
+        $('#previewer div.modal-body').animate({scrollTop: $($highlights.get(newShowing-1)).offset().top}, 500);
 }
 
 const locationsArray = [

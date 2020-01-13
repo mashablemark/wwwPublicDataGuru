@@ -27,6 +27,7 @@ exports.searchEFTS = async (r, context) => {
                 "filter": []
             },
         },
+        "from" : 0, "size" : 100, // outer hits, or books
         "docvalue_fields": [
             "ciks",
             "sics",
@@ -65,15 +66,15 @@ exports.searchEFTS = async (r, context) => {
     };
     const keywords = r.q.split(' ');
     for(let i=0;i<keywords.length;i++){
-        if(keywords[i].length>2) query.query.bool.must.push( {"match": { "doc_text": keywords[i]}})
+        if(keywords[i].length>2) query.query.bool.must.push( {"match": { "doc_text": keywords[i]}});
     }
     if(r.forms && r.forms.length) query.query.bool.filter.push( {"terms": { "root_form": r.forms}});
     if(r.sic) query.query.bool.filter.push( {"term": { "sics": {"value": r.sic}}});
-    if(r.cik)query.query.bool.filter.push( {"term": { "ciks": {"value": r.cik}}});
+    if(r.cik) query.query.bool.filter.push( {"term": { "ciks": {"value": r.cik}}});
     //todo: const dateFilter = r.startdt || r.enddt ? ';
 
     const querystring = JSON.stringify(query);
-console.log(querystring); //debug only
+    console.log(querystring); //debug only
     const options = {
         hostname: `${domain}.${region}.es.amazonaws.com`,
         port: 443,

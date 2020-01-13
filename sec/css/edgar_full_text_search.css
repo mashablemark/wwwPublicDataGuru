@@ -137,7 +137,7 @@ table.entity-hints tr.hint:hover{
 }
 #results{
     margin: 0;
-    /*display: none;*/
+    display: none;
 }
 
 #facets table {
@@ -146,4 +146,17 @@ table.entity-hints tr.hint:hover{
 
 #previewer .modal-dialog{
     max-width: 100%;
+}
+#previewer .modal-body {
+    border-width: 2px;
+    border-style: inset;
+    margin-left: 1rem;
+    margin-right: 1rem;
+    height: 90%;
+    overflow: auto;
+}
+span.sect-efts-search-match-khjdickkwg {
+    background-color: yellow;
+    padding: 2px;
+    box-shadow: rgba(0,0,0,0.7) 0 1px 4px;
 }
