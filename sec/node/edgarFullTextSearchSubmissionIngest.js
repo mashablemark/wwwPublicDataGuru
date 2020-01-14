@@ -83,6 +83,7 @@ process.on('message', (processInfo) => {
     let indexedByteCount = 0;
     submissionCount++;
     start = (new Date()).getTime();
+    if(!processNum)console.log('starting up process '+processInfo.processNum);
     if(processNum && processNum != processInfo.processNum){
         console.log('changing process num from '+processNum + ' to ' + processInfo.processNum);
     }
@@ -338,21 +339,17 @@ process.on('message', (processInfo) => {
                         let e = submission.entities[i];
                         //type values: OC=operating co; IC=invest co, RP=reporting person
                         //todo:  make the entity update into a SPROC with transaction to avoid race conditions
+                        //FIRST DB CONNECTION USES AWAIT TO SECURE THE CONNECTION FOR FOLLOWING QUERIES:
+                        let result = await common.runQuery(`select * from efts_entities where cik=${e.cik}`);
+                        if(result.data && result.data.length==0){
+                            //console.log(`inserting {q(e.name)} (${e.cik})$`);
+                            dbPromises.push(common.runQuery(`insert ignore into efts_entities (cik,name,state_inc,type,updatedfromadsh) 
+                                      values(${e.cik},${q(e.name)},${q(e.incorporationState)}, ${q(e.type)}, ${q(submission.adsh)})`
+                            ));
+                        }
                         dbPromises.push(common.runQuery(`select * from efts_entities where cik=${e.cik}`)
                             .then((result)=>{
-                                if(result.data && result.data.length==0){
-                                    //console.log(`inserting {q(e.name)} (${e.cik})$`);
-                                    dbPromises.push(common.runQuery(`insert ignore into efts_entities (cik,name,state_inc,type,updatedfromadsh) 
-                                      values(${e.cik},${q(e.name)},${q(e.incorporationState)}, ${q(e.type)}, ${q(submission.adsh)})`
-                                    ));
-                                }
-                                if(result.data && result.data[0] && result.data[0].filedt<submission.filingDate && (result.data[0].name!=e.name || result.data[0].state_inc!=e.incorporationState)){
-                                    console.log(`updating {q(e.name)} (${e.cik})$`);
-                                    common.runQuery(`update efts_entities set (name,state_inc,type,updatedfromadsh) 
-                                        values(${q(e.name)}, ${q(e.incorporationState)}, ${q(e.type)}, ${q(submission.adsh)})
-                                        where cik=${e.cik}`
-                                    );
-                                }
+
                             })
                         );
                         dbPromises.push(common.runQuery(`insert ignore into efts_submissions_entities (cik, adsh) 
@@ -456,9 +453,10 @@ function findPaths(headerLines, partialPropertyTag, paths){
 process.on('disconnect', async () => {
     if(common.con){
         common.con.end((err)=>{
-            if(err)
+            if(err){
+                console.log('connection error (processNum ' +processNum+')');
                 console.log(err);
-            else {
+            } else {
                 console.log('closed mysql connection held by parseSubmissionTxtFile (processNum ' +processNum+')');
                 common.con = false;
                 common.con = false;
