@@ -27,7 +27,7 @@ exports.searchEFTS = async (r, context) => {
                 "filter": []
             },
         },
-        "from" : 0, "size" : 100, // outer hits, or books
+        "from" : 0, "size" : 10, // outer hits, or books
         "docvalue_fields": [
             "ciks",
             "sics",
@@ -71,7 +71,7 @@ exports.searchEFTS = async (r, context) => {
     if(r.forms && r.forms.length) query.query.bool.filter.push( {"terms": { "root_form": r.forms}});
     if(r.sic) query.query.bool.filter.push( {"term": { "sics": {"value": r.sic}}});
     if(r.cik) query.query.bool.filter.push( {"term": { "ciks": {"value": r.cik}}});
-    //todo: const dateFilter = r.startdt || r.enddt ? ';
+    if(r.startdt && r.enddt) query.query.bool.filter.push({"range": {"file_date": {"gte": r.startdt, "lte": r.enddt}}});
 
     const querystring = JSON.stringify(query);
     console.log(querystring); //debug only

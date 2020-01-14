@@ -5,6 +5,7 @@
 
 //REQUIRES LAMBDA LAYER "COMMON"
 const common = require('common');
+let newContainer = true;
 
 exports.handler = async (req, context) => {
     if(req.keysTyped && req.keysTyped.length){
@@ -20,6 +21,10 @@ exports.handler = async (req, context) => {
         }
         //console.log(JSON.stringify(hints));
         hints.execTimeMS = (new Date()).getTime() - start.getTime();
+        if(newContainer){
+            hints.newContainer =  true;
+            newContainer = false;
+        }
         return hints;
     }
 };

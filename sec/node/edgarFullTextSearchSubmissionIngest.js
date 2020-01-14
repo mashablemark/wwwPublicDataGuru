@@ -40,7 +40,7 @@ after the last component file, the .txt archive always ends with
 
 const fs = require('fs');
 const readLine = require('readline');
-const common = require('common');  //custom set of common dB & S3 routines used by custom Lambda functions & Node programs
+const common = require('./common.js');  //custom set of common dB & S3 routines used by custom Lambda functions & Node programs
 const AWS = require('aws-sdk');
 
 const region = 'us-east-1';
@@ -141,10 +141,12 @@ process.on('message', (processInfo) => {
             if ((tLine == '</COMPANY-DATA>' || tLine == '</OWNER-DATA>') && entity.cik) {
                 submission.entities.push(entity);
                 if (entity.name) submission.names.push(entity.name);
-                if (entity.incorporationState && entity.incorporationState.toString().length==2) submission.incorporationStates.push(entity.incorporationState);
-                if (entity.sic) submission.sics.push(entity.sic);
-                submission.ciks.push(entity.cik);
-                submission.displayNames.push(`${entity.name || ''} (${entity.cik})`);
+                if (entity.incorporationState && entity.incorporationState.toString().length==2
+                    && submission.incorporationStates.indexOf(entity.incorporationState)==-1) submission.incorporationStates.push(entity.incorporationState);
+                if (entity.sic && submission.sics.indexOf(entity.sic)==-1) submission.sics.push(entity.sic);
+                if(submission.ciks.indexOf(entity.cik) == -1) submission.ciks.push(entity.cik);
+                let displayName = `${entity.name || ''} (${entity.cik})`;
+                if(submission.displayNames.indexOf(displayName)==-1) submission.displayNames.push(displayName);
             }  //ignores <DEPOSITOR-CIK> && <OWNER-CIK> (see path analysis below)
             if (tLine.startsWith('<CIK>')) entity.cik = tLine.substr('<CIK>'.length);
             if (tLine.startsWith('<ASSIGNED-SIC>')) entity.sic = tLine.substr('<ASSIGNED-SIC>'.length);
@@ -272,7 +274,7 @@ process.on('message', (processInfo) => {
                     console.log('retrying ES timed out call for :', submission.fileName, submission.docs[d].fileName, 'length =',doc_textLength);
                     request.
                 }, 10000); //set less than parent process's kill time of 60s*/
-                client.handleRequest(request, {connectTimeout: 100, timeout: 20000}, function(response) {
+                client.handleRequest(request, {connectTimeout: 1000, timeout: 20000}, function(response) {
                     //console.log(response.statusCode + ' ' + response.statusMessage);
                     var responseBody = '';
                     response.on('data', function (chunk) {
@@ -459,21 +461,21 @@ process.on('disconnect', async () => {
             } else {
                 console.log('closed mysql connection held by parseSubmissionTxtFile (processNum ' +processNum+')');
                 common.con = false;
-                common.con = false;
             }
+            //console.log(`${(new Date()).toISOString().substr(11, 10)} child process P${processNum} disconnected and shutting down`);
+            if(submission.readState != READ_STATES.MESSAGED_PARENT) {
+                submission.submissionCount = submissionCount;
+                submission.processRunTime = ((new Date()).getTime()-processStart)/1000;
+                submission.lastSubmissionRunTime = ((new Date()).getTime() - start)/1000;
+                submission.process = 'P'+processNum;
+                if(submission.lastSubmissionRunTime>60){
+                    console.log(submission.process, submission.lastSubmissionRunTime, submission.adsh, submission.readState, submission.indexState, submission.indexed, submission.docs[submission.indexed].state);
+                }
+            }
+            process.exit();
         });
     }
-    //console.log(`${(new Date()).toISOString().substr(11, 10)} child process P${processNum} disconnected and shutting down`);
-    if(submission.readState != READ_STATES.MESSAGED_PARENT) {
-        submission.submissionCount = submissionCount;
-        submission.processRunTime = ((new Date()).getTime()-processStart)/1000;
-        submission.lastSubmissionRunTime = ((new Date()).getTime() - start)/1000;
-        submission.process = 'P'+processNum;
-        if(submission.lastSubmissionRunTime>60){
-            console.log(submission.process, submission.lastSubmissionRunTime, submission.adsh, submission.readState, submission.indexState, submission.indexed, submission.docs[submission.indexed].state);
-        }
-    }
-    process.exit();
+
 });
 
 function runGarbageCollection(processInfo){

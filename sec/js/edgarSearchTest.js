@@ -1,6 +1,5 @@
 "use strict";
 
-var entity = false;  //holds the entity info once selected
 var categories = {};
 var formTooltips = {};
 var edgarLocations = {};
@@ -123,16 +122,17 @@ function getHashAsObject(){
 }
 
 function setHashValues(){
-    var filingTypes = $('#filing-types').val().trim();
+    var filingTypes = $('#filing-types').val().trim(),
+        entityName = $('.entity').val();
     let formValues = {
         q: $('#keywords').val(),
         dateRange: $('#date-range-select').find(':checked').val(),
-        startdt: $('#date-from').val(),
-        enddt: $('#date-to').val(),
+        startdt: formatDate($('#date-from').val()),
+        enddt: formatDate($('#date-to').val()),
         category: $('#category-select').val(),
-        cik: entity?entity.cik:false,
-        entityName: $('.entity').val(),
-        forms: filingTypes.length?filingTypes.replace(/[/s;,+]+/i,',').trim().split(','):[]
+        cik: extractCIK(entityName),
+        entityName: entityName,
+        forms: filingTypes.trim().length?filingTypes.replace(/[\s;,+]+/g,',').trim().toUpperCase().split(','):[]
     };
     let hashValues = [];
     for(let p in formValues){
@@ -142,6 +142,20 @@ function setHashValues(){
     hasher.setHash(hashValues.join('&')); //set hash without dispatching changed signal
     hasher.changed.active = true; //re-enable signal
     return formValues;
+    function formatDate(dateOrString){
+        var dt = new Date(dateOrString),
+            yyyy=dt.getFullYear(),
+            m=dt.getMonth()+1,
+            d=dt.getDate();
+        return yyyy+'-'+(m<10?'0'+m:m)+'-'+(d<10?'0'+d:d);
+    }
+}
+
+function extractCIK(entityName){
+    if(entityName.substr(entityName.length-12).match(/\([0-9]{10}\)/))
+        return entityName.substr(entityName.length-11, 10);
+    else
+        return false;
 }
 
 function getCompanyHints(control, keysTyped){
@@ -164,17 +178,18 @@ function getCompanyHints(control, keysTyped){
                 if(data.cikMatch) hints.unshift({CIK:data.cikMatch, entity: cikMatchName, tickers: cikMatchTickers});
                 var hintDivs = [];
                 var processedCIKs = [];
-                var rgxKeysTyped = new RegExp('('+keysTyped.trim()+')','i');
+                var rgxKeysTyped = new RegExp('('+keysTyped.trim()+')','gi');
                 if(hints.length){
                     for(var h=0;h<hints.length;h++){
                         if(processedCIKs.indexOf(hints[h].CIK)==-1){
-                            hintDivs.push('<tr class="hint" data="'+hints[h].CIK+'"><td class="hint-entity">'
+                            hintDivs.push('<tr class="hint" data="'+ hints[h].entity + ' ('+formatCIK(hints[h].CIK)+')"><td class="hint-entity">'
                                 +((hints[h].entity||'')+(hints[h].tickers?' ('+hints[h].tickers+')':'')).replace(rgxKeysTyped, '<b>$1</b>')
-                                + '</td><td class="hint-cik">' + ((' <i>CIK '+hints[h].CIK+'</i>')||'')+'</td></tr>');
+                                + '</td><td class="hint-cik">' + ((' <i>CIK '+ formatCIK(hints[h].CIK)+'</i>')||'')+'</td></tr>');
                             processedCIKs.push(hints[h].CIK)
                         }
                     }
-                    $('table.entity-hints').find('tr').remove().end().html(hintDivs.join('')).show().find('tr.hint').click(function(evt){hintClicked(this)});
+                    $('table.entity-hints').find('tr').remove().end().html(hintDivs.join('')).show().find('tr.hint')
+                        .click(function(evt){hintClicked(this)});
                     $('div.entity-hints').show();
                 } else {
                     hideCompanyHints();
@@ -194,11 +209,7 @@ function getCompanyHints(control, keysTyped){
 function hintClicked(row){
     console.log('hintClicked', (new Date()).getTime());
     var $row = $(row);
-    entity = {
-        cik: formatCIK(parseInt($row.attr('data'))),
-        name: $row.find('.hint-entity').html().replace(/<\/?b>/gi, '')
-    };
-    $('.entity').val(entity.name);
+    $('.entity').val($(row).attr('data'));
     hideCompanyHints();
 }
 function hideCompanyHints(){
@@ -207,6 +218,7 @@ function hideCompanyHints(){
 
 function executeSearch(e){
     var $searchingOverlay = $('.searching-overlay').show();
+    $('.tooltip').remove();
     if(e) e.preventDefault();  //don't refresh the page if called by submit event
 
     const label = 'EFTS ajax call';
@@ -222,6 +234,13 @@ function executeSearch(e){
             console.log('successfully talked to Lambda function!');
             console.timeEnd(label);
             console.log(data);
+            if(typeof data == 'string' && data.startsWith('invlaid JSON in: ')){
+                try{
+
+                } catch(e) {
+
+                }
+            }
             //write the data to the HTML containers
             writeFilters(data, 'inc_states_filter');
             writeFilters(data, 'form_filter');
