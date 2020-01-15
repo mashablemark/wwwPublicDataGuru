@@ -249,11 +249,15 @@ function executeSearch(e){
             var hits = data.hits.hits,
                 rows = [];
             for(var i=0;i<hits.length;i++){
-                rows.push('<tr><td class="file-name"><a href="#0" class="preview-file" data-adsh="' + hits[i]._source.adsh
-                    + '">' + hits[i].fields.file_name[0] + '</a></td><td class="name">'+hits[i].fields['display_names.raw'].join('; ') + '</td><td class="filing-type">'
-                    + hits[i].fields.form[0] + '</td><td class="filed">' + hits[i]._source.file_date + '</td><td class="file-name">'
-                    + '</td><td class="file-number">file no'
-                    + '</td><td class="sic">SIC</td></tr>')
+                try{
+                    rows.push('<tr><td class="file-name"><a href="#0" class="preview-file" data-adsh="' + hits[i]._source.adsh
+                        + '">' + hits[i].fields.file_name[0] + '</a></td><td class="name">'+hits[i].fields['display_names.raw'].join('; ') + '</td><td class="filing-type">'
+                        + hits[i].fields.form[0] + '</td><td class="filed">' + hits[i]._source.file_date + '</td><td class="file-name">'
+                        + '</td><td class="file-number">file no'
+                        + '</td><td class="sic">SIC</td></tr>');
+                } catch (e) {
+                    console.log("error process search hit:", hits[i]);
+                }
             }
             $('#hits table tbody')
                 .html(rows.join(''))
