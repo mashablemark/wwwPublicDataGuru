@@ -40,7 +40,7 @@ after the last component file, the .txt archive always ends with
 
 const fs = require('fs');
 const readLine = require('readline');
-const common = require('./common.js');  //custom set of common dB & S3 routines used by custom Lambda functions & Node programs
+const common = require('common.js');  //custom set of common dB & S3 routines used by custom Lambda functions & Node programs
 const AWS = require('aws-sdk');
 
 const region = 'us-east-1';
@@ -83,7 +83,7 @@ process.on('message', (processInfo) => {
     let indexedByteCount = 0;
     submissionCount++;
     start = (new Date()).getTime();
-    if(!processNum)console.log('starting up process '+processInfo.processNum);
+    //if(!processNum)console.log('starting up process '+processInfo.processNum);
     if(processNum && processNum != processInfo.processNum){
         console.log('changing process num from '+processNum + ' to ' + processInfo.processNum);
     }
@@ -274,7 +274,7 @@ process.on('message', (processInfo) => {
                     console.log('retrying ES timed out call for :', submission.fileName, submission.docs[d].fileName, 'length =',doc_textLength);
                     request.
                 }, 10000); //set less than parent process's kill time of 60s*/
-                client.handleRequest(request, {connectTimeout: 1000, timeout: 20000}, function(response) {
+                client.handleRequest(request, {connectTimeout: 1000, timeout: 55000}, function(response) {
                     //console.log(response.statusCode + ' ' + response.statusMessage);
                     var responseBody = '';
                     response.on('data', function (chunk) {
@@ -319,7 +319,7 @@ process.on('message', (processInfo) => {
                         nextDoc();
                     });
                 }, function(error) {
-                    console.log('Error: ' + error);
+                    console.log('Error sending data to ES: ' + error);
                     submission.docs[d].state = INDEX_STATES.INDEX_FAILED;
                     submission.docs[d].tries = (submission.docs[d].tries||1)+1;
                     if(submission.docs[d].tries<=3){
@@ -459,7 +459,7 @@ process.on('disconnect', async () => {
                 console.log('connection error (processNum ' +processNum+')');
                 console.log(err);
             } else {
-                console.log('closed mysql connection held by parseSubmissionTxtFile (processNum ' +processNum+')');
+                //console.log('closed mysql connection held by parseSubmissionTxtFile (processNum ' +processNum+')');
                 common.con = false;
             }
             //console.log(`${(new Date()).toISOString().substr(11, 10)} child process P${processNum} disconnected and shutting down`);

@@ -12,7 +12,12 @@ $(document).ready(function() {
     setDatesFromRange();
 
     //configure company hints event on both keywords and company text boxes
-    $('.entity').keyup(function(event){ getCompanyHints(this, $(this).val())});
+    $('.entity')
+        .keyup(function(event){ getCompanyHints(this, $(this).val())})
+        .blur(function(evt){console.log(evt.relatedTarget)})
+        .keypress(
+            function(evt){console.log(evt.relatedTarget)
+            });
     $('#form-container').blur(hideCompanyHints);
     $('#form-container button, #form-container label, #form-container input:not(.entity)').focus(hideCompanyHints);
 
@@ -136,7 +141,7 @@ function setHashValues(){
     };
     let hashValues = [];
     for(let p in formValues){
-        if(formValues[p]) hashValues.push(p+'='+encodeURIComponent(formValues[p]));
+        if(formValues[p]) hashValues.push(p+'='+formValues[p]);
     }
     hasher.changed.active = false; //disable changed signal
     hasher.setHash(hashValues.join('&')); //set hash without dispatching changed signal
@@ -373,8 +378,9 @@ function previewFile(evt){
     var $a = $(this),
         fileName = $a.html(),
         adsh = $a.attr('data-adsh'),
+        cik = extractCIK($a.closest('tr').find('.name').html()),
         submissionRoot = 'https://www.sec.gov/Archives/edgar/data/'
-            + adsh.split('-')[0] + '/' + adsh.replace(/-/g,'') + '/' ,
+            + cik + '/' + adsh.replace(/-/g,'') + '/' ,
         $searchingOverlay = $('.searching-overlay').show();
     $.get('https://www.publicdata.guru/sec/getWebDoc.php?f='+encodeURIComponent(submissionRoot + fileName),
         function(data){

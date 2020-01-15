@@ -20,6 +20,10 @@ exports.searchEFTS = async (r, context) => {
     //todo: add screens for malicious of prohibited actions
     if(!r.q || r.q.trim().length<2 || r.q.trim()[0]=='*') return {error: 'text search query must include a keyword longer then 2 characters'};
 
+    let from = 0;  //"from" parameter allows for pagination
+    if(r.from && !isNaN(r.from)){
+        from = parseInt(r.from);
+    }
     const query = {
         "query": {
             "bool": {
@@ -27,7 +31,7 @@ exports.searchEFTS = async (r, context) => {
                 "filter": []
             },
         },
-        "from" : 0, "size" : 10, // outer hits, or books
+        "from": from, "size": 100, // outer hits, or books
         "docvalue_fields": [
             "ciks",
             "sics",
@@ -36,8 +40,11 @@ exports.searchEFTS = async (r, context) => {
             "file_description",
             "filed",
             "form"
-        ],
-        "aggregations": {
+        ]
+    };
+
+    if(!from) {
+        query .aggregations = {
             "form_filter": {
                 "terms": {
                     "field": "form",
@@ -94,10 +101,9 @@ exports.searchEFTS = async (r, context) => {
             });
             response.on('end', () => {
                 try{
-                    resolve(JSON.parse(chunks.join()));
+                    resolve(JSON.parse(chunks.join('')));
                 } catch (e) {
-
-                    resolve('invlaid JSON in: '+(chunks.join()));
+                    resolve('invalid JSON in: '+(chunks.join('')));
                 }
             });
         });

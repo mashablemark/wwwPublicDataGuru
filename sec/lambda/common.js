@@ -43,7 +43,7 @@ let me = {
             return ' null' + (isLast ? '' : ',');
         }
     },
-    createDbConnection: (dbInfo) => {
+    createDbConnection: (dbInfo, logInfo = false) => {
         return new Promise((resolve, reject) => {
             let newConn = mysql.createConnection(dbInfo || secure.publicdataguru_dbinfo()); // (Re)create reusable connection for this Lambda
             newConn.connect(async err => {
@@ -60,14 +60,13 @@ let me = {
                             throw new Error(err.message);
                         }
                     });
-                    console.log('createDbConnection opened a new mysql connection');
-                    if(!dbInitializationFlag){
-                        dbInitializationFlag = true;
-                        console.log('db connected for first time and dbInitializationFlag set')
+                    if(logInfo){
+                        me.con= newConn;  //if not set, runQuery will create another
+                        //let status = await me.runQuery('SHOW STATUS WHERE variable_name LIKE "Threads_%" OR variable_name = "Connections"');
+                        let status = await me.runQuery('SHOW STATUS WHERE variable_name = "Connections"');
+                        console.log(`createDbConnection new mysql connection (dbInitializationFlag = ${dbInitializationFlag }); ${JSON.stringify(status.data[0])}`);
                     }
-                    me.con= newConn;  //if not set, runQuery will create another
-                    let status = await me.runQuery('SHOW STATUS WHERE variable_name LIKE "Threads_%" OR variable_name = "Connections"');
-                    console.log(JSON.stringify(status.data));
+                    dbInitializationFlag = true;
                     resolve(newConn);
                 }
             });

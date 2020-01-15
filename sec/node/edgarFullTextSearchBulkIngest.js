@@ -387,6 +387,10 @@ function indexDirectory(processControl, downloadNum, ingestDirectoryCallback){
                     console.log(`${Math.round(10*indexedByteCount/(1024*1024))/10}MB indexed for this day in ${Math.round(((new Date()).getTime()-startIndexTime)/100)/10}s; ${Math.round(10*processControl.indexedByteCount/(1024*1024))/10}MB in total`);
                 }
                 downloadControl.status = 'indexed';
+                const archiveDir = processControl.directory + downloadControl.archiveName;
+                exec('rm ' + archiveDir + '/*').on('exit', function (code) {
+                    exec('rmdir ' + archiveDir);
+                });
                 if(ingestDirectoryCallback) ingestDirectoryCallback(downloadControl);
             }
         }
