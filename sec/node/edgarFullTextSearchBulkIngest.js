@@ -72,15 +72,20 @@ let  esMappings = {
                 "boost": 100,  //if the keyword appear in the name, boost it!
                 "fields": {
                     "raw": {  //accessed as entity_name.raw
-                        "type": "keyword",
-                        //"doc_values": true, //retrievable
+                        "type": "keyword", //"doc_values": true, //retrievable
                     }
                 }
             },
+/*          id (returned) = adsh:file_name therefore these are redundant fields
             "file_name": {
                 "type": "keyword",
                 "index": false, // not searchable, but needed for display of results
             },
+            "adsh": { //returning!
+                "type": "keyword",
+                "index": false, // not searchable , but needed for display of results
+                //"doc_values": true,
+            },*/
             "file_description": {
                 "type": "keyword",
                 "index": false, // not searchable, but needed for display of results
@@ -88,6 +93,14 @@ let  esMappings = {
             },
             "file_type": {  //for searching exhibit types attached to a form
                 "type": "keyword",
+            },
+            "film_num": {  //for searching exhibit types attached to a form
+                "type": "keyword",
+                "index": false, // not searchable (root_form is), but needed for display of results
+            },
+            "file_num": {  //for searching exhibit types attached to a form
+                "type": "keyword",
+                "index": false, // not searchable (root_form is), but needed for display of results
             },
             "file_date": {
                 "type": "date",
@@ -102,17 +115,24 @@ let  esMappings = {
                 "type": "keyword",
                 //"doc_values": true, //retrievable
             },
-            "inc_states": { //returning!
-                "type": "keyword",
-                //"doc_values": true, //retrievable
-            },
             "form": { //returning!
                 "type": "keyword",
                 "index": false, // not searchable (root_form is), but needed for display of results
+            },
+            "root_form": { //returning!
+                "type": "keyword",
+            },
+            "inc_states": { //returning!
+                "type": "keyword",
+            },
+            "biz_states": { //returning!
+                "type": "text",
                 //"doc_values": true,
             },
-            "root_form": {
+            "biz_locations": { //returning!
                 "type": "keyword",
+                "index": false, // not searchable (root_form is), but needed for display of results
+                //"doc_values": true,
             },
         }
     }
@@ -362,7 +382,8 @@ function indexDirectory(processControl, downloadNum, ingestDirectoryCallback){
                         if(submissionHandler && submissionHandler.connected){
                             submissionHandler.removeAllListeners('message');
                             submissionHandler.removeAllListeners('error');
-                            submissionHandler.disconnect()
+                            console.log('disconnecting long running process p'+p);
+                            submissionHandler.disconnect();
                         }
                         delete processControl.processes["p"+p];  //process is dead to me
                         let processInfo = processNextFile(p);
