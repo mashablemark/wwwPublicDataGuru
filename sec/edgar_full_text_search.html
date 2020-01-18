@@ -18,7 +18,7 @@
 
     <script type="text/javascript" src="global/js/signals/signals.js"></script>
     <script type="text/javascript" src="global/js/hasher/hasher.min.js"></script>
-    <script src="js/edgarSearchTest.js"></script>
+    <script src="js/edgar_full_text_search.js"></script>
 </head>
 <body>
 <div class="justify-content-center align-items-center searching-overlay" style="display:none;">
@@ -95,7 +95,7 @@
                 <div class="facets"></div>
             </div>
             <div id="inc_states_filter" class="facet">
-                <div class="facet-title"><span class="badge badge-secondary">count</span> Location Incorporated</div>
+                <div class="facet-title"><span class="badge badge-secondary">count</span> Incorporated In</div>
                 <div class="facets"></div>
             </div>
             <div id="sic_filter" class="facet">
@@ -107,7 +107,13 @@
         <div id="hits" class="col-md-8 col-lg-9">
             <table class="table ">
                 <thead>
-                    <tr><th class="file-name">File Name</th><th class="name">Entity Name</th><th class="filing-type">Filing Type</th><th class="filed">Filed</th><th class="file-number">File Number</th><th class="cik">CIK</th><th class="sic">SIC</th></tr>
+                    <tr>
+                        <th class="file">File</th>
+                        <th class="file">Form</th>
+                        <th class="filed">Filed</th>
+                        <th class="name">Entity Name (CIK)</th>
+                        <th class="located">Located</th>
+                        <th class="incorporate">Incorporated</th>
                 </thead>
                 <tbody>
                 </tbody>

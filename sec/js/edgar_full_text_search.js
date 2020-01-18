@@ -6,9 +6,6 @@ var edgarLocations = {};
 
 $(document).ready(function() {
     $('[data-toggle="tooltip"]').tooltip({classes: {"ui-tooltip":"popover"}});
-    const hashValues = getHashAsObject();
-    //load the state / locations drop down
-
     setDatesFromRange();
 
     //configure company hints event on both keywords and company text boxes
@@ -81,7 +78,7 @@ $(document).ready(function() {
         $dateRangeSelect.val('custom')
     });
 
-    $('#form-container form').submit(executeSearch);
+    $('#form-container form').submit(setHashFromForm); //intercept form submit events; also called programmatically
 
     $('#clear').click(function(){
         setTimeout(setDatesFromRange, 10) //allow default reset behavior to occur first
@@ -113,20 +110,28 @@ $(document).ready(function() {
         $('#date-to').val(endDate.toLocaleDateString());
     }
 
+    hasher.initialized.add(loadFormFromHash); //populate form if values bookmarked/embedded in link
+    hasher.initialized.add(executeSearch);//execute search on load if values bookmarked/embedded in link
+    hasher.changed.add(loadFormFromHash); //update form on back/forward navigate
+    hasher.changed.add(executeSearch); //execute search on hash change from form submit or pn navigate
+    hasher.init();
 });
 
-function getHashAsObject(){
-    var hashString = location.href.split('#/').pop(),
-        hashTupletes = hashString.split('&'),
-        hashObject = {};
-    for(var i=0;i<hashTupletes.length;i++){
-        var hashPairs =  hashTupletes[i].split('=');
-        hashObject[hashPairs[0]]  = decodeURIComponent(hashPairs[1]);
+function hashToObject(hashString){
+    var hashObject = {};
+    if(!hashString) hashString = hasher.getHashAsArray().pop();
+    if(hashString){
+        var hashTupletes = hashString.split('&');
+        for(var i=0;i<hashTupletes.length;i++){
+            var hashPair =  hashTupletes[i].split('=');
+            hashObject[hashPair[0]]  = decodeURIComponent(hashPair[1]);
+        }
     }
     return hashObject;
 }
 
-function setHashValues(){
+function setHashFromForm(e){
+    if(e) e.preventDefault();  //don't refresh the page if called by submit event
     var filingTypes = $('#filing-types').val().trim(),
         entityName = $('.entity').val();
     let formValues = {
@@ -135,6 +140,7 @@ function setHashValues(){
         startdt: formatDate($('#date-from').val()),
         enddt: formatDate($('#date-to').val()),
         category: $('#category-select').val(),
+        locationCode: $('#location-select').val(),
         cik: extractCIK(entityName),
         entityName: entityName,
         forms: filingTypes.trim().length?filingTypes.replace(/[\s;,+]+/g,',').trim().toUpperCase().split(','):[]
@@ -143,17 +149,16 @@ function setHashValues(){
     for(let p in formValues){
         if(formValues[p]) hashValues.push(p+'='+formValues[p]);
     }
-    hasher.changed.active = false; //disable changed signal
-    hasher.setHash(hashValues.join('&')); //set hash without dispatching changed signal
-    hasher.changed.active = true; //re-enable signal
+    hasher.setHash(hashValues.join('&')); //this trigger the listener (= executeSearch)
     return formValues;
-    function formatDate(dateOrString){
-        var dt = new Date(dateOrString),
-            yyyy=dt.getFullYear(),
-            m=dt.getMonth()+1,
-            d=dt.getDate();
-        return yyyy+'-'+(m<10?'0'+m:m)+'-'+(d<10?'0'+d:d);
-    }
+}
+
+function formatDate(dateOrString){
+    var dt = new Date(dateOrString),
+        yyyy=dt.getFullYear(),
+        m=dt.getMonth()+1,
+        d=dt.getDate();
+    return yyyy+'-'+(m<10?'0'+m:m)+'-'+(d<10?'0'+d:d);
 }
 
 function extractCIK(entityName){
@@ -221,16 +226,29 @@ function hideCompanyHints(){
     $('div.entity-hints').hide();
 }
 
-function executeSearch(e){
+function loadFormFromHash(hash){
+    const hashValues = hashToObject(hash);
+    if(hashValues.q) $('#keywords').val(hashValues.q);
+    if(hashValues.dateRange) $('#date-range-select').find(':checked').val(hashValues.dateRange);
+    if(hashValues.startdt) $('#date-from').val(formatDate(hashValues.startdt));
+    if(hashValues.enddt) $('#date-to').val(formatDate(hashValues.enddt));
+    if(hashValues.category)  $('#category-select').val(hashValues.category);
+    if(hashValues.locationCode) $('#location-select').val(hashValues.locationCode);
+    if(hashValues.entityName)  $('.entity').val(hashValues.entityName);
+    if(hashValues.forms)  $('#filing-types').val(hashValues.forms);
+}
+
+function executeSearch(newHash, oldHash){
     var $searchingOverlay = $('.searching-overlay').show();
     $('.tooltip').remove();
-    if(e) e.preventDefault();  //don't refresh the page if called by submit event
-
+    
     const label = 'EFTS ajax call';
     console.time(label);
-    var start = new Date();
+    var start = new Date(),
+        searchParams = hashToObject(newHash);
+    console.log(searchParams);
     $.ajax({
-        data: JSON.stringify(setHashValues()),
+        data: JSON.stringify(searchParams),
         dataType: 'JSON',
         type: 'POST',
         url: 'https://search.publicdata.guru/search-index',
@@ -255,13 +273,21 @@ function executeSearch(e){
                 rows = [];
             for(var i=0;i<hits.length;i++){
                 try{
-                    rows.push('<tr><td class="file-name"><a href="#0" class="preview-file" data-adsh="' + hits[i]._source.adsh
-                        + '">' + hits[i].fields.file_name[0] + '</a></td><td class="name">'+hits[i].fields['display_names.raw'].join('; ') + '</td><td class="filing-type">'
-                        + hits[i].fields.form[0] + '</td><td class="filed">' + hits[i]._source.file_date + '</td><td class="file-name">'
-                        + '</td><td class="file-number">file no'
-                        + '</td><td class="sic">SIC</td></tr>');
+                    let pathParts = hits[i]._id.split(':'),
+                    adsh = pathParts[0],
+                    fileName = pathParts[1],
+                    fileType = hits[i]._source.file_type || hits[i]._source.file_description || fileName,
+                    form =  hits[i]._source.form;
+                    rows.push('<tr>'
+                        + '<td class="file"><a href="#0" class="preview-file" data-adsh="' + adsh + '" data-file-name="'
+                        +     fileName+'">' + fileType + '</a></td>'
+                        + '<td class="form">' + form + '</td>'
+                        + '<td class="filed">' + hits[i]._source.file_date + '</td>'
+                        + '<td class="name">' + hits[i]._source.display_names.join('<br> ') + '</td>'
+                        + '<td class="biz-location">' + hits[i]._source.biz_locations.join('<br>') + '</td>'
+                        + '</tr>');
                 } catch (e) {
-                    console.log("error process search hit:", hits[i]);
+                    console.log("error processing search hit:", hits[i]);
                 }
             }
             $('#hits table tbody')
@@ -316,7 +342,7 @@ function executeSearch(e){
                     var $a = $(this),
                         filterKey = $a.closest('.facet').attr('id');
                     $(inputControls[filterKey]).val($a.attr('data-filter-key')); //update the form
-                    executeSearch();  //execute a new search -> update results and facets
+                    setHashFromForm();  //update the hash and trigger a new search -> update results and facets
             });
             $filter.find('[data-toggle="tooltip"]').tooltip({classes: {"ui-tooltip":"popover"}});
             $facetSection.show();
@@ -376,9 +402,9 @@ function highlightMatchingPhases(text, phrases, isMarkupLanguage){
 function previewFile(evt){
     if(evt) evt.preventDefault();
     var $a = $(this),
-        fileName = $a.html(),
-        adsh = $a.attr('data-adsh'),
         cik = extractCIK($a.closest('tr').find('.name').html()),
+        adsh = $a.attr('data-adsh'),
+        fileName = $a.attr('data-file-name'),
         submissionRoot = 'https://www.sec.gov/Archives/edgar/data/'
             + cik + '/' + adsh.replace(/-/g,'') + '/' ,
         $searchingOverlay = $('.searching-overlay').show();
@@ -389,7 +415,7 @@ function previewFile(evt){
                 ext = fileName.split('.').pop().toLowerCase(),
                 isText = ext == 'txt',
                 isHTML = ext == 'htm' || ext == 'html',
-                hashValues = getHashAsObject(),
+                hashValues = hashToObject(),
                 searchedKeywords = hashValues.q,
                 html;
             if(isHTML){
