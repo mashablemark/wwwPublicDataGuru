@@ -242,6 +242,16 @@ let me = {
     makeHash: (thing) => {
         if(typeof thing == 'object') thing = JSON.stringify(thing);
         return require('crypto').createHash('sha1').update(thing.toString()).digest('base64');
+    },
+    toTitleCase: function(title){
+        let w, word, words = title.split(' ');
+        const lcaseSmalls = ['A','An','And','In','Of','The'];
+        for(w=0; w<words.length; w++){
+            word = words[w].substr(0,1).toUpperCase() + words[w].substr(1).toLowerCase();
+            if(w!=0 && lcaseSmalls.indexOf(word)!=-1) word = word.toLowerCase();
+            words[w] = word;
+        }
+        return words.join(' ');
     }
 };
 

@@ -175,8 +175,8 @@ process.on('message', (processInfo) => {
                 for(let i=0;i<submission.entities.length;i++){
                     let e = submission.entities[i];
                     submission.businessStates.push( e.businessAddress ? e.businessAddress.state : (e.mailingAddress ? e.mailingAddress.state : null));
-                    submission.businessLocations.push((e.businessAddress ? e.businessAddress.city + ' ' + edgarLocations[e.businessAddress.state] : null)
-                        || (e.mailingAddress ? e.mailingAddress.city + ' ' + edgarLocations[e.mailingAddress.state] : null));
+                    submission.businessLocations.push((e.businessAddress ? common.toTitleCase(e.businessAddress.city) + ', ' + edgarLocations[e.businessAddress.state] : null)
+                        || (e.mailingAddress ? common.toTitleCase(e.mailingAddress.city) + ', ' + edgarLocations[e.mailingAddress.state] : null));
                 }
                 submission.readState = READ_STATES.DOC_HEADER;
             }

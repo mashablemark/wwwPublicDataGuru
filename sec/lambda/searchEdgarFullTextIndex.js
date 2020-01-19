@@ -32,22 +32,13 @@ exports.searchEFTS = async (r, context) => {
             },
         },
         "from": from, "size": 100, // outer hits, or books
-        "docvalue_fields": [
-            "ciks",
-            "sics",
-            "file_name",
-            "display_names.raw",
-            "file_description",
-            "filed",
-            "form"
-        ]
     };
 
     if(!from) {
         query .aggregations = {
             "form_filter": {
                 "terms": {
-                    "field": "form",
+                    "field": "root_form",
                     "size": 30
                 }
             },
@@ -70,15 +61,17 @@ exports.searchEFTS = async (r, context) => {
                 }
             }
         }
-    };
+    }
+
     const keywords = r.q.split(' ');
     for(let i=0;i<keywords.length;i++){
         if(keywords[i].length>2) query.query.bool.must.push( {"match": { "doc_text": keywords[i]}});
     }
     if(r.forms && r.forms.length) query.query.bool.filter.push( {"terms": { "root_form": r.forms}});
-    if(r.sic) query.query.bool.filter.push( {"term": { "sics": {"value": r.sic}}});
+    if(r.sics && r.sics.length) query.query.bool.filter.push( {"terms": { "sics": r.sics}});
     if(r.cik) query.query.bool.filter.push( {"term": { "ciks": {"value": r.cik}}});
     if(r.startdt && r.enddt) query.query.bool.filter.push({"range": {"file_date": {"gte": r.startdt, "lte": r.enddt}}});
+    if(r.locationCode) query.query.bool.filter.push( {"term": { "inc_states": {"value": r.locationCode}}});
 
     const querystring = JSON.stringify(query);
     console.log(querystring); //debug only

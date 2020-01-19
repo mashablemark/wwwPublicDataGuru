@@ -25,13 +25,13 @@
     <div class="spinner-border text-warning"></div>
 </div>
 <div  id="search_form" class="efstsearch-form">
-<h2>EDGAR Full Text Search Prototype using Elastic Search</h2>
+<h2 class="mx-auto">EDGAR Full Text Search Prototype using Elastic Search</h2>
     <div id="form-container" class="container rounded-lg mb-4">
         <form autocomplete="off">
         <div class="form-group row">
             <div class="col-sm-8">
-                <label for="keywords">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
-                <input id="keywords" type="text" class="company form-control border-onfocus" placeholder="keywords to search on" autocomplete="false">
+                    <label for="keywords">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
+                    <input id="keywords" type="text" class="company form-control border-onfocus" placeholder="keywords to search on" autocomplete="false" required>
                 <label>Company Name, Ticker, CIK Number or Reporter's last name</label>
                 <input type="text"  class="entity form-control border-onfocus" placeholder="Company name, ticker symbol, reporter last name or CIK" autocomplete="false">
                 <div class="rel-none container">
@@ -66,8 +66,8 @@
                 <select name="loction-select" id="location-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all">View All</option>
                 </select>
-                <label for="sic_code-select">SIC Codes</label><button type="button" id="help-tips-sic-codes" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="The US Standard Industrial Classification (SIC) code system is used to classify the primary activities of a corporation.">?</button><span id="browse-sic-codes" class="browse">Browse SIC Codes</span>
-                <select name="sic_code-select" id="sic_code-select" class="custom-select border-onfocus" autocomplete="false">
+                <label for="sic-select">SIC Codes</label><button type="button" id="help-tips-sic-codes" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="The US Standard Industrial Classification (SIC) code system is used to classify the primary activities of a corporation.">?</button><span id="browse-sic-codes" class="browse">Browse SIC Codes</span>
+                <select name="sic-select" id="sic-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all">View All</option>
                 </select>
                 <!--label>Display</label><button type="button" id="help-tips-insider" class="btn btn-primary btn-circle btn-sm">?</button><br />
@@ -121,7 +121,7 @@
         </div>
     </div>
 </div>
-<footer class="py-4 w-100">
+<footer class="py-4 w-100 navbar navbar-expand-sm float-bottom">
     <div class="container-md">
             <nav role="navigation" aria-labelledby="block-secgov-footer-menu" id="block-secgov-footer">
                 <ul id="section-menu" class="menu mx-auto">
