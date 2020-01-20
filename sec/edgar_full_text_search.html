@@ -6,7 +6,7 @@
     <title>Edgar Full Text Search Test Page</title>
 
     <!--CSS files-->
-
+    <link  rel="stylesheet" href="css/all.css" />
     <link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" type="text/css" />
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
     <link  rel="stylesheet" href="css/edgar_full_text_search.css" />
@@ -84,25 +84,102 @@
     </div>
 </div>
 <div id="results" class="container mw-100 p-lg-4">
-    <div id="tags" class="row">
+    <div id="results-grid" class="row">
         <div id="facets" class="col-md-4 col-lg-3">
-            <div id="entity_filter" class="facet">
-                <div class="facet-title"><span class="badge badge-secondary">count</span> Entity</div>
-                <div class="facets"></div>
+            <h4  class="m-3">Refine search results by:</h4>
+            <!--Accordion wrapper-->
+            <div class="accordion md-accordion" id="accordionEx" role="tablist" aria-multiselectable="true">
+
+                <!-- Accordion card -->
+                <div class="card facet" id="entity_filter">
+
+                    <!-- Card header -->
+                    <div class="card-header" role="tab">
+                        <a class="collapsed" data-toggle="collapse" data-parent="#accordionEx" href="#collapseOne1" aria-expanded="true"
+                           aria-controls="collapseOne1">
+                            <h5 class="mb-0">
+                                Entity <i class="fas fa-angle-down rotate-icon"></i>
+                            </h5>
+                        </a>
+                    </div>
+
+                    <!-- Card body -->
+                    <div id="collapseOne1" class="collapse" role="tabpanel" aria-labelledby="headingOne1" data-parent="#accordionEx">
+                        <div class="card-body facets"></div>
+                    </div>
+
+                </div>
+                <!-- Accordion card -->
+
+                <!-- Accordion card -->
+                <div class="card facet"  id="form_filter">
+
+                    <!-- Card header -->
+                    <div class="card-header" role="tab" id="headingTwo2">
+                        <a class="collapsed" data-toggle="collapse" data-parent="#accordionEx" href="#collapseTwo2"
+                           aria-expanded="false" aria-controls="collapseTwo2">
+                            <h5 class="mb-0">
+                                Form Type <i class="fas fa-angle-down rotate-icon"></i>
+                            </h5>
+                        </a>
+                    </div>
+
+                    <!-- Card body -->
+                    <div id="collapseTwo2" class="collapse" role="tabpanel" aria-labelledby="headingTwo2" data-parent="#accordionEx">
+                        <div class="card-body facets"></div>
+                    </div>
+
+                </div>
+                <!-- Accordion card -->
+
+                <!-- Accordion card -->
+                <div class="card"  id="inc_states_filter" class="facet">
+
+                    <!-- Card header -->
+                    <div class="card-header" role="tab" id="headingThree3">
+                        <a class="collapsed" data-toggle="collapse" data-parent="#accordionEx" href="#collapseThree3" aria-expanded="false" aria-controls="collapseThree3">
+                            <h5 class="mb-0">
+                                Incorporated In <i class="fas fa-angle-down rotate-icon"></i>
+                            </h5>
+                        </a>
+                    </div>
+
+                    <!-- Card body -->
+                    <div id="collapseThree3" class="collapse" role="tabpanel" aria-labelledby="headingThree3"
+                         data-parent="#accordionEx">
+                        <div class="card-body facets"></div>
+                    </div>
+
+                </div>
+                <!-- Accordion card -->
+
+                <!-- Accordion card -->
+                <div class="card"  id="sic_filter" class="facet">
+
+                    <!-- Card header -->
+                    <div class="card-header" role="tab" id="headingFour4">
+                        <a class="collapsed" data-toggle="collapse" data-parent="#accordionEx" href="#collapseThree3" aria-expanded="false" aria-controls="collapseThree3">
+                            <h5 class="mb-0">
+                                SIC Codes <i class="fas fa-angle-down rotate-icon"></i>
+                            </h5>
+                        </a>
+                    </div>
+
+                    <!-- Card body -->
+                    <div id="collapseFour4" class="collapse" role="tabpanel" aria-labelledby="headingThree3"
+                         data-parent="#accordionEx">
+                        <div class="card-body facets"></div>
+                    </div>
+
+                </div>
+                <!-- Accordion card -->
+
             </div>
-            <div id="form_filter" class="facet">
-                <div class="facet-title"><span class="badge badge-secondary">count</span> Form Type</div>
-                <div class="facets"></div>
+            <!-- Accordion wrapper -->
+            <div class="m-3">
+                <i>Click headings to show top filters.<br>
+                    Document counts shown in <span class="badge badge-secondary">#</span></i>
             </div>
-            <div id="inc_states_filter" class="facet">
-                <div class="facet-title"><span class="badge badge-secondary">count</span> Incorporated In</div>
-                <div class="facets"></div>
-            </div>
-            <div id="sic_filter" class="facet">
-                <div class="facet-title"><span class="badge badge-secondary">count</span>SIC Codes</div>
-                <div class="facets"></div>
-            </div>
-            <i>document counts shown in <span class="badge badge-secondary">#</span></i>
         </div>
         <div id="hits" class="col-md-8 col-lg-9">
             <table class="table ">

@@ -144,6 +144,27 @@ table.entity-hints tr.hint:hover{
 
 }
 
+
+.fas {
+    float: right;
+}
+.xfas {
+    float: right;
+    font-weight: 900;
+    -webkit-font-smoothing: antialiased;
+    display: inline-block;
+    font-style: normal;
+    font-variant: normal;
+    text-rendering: auto;
+    line-height: 1;
+    font-family: FontAwesome;
+}
+.xfa-angle-down:before {
+    content: "\f107";
+}
+.xfa-angle-up:before {
+    content: "\f107";
+}
 #previewer .modal-dialog{
     max-width: 100%;
 }
@@ -180,3 +201,4 @@ footer li.menu__item {
 footer li.menu__item a {
     color: #fff;
 }
+

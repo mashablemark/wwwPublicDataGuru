@@ -337,6 +337,7 @@ function executeSearch(newHash, oldHash){
             $('#hits table tbody')
                 .html(rows.join(''))
                 .find('a.preview-file').click(previewFile);
+            $('div.collapse.show').removeClass('show');  //collapse the accordion of facets
             $searchingOverlay.hide();
             $('#results').show();
         },
