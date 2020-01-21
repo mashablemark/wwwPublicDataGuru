@@ -495,7 +495,7 @@ function showHighlight (change){
         $previewPanel = $('#previewer div.modal-body'),
         newShowing = Math.min(Math.max(1, parseInt($('#showing-highlight').html())+change), $highlights.length);
     $('#showing-highlight').html(newShowing);
-    $previewPanel.animate({scrollTop: $previewPanel.scrollTop() + $($highlights.get(newShowing-1)).offset().top}, 500);
+    $previewPanel.animate({scrollTop: Math.max(0, $previewPanel.scrollTop() + $($highlights.get(newShowing-1)).offset().top - $previewPanel.height()/2)}, 500);
 }
 
 const locationsArray = [
