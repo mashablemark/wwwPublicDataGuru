@@ -319,8 +319,13 @@ function executeSearch(newHash, oldHash){
                     let pathParts = hits[i]._id.split(':'),
                     adsh = pathParts[0],
                     fileName = pathParts[1],
+                    fileNameParts = fileName.split('.'),
+                    fileNameMain = fileNameParts[0],
+                    fileNameExt = fileNameParts[1],
                     fileType = hits[i]._source.file_type || hits[i]._source.file_description || fileName,
                     form =  hits[i]._source.form;
+                    if(XLS_Forms.indexOf(form)!=1 && fileNameExt.toUpperCase()=='XML' )
+                        fileName = fileNameMain + '.' + fileNameExt;
                     rows.push('<tr>'
                         + '<td class="file"><a href="#0" class="preview-file" data-adsh="' + adsh + '" data-file-name="'
                         +     fileName+'">' + fileType + '</a></td>'
@@ -486,11 +491,11 @@ function previewFile(evt){
 }
 
 function showHighlight (change){
-        var $highlights = $('span.sect-efts-search-match-khjdickkwg'),
-            hightlightCount = $highlights.length,
-            newShowing = Math.min(Math.max(1, parseInt($('#showing-highlight').html())+change), $highlights.length);
-        $('#showing-highlight').html(newShowing);
-        $('#previewer div.modal-body').animate({scrollTop: $($highlights.get(newShowing-1)).offset().top}, 500);
+    var $highlights = $('span.sect-efts-search-match-khjdickkwg'),
+        $previewPanel = $('#previewer div.modal-body'),
+        newShowing = Math.min(Math.max(1, parseInt($('#showing-highlight').html())+change), $highlights.length);
+    $('#showing-highlight').html(newShowing);
+    $previewPanel.animate({scrollTop: $previewPanel.scrollTop() + $($highlights.get(newShowing-1)).offset().top}, 500);
 }
 
 const locationsArray = [
@@ -1614,4 +1619,47 @@ var SIC_Codes= [
     {"id":"9721","label":"INTERNATIONAL AFFAIRS"},
     {"id":"D11","label":"Nonclassifiable","start_sic":"9900","end_sic":"9999"},
     {"id":"9995","label":"NON-OPERATING ESTABLISHMENTS"}
+];
+
+
+
+var XLS_Forms =[
+    "1-A",
+    "1-K",
+    "1-Z",
+    "3",
+    "4",
+    "5",
+    "CFPORTAL",
+    "C",
+    "EFFECT",
+    "13F",
+    "25",
+    "D",
+    "N-MFP",
+    "TA",
+    "MA-I",
+    "MA-W",
+    "MA",
+    "N-CEN",
+    "N-MFP1",
+    "N-MFP2",
+    "NPORT-NP",
+    "NPORT-P",
+    "QUALIF",
+    "SBSE-A",
+    "SBSE-BD",
+    "SBSE-C",
+    "SBSE-W",
+    "SBSE",
+    "SDR",
+    "TA-1",
+    "TA-1",
+    "TA-1",
+    "TA-2",
+    "TA-2",
+    "TA-W",
+    "TA-W",
+    "TA-W",
+    "X-17A-5"
 ];

@@ -202,3 +202,6 @@ footer li.menu__item a {
     color: #fff;
 }
 
+a.collapsed h5 i.fas.fa-angle-up.rotate-icon:before {
+    content: "\f107" !important;
+}
