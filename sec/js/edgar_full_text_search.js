@@ -231,7 +231,7 @@ function getCompanyHints(control, keysTyped){
                 console.log('round-trip execution time for '+hintsURL+ ' = '+((new Date()).getTime()-start.getTime())+' ms');
                 console.log(data);
                 var hints = data.branchTopHints;
-                if(data.cikMatch) hints.unshift({CIK:data.cikMatch, entity: cikMatchName, tickers: cikMatchTickers});
+                if(data.cikMatch) hints.unshift({CIK:data.cikMatch, entity: data.cikMatchName, tickers: data.cikMatchTickers});
                 var hintDivs = [];
                 var processedCIKs = [];
                 var rgxKeysTyped = new RegExp('('+keysTyped.trim()+')','gi');
