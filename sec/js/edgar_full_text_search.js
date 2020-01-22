@@ -324,8 +324,8 @@ function executeSearch(newHash, oldHash){
                     fileNameExt = fileNameParts[1],
                     fileType = hits[i]._source.file_type || hits[i]._source.file_description || fileName,
                     form =  hits[i]._source.form;
-                    if(XLS_Forms.indexOf(form)!=1 && fileNameExt.toUpperCase()=='XML' )
-                        fileName = fileNameMain + '.' + fileNameExt;
+                    if(XLS_Forms.indexOf(form)!=-1 && fileNameExt.toUpperCase()=='XML' )
+                        fileName = fileNameMain + '.' + 'html';
                     rows.push('<tr>'
                         + '<td class="file"><a href="#0" class="preview-file" data-adsh="' + adsh + '" data-file-name="'
                         +     fileName+'">' + fileType + '</a></td>'
@@ -485,7 +485,7 @@ function previewFile(evt){
             $('#open-submission').attr('href',submissionRoot + adsh + '-index.html');
             $searchingOverlay.hide();
             $('#previewer').modal();
-            showHighlight(0);
+            showHighlight(1);
         }
     );
 }
@@ -494,8 +494,12 @@ function showHighlight (change){
     var $highlights = $('span.sect-efts-search-match-khjdickkwg'),
         $previewPanel = $('#previewer div.modal-body'),
         newShowing = Math.min(Math.max(1, parseInt($('#showing-highlight').html())+change), $highlights.length);
-    $('#showing-highlight').html(newShowing);
-    $previewPanel.animate({scrollTop: Math.max(0, $previewPanel.scrollTop() + $($highlights.get(newShowing-1)).offset().top - $previewPanel.height()/2)}, 500);
+    if($highlights.length){
+        $('#showing-highlight').html(newShowing);
+        $previewPanel.animate({scrollTop: Math.max(0, $previewPanel.scrollTop() + $($highlights.get(newShowing-1)).offset().top - $previewPanel.height()/2)}, 500);
+    } else {
+
+    }
 }
 
 const locationsArray = [
@@ -1622,44 +1626,43 @@ var SIC_Codes= [
 ];
 
 
-
-var XLS_Forms =[
-    "1-A",
-    "1-K",
-    "1-Z",
-    "3",
-    "4",
-    "5",
-    "CFPORTAL",
-    "C",
-    "EFFECT",
-    "13F",
-    "25",
-    "D",
-    "N-MFP",
-    "TA",
-    "MA-I",
-    "MA-W",
-    "MA",
-    "N-CEN",
-    "N-MFP1",
-    "N-MFP2",
-    "NPORT-NP",
-    "NPORT-P",
-    "QUALIF",
-    "SBSE-A",
-    "SBSE-BD",
-    "SBSE-C",
-    "SBSE-W",
-    "SBSE",
-    "SDR",
-    "TA-1",
-    "TA-1",
-    "TA-1",
-    "TA-2",
-    "TA-2",
-    "TA-W",
-    "TA-W",
-    "TA-W",
-    "X-17A-5"
-];
+var XLS_Forms = {
+    "1-A": "xsl1-A_X01",
+    "1-K": "xsl1-K_X01",
+    "1-Z": "xsl1-Z_X01",
+    "3": "xslF345_X03",
+    "4": "xslF345_X03",
+    "5": "xslF345_X03",
+    "CFPORTAL": "xslCFPORTAL_X01",
+    "C": "xslC_X01",
+    "EFFECT": "xslEFFECT_X02",
+    "Form13F": "xslForm13F_X01",
+    "Form25": "xslForm25_X02",
+    "FormD": "xslFormD_X01",
+    "FormN-MFP": "xslFormN-MFP_X01",
+    "FormTA": "xslFormTA_X01",
+    "13F": "xslForm13F_X01",
+    "25": "xslForm25_X02",
+    "D": "xslFormD_X01",
+    "N-MFP": "xslFormN-MFP_X01",
+    "TA": "xslFormTA_X01",
+    "MA-I": "xslMA-I_X01",
+    "MA-W": "xslMA-W_X01",
+    "MA": "xslMA_X01",
+    "N-CEN": "xslN-CEN_X01",
+    "N-MFP1": "xslN-MFP1_X01",
+    "N-MFP2": "xslN-MFP2_X01",
+    "NPORT-NP": "xslNPORT-NP_X01",
+    "NPORT-P": "xslNPORT-P_X01",
+    "QUALIF": "xslQUALIF_X01",
+    "SBSE-A": "xslSBSE-A_X01",
+    "SBSE-BD": "xslSBSE-BD_X01",
+    "SBSE-C": "xslSBSE-C_X01",
+    "SBSE-W": "xslSBSE-W_X01",
+    "SBSE": "xslSBSE_X01",
+    "SDR": "xslSDR_X01",
+    "TA-1": "xslTA-1_X06",
+    "TA-2": "xslTA-2_X06",
+    "TA-W": "xslTA-W_X06",
+    "X-17A-5": "xslX-17A-5_X01",
+};
