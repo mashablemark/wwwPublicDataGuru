@@ -2,7 +2,6 @@
 // reserved concurrency = 4 with average execution time of 10ms supports 400 responses / second
 //
 
-
 //REQUIRES LAMBDA LAYER "COMMON"
 const common = require('common');
 let newContainer = true;

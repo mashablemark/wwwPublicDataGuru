@@ -14,71 +14,107 @@ const HTTPS = require('https');
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
 const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
-const index = 'submissions';
 
 exports.searchEFTS = async (r, context) => {
-    //todo: add screens for malicious of prohibited actions
-    if(!r.q || r.q.trim().length<2 || r.q.trim()[0]=='*') return {error: 'text search query must include a keyword longer then 2 characters'};
+    //todo: add screens for malicious of prohibited actions};
+    let indexToSearch, query;
+    if(r.keysTyped){
+        //suggestions query
+        indexToSearch = 'hints';
+        query = {
+            "query": {
+                "bool": {
+                    "should": [
+                        {"match": {"entity": {
+                                    "query": r.keysTyped,
+                                    "operator": "and"}
+                            }
+                        },
+                        {"match": {"id_": {
+                                    "query": r.keysTyped,
+                                    "boost": 1000}
+                            }
+                        },
+                        {"match": {"tickers": {
+                                    "query": r.keysTyped,
+                                    "operator": "and",
+                                    "boost": 10}
+                            }
+                        },
+                     ]
+            }},
+            "from": 0,
+            "size": 10, // outer hits, or books
+        };
+    } else {
+        //document search query
+        indexToSearch = 'submissions';
+        query = {
+            "query": {
+                "bool": {
+                    "must": [],
+                    "filter": []
+                },
+            },
+            "from": isNaN(r.from)?0:Math.min(0, parseInt(r.from)), //optional parameter allows for pagination
+            "size": 100, // outer hits, or books
+        };
 
-    let from = 0;  //"from" parameter allows for pagination
-    if(r.from && !isNaN(r.from)){
-        from = parseInt(r.from);
-    }
-    const query = {
-        "query": {
-            "bool": {
-                "must": [],
-                "filter": []
-            },
-        },
-        "from": from, "size": 100, // outer hits, or books
-    };
-
-    if(!from) {
-        query .aggregations = {
-            "form_filter": {
-                "terms": {
-                    "field": "root_form",
-                    "size": 30
-                }
-            },
-            "entity_filter": {
-                "terms": {
-                    "field": "display_names.raw",
-                    "size": 30
-                }
-            },
-            "sic_filter": {
-                "terms": {
-                    "field": "sics",
-                    "size": 30
-                }
-            },
-            "inc_states_filter": {
-                "terms": {
-                    "field": "inc_states",
-                    "size": 30
+        if (!query.from) {  //don't request aggregations again for each page
+            query.aggregations = {
+                "form_filter": {
+                    "terms": {
+                        "field": "root_form",
+                        "size": 30
+                    }
+                },
+                "entity_filter": {
+                    "terms": {
+                        "field": "display_names.raw",
+                        "size": 30
+                    }
+                },
+                "sic_filter": {
+                    "terms": {
+                        "field": "sics",
+                        "size": 30
+                    }
+                },
+                "inc_states_filter": {
+                    "terms": {
+                        "field": "inc_states",
+                        "size": 30
+                    }
                 }
             }
         }
-    }
 
-    const keywords = r.q.split(' ');
-    for(let i=0;i<keywords.length;i++){
-        if(keywords[i].length>2) query.query.bool.must.push( {"match": { "doc_text": keywords[i]}});
+        if (r.forms && r.forms.length) query.query.bool.filter.push({"terms": {"root_form": r.forms}});
+        if (r.sics && r.sics.length) query.query.bool.filter.push({"terms": {"sics": r.sics}});
+        if (r.ciks && r.ciks.length) query.query.bool.filter.push({"terms": {"ciks": r.ciks}});
+        if (r.locationCodes && r.locationCodes) query.query.bool.filter.push({"terms": {"inc_states": {"value": r.locationCodes}}});
+        if (query.query.bool.filter == 0 && (!r.q || !r.q.trim().length || r.q.trim()[0] == '*')) {
+            r.q = 'kjasfdlkhdsf534udaslasefasdkfasdrdsfsd84s' //impossible string to return no results if no search criterion entered at all
+        }
+        const keywords = r.q.split(' ');
+        for (let i = 0; i < keywords.length; i++) {
+            query.query.bool.must.push({"match": {"doc_text": keywords[i]}});
+        }
+        if (r.startdt && r.enddt) query.query.bool.filter.push({
+            "range": {
+                "file_date": {
+                    "gte": r.startdt,
+                    "lte": r.enddt
+                }
+            }
+        });
     }
-    if(r.forms && r.forms.length) query.query.bool.filter.push( {"terms": { "root_form": r.forms}});
-    if(r.sics && r.sics.length) query.query.bool.filter.push( {"terms": { "sics": r.sics}});
-    if(r.cik) query.query.bool.filter.push( {"term": { "ciks": {"value": r.cik}}});
-    if(r.startdt && r.enddt) query.query.bool.filter.push({"range": {"file_date": {"gte": r.startdt, "lte": r.enddt}}});
-    if(r.locationCode) query.query.bool.filter.push( {"term": { "inc_states": {"value": r.locationCode}}});
-
     const querystring = JSON.stringify(query);
-    console.log(querystring); //debug only
+    console.log(querystring); //debug only!
     const options = {
         hostname: `${domain}.${region}.es.amazonaws.com`,
         port: 443,
-        path: `/${index}/_search`,
+        path: `/${indexToSearch}/_search`,
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
