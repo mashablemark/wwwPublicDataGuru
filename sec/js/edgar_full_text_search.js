@@ -164,8 +164,8 @@ function setHashFromForm(e){
         enddt: formatDate($('#date-to').val()),
         category: $('#category-select').val(),
         sics: $('#sic-select').val(),
-        locationCode: $('#location-select').val(),
-        cik: extractCIK(entityName),
+        locationCodes: $('#location-select').val(),
+        ciks: extractCIK(entityName),
         entityName: entityName,
         forms: forms.length?forms.replace(/[\s;,+]+/g,',').toUpperCase():null
     };
@@ -216,8 +216,8 @@ function extractCIK(entityName){
 
 function getCompanyHints(control, keysTyped){
     if(keysTyped && keysTyped.trim()){
-        const hintsURL = 'https://search.publicdata.guru/typing-hints';
-        const label = 'ajax call to ' + hintsURL + ' for "' + keysTyped + '"';
+        const hintsURL = 'https://search.publicdata.guru/search-index';
+        const label = 'ajax call to ' + hintsURL + ' for suggestion for "' + keysTyped + '"';
         console.time(label);
         var start = new Date();
         $.ajax({
@@ -324,8 +324,8 @@ function executeSearch(newHash, oldHash){
                     fileNameExt = fileNameParts[1],
                     fileType = hits[i]._source.file_type || hits[i]._source.file_description || fileName,
                     form =  hits[i]._source.form;
-                    if(XLS_Forms.indexOf(form)!=-1 && fileNameExt.toUpperCase()=='XML' )
-                        fileName = fileNameMain + '.' + 'html';
+                    if(XLS_Forms[form]!=-1 && fileNameExt.toUpperCase()=='XML') //this is an XML file with a transformation
+                        fileName = XLS_Forms[form] + '/' + fileNameMain + '.' + fileNameExt;
                     rows.push('<tr>'
                         + '<td class="file"><a href="#0" class="preview-file" data-adsh="' + adsh + '" data-file-name="'
                         +     fileName+'">' + fileType + '</a></td>'
@@ -463,19 +463,25 @@ function previewFile(evt){
                 bodyClose= data.search(/<\/body>/i),
                 ext = fileName.split('.').pop().toLowerCase(),
                 isText = ext == 'txt',
-                isHTML = ext == 'htm' || ext == 'html',
+                isHTML = ext == 'htm' || ext == 'html' ,
                 hashValues = hashToObject(),
                 searchedKeywords = hashValues.q,
                 html;
-            if(isHTML){
-                if(bodyOpen!=-1 && bodyClose!=-1) {
+            switch(ext){
+                case 'htm':
+                case 'html':
+                case 'xml':
                     html = data.substring(data.search('>', bodyOpen)+1, bodyClose-1).replace(/<img src="/gi, '<img src="'+submissionRoot);
                     $('#previewer div.modal-body').html(highlightMatchingPhases(html, keywordStringToPhrases(searchedKeywords), isHTML));
-                } else {
-                    $('#previewer div.modal-body').html('');
-                }
-            } else {
-                $('#previewer div.modal-body').html('<pre>' + highlightMatchingPhases(html, keywordStringToPhrases(searchedKeywords), isHTML) + '</pre>');
+                    break;
+                case 'txt':
+                    $('#previewer div.modal-body').html('<pre>' + highlightMatchingPhases(html, keywordStringToPhrases(searchedKeywords), isHTML) + '</pre>');
+                    break;
+                case 'pdf':
+                    $('#previewer div.modal-body').html('Open File to view PDF in new tab');
+                    break;
+                default:
+                    $('#previewer div.modal-body').html('unknown file type: '+ext);
             }
 
             $('#previewer h4.modal-title strong').html(hashValues.q);
@@ -1624,7 +1630,6 @@ var SIC_Codes= [
     {"id":"D11","label":"Nonclassifiable","start_sic":"9900","end_sic":"9999"},
     {"id":"9995","label":"NON-OPERATING ESTABLISHMENTS"}
 ];
-
 
 var XLS_Forms = {
     "1-A": "xsl1-A_X01",

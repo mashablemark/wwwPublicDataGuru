@@ -30,8 +30,6 @@
         <form autocomplete="off">
         <div class="form-group row">
             <div class="col-sm-8">
-                    <label for="keywords">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
-                    <input id="keywords" type="text" class="company form-control border-onfocus" placeholder="keywords to search on" autocomplete="false" required>
                 <label>Company Name, Ticker, CIK Number or Reporter's last name</label>
                 <input type="text"  class="entity form-control border-onfocus" placeholder="Company name, ticker symbol, reporter last name or CIK" autocomplete="false">
                 <div class="rel-none container">
@@ -39,6 +37,8 @@
                         <table id="asdf" class="table table-hover entity-hints"></table>
                     </div>
                 </div>
+                <label for="keywords">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
+                    <input id="keywords" type="text" class="company form-control border-onfocus" placeholder="keywords to search on" autocomplete="false" required>
                 <label for="category-select">Filing Type Category</label>
                 <select name="category-select" id="category-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all" selected>all forms</option>
