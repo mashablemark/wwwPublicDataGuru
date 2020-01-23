@@ -47,7 +47,8 @@ const AWS = require('aws-sdk');
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
 const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
-const index = 'submissions';
+const submissionsIndex = 'submission';
+const entityIndex = 'entity';
 const type = '_doc';
 
 //const es = new AWS.ES({apiVersion: '2015-01-01'});
@@ -74,7 +75,6 @@ const INDEX_STATES = {  //can't collide with READ_STATES!
         INDEX_FAILED: 'INDEX_FAILED',
     };
 var processNum = false;
-var submission;
 let submissionCount = 0;
 let processStart = (new Date()).getTime();
 let start;
@@ -233,7 +233,11 @@ process.on('message', (processInfo) => {
                 if (tLine.startsWith('<SEQUENCE>')) submission.docs[d].fileSequence = tLine.substr('<SEQUENCE>'.length);
                 if (tLine == '<TEXT>') {
                     submission.readState = READ_STATES.DOC_BODY;
-                    if(submission.docs[d].fileDescription == 'IDEA: XBRL DOCUMENT')submission.docs[d].lines = false; //don't index the DERA docs
+                    const rootForm = submission.form.replace('/A','').toUpperCase();
+                    if(submission.docs[d].fileExtension == 'xml'
+                        && (rootForm!= submission.docs[d].fileType.toUpperCase() || !XLS_Forms[submission.docs[d].fileType.toUpperCase()])){
+                        submission.docs[d].lines = false; //only index XML file the are the primary XML document of a form with XLS transformation
+                    }
                 }
             }
         }
@@ -264,10 +268,10 @@ process.on('message', (processInfo) => {
                 for(let i=0;i<submission.docs[d].lines.length;i++) doc_textLength += submission.docs[d].lines[i].length;
                 //console.log(`P${processNum} about to index a doc`);
                 const startIndexingTime = (new Date()).getTime();
-                let request = new AWS.HttpRequest(endpoint, region);
 
+                let request = new AWS.HttpRequest(endpoint, region);
                 request.method = 'PUT';
-                request.path += `${index}/${type}/${submission.adsh}:${submission.docs[d].fileName}`;
+                request.path += `${submissionsIndex}/${type}/${submission.adsh}:${submission.docs[d].fileName}`;
                 request.body = JSON.stringify({  //try not to create unnecessary copies of the document text in memory
                     doc_text: indexedText,
                     //adsh: submission.adsh,  //embedded in ID = REDUNDANT FIELD
@@ -318,7 +322,7 @@ process.on('message', (processInfo) => {
                                 console.log(responseBody + ' for ' + submission.docs[d].fileName + ' in ' + submission.adsh);
                                 request.bodyTuncated = request.body.substr(0,2000);
                                 delete request.body;
-                                await common.logEvent('failed ElasticSearch index', JSON.stringify(request), true);
+                                await common.logEvent('failed ElasticSearch submissionsIndex', JSON.stringify(request), true);
                             } else {
                                 if(submission.docs[d].tries) console.log('success on retry #'+submission.docs[d].tries);
                                 await common.runQuery(`update efts_submissions_files  set last_indexed = now()
@@ -330,7 +334,7 @@ process.on('message', (processInfo) => {
                             request.bodyTuncated = request.body.substr(0,2000);
                             delete request.body;
                             request.responseCode = response.statusCode;
-                            await common.logEvent('ElasticSearch index error', JSON.stringify(request), true);
+                            await common.logEvent('ElasticSearch submissionsIndex error', JSON.stringify(request), true);
                         }
                         submission.docs[d].state = INDEX_STATES.INDEXED;
                         //the file record already written above; setting the last_indexed timestamp (from NULL) indicates success
@@ -377,7 +381,7 @@ process.on('message', (processInfo) => {
                 //collect all the db promises
                 for(let i=0;i<dbPromises.length;i++){ let z = await dbPromises[i]}
                 // 2. check free heap size and collect garbage if heap > 1GB free
-                submission.docs[d].lines = 'removed after sending to index'; //but first free up any large arrays or strings
+                submission.docs[d].lines = 'removed after sending to submissionsIndex'; //but first free up any large arrays or strings
                 let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
                 if(memoryUsage.heapUsed > 0.75*1024*1024*1024) runGarbageCollection(processInfo); //if more than 0.75GB used (out of 1GB)
                 //readInterface.resume();
@@ -496,6 +500,46 @@ function runGarbageCollection(processInfo){
     } else console.log('global.gc not set');
 }
 
+var XLS_Forms = {
+    "1-A": "xsl1-A_X01",
+    "1-K": "xsl1-K_X01",
+    "1-Z": "xsl1-Z_X01",
+    "3": "xslF345_X03",
+    "4": "xslF345_X03",
+    "5": "xslF345_X03",
+    "CFPORTAL": "xslCFPORTAL_X01",
+    "C": "xslC_X01",
+    "EFFECT": "xslEFFECT_X02",
+    "Form13F": "xslForm13F_X01",
+    "Form25": "xslForm25_X02",
+    "FormD": "xslFormD_X01",
+    "FormN-MFP": "xslFormN-MFP_X01",
+    "FormTA": "xslFormTA_X01",
+    "13F": "xslForm13F_X01",
+    "25": "xslForm25_X02",
+    "D": "xslFormD_X01",
+    "N-MFP": "xslFormN-MFP_X01",
+    "TA": "xslFormTA_X01",
+    "MA-I": "xslMA-I_X01",
+    "MA-W": "xslMA-W_X01",
+    "MA": "xslMA_X01",
+    "N-CEN": "xslN-CEN_X01",
+    "N-MFP1": "xslN-MFP1_X01",
+    "N-MFP2": "xslN-MFP2_X01",
+    "NPORT-NP": "xslNPORT-NP_X01",
+    "NPORT-P": "xslNPORT-P_X01",
+    "QUALIF": "xslQUALIF_X01",
+    "SBSE-A": "xslSBSE-A_X01",
+    "SBSE-BD": "xslSBSE-BD_X01",
+    "SBSE-C": "xslSBSE-C_X01",
+    "SBSE-W": "xslSBSE-W_X01",
+    "SBSE": "xslSBSE_X01",
+    "SDR": "xslSDR_X01",
+    "TA-1": "xslTA-1_X06",
+    "TA-2": "xslTA-2_X06",
+    "TA-W": "xslTA-W_X06",
+    "X-17A-5": "xslX-17A-5_X01",
+};
 const edgarLocations = {
     "AL": "Alabama",
     "AK": "Alaska",

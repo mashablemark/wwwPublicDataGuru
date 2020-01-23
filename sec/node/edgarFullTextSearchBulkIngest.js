@@ -26,6 +26,39 @@ Design uses two timers to monitor and kick off:
   2. ingestOverSeer controls the rate submissions are indexed (10/s).
         a) each submission ingested by a spawned function running same code as production Lambda function on this instance
         b) each submission may contain multiple files of varying sizes
+
+Access Policy for Public ES Cluster (not VPC terminated):
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "*"
+      },
+      "Action": "es:*",
+      "Resource": "arn:aws:es:us-east-1:008161247312:domain/edgar/*",
+      "Condition": {
+        "IpAddress": {
+          "aws:SourceIp": "18.210.128.241"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::008161247312:role/service-role/searchEdgarFullTextIndex-role-pa8mcpl8"
+        ]
+      },
+      "Action": [
+        "es:*"
+      ],
+      "Resource": "arn:aws:es:us-east-1:008161247312:domain/edgar/*"
+    }
+  ]
+}
+
 */
 
 //var request = require('request');
@@ -38,14 +71,15 @@ const secDomain = 'https://www.sec.gov';
 
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
-const index = 'submissions';
+const submissionsIndex = 'submission';
+const entityIndex = 'entity';
 const processControl = {
     maxFileIngests: 4,  //internal processes to ingest local files leveraging Node's non-blocking model
     maxQueuedDownloads: 3,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
     start: new Date("2019-01-01"),  //restart date.  If none, the lesser of the max(filedt) and 2008-01-01 is used
-    end: new Date("2019-03-31"), //if false or not set, scrape continues up to today
+    end: new Date("2019-12-31"), //if false or not set, scrape continues up to today
     days: [
     ], //ingest specific days (also used as retry queue) e.g. ['2013-08-12', '2013-08-14', '2013-11-13', '2013-11-15', '2014-03-04', '2014-08-04', '2014-11-14', '2015-03-31','2015-04-30', '2016-02-18', '2016-02-26', '2016-02-29', '2017-02-24', '2017-02-28', '2017-04-27','2017-05-10', '2017-08-03', '2017-08-04', '2017-08-08', '2017-10-16', '2017-10-23', '2017-10-30', '2017-11-03','2017-11-06', '2017-12-20', '2018-04-26', '2018-04-27', '2018-04-30', '2018-05-01', '2018-11-14']],
     processes: {},
@@ -53,7 +87,7 @@ const processControl = {
     directory: '/data/' //use local 75GB SSD mounted at /data instead of './dayfiles/' on full EBS
 };
 
-let  esMappings = {
+let  esFullTextSearchMappings = {
     "mappings": {
         "_source": {
             "excludes": [
@@ -139,26 +173,25 @@ let  esMappings = {
 };
 
 (async function (){  //entry point of this program
-    //Unzipping occurs on local drive using instances with local SSDs (=75 GB for rd5.large), which requires formatting and mounting before use
+    //Unzipping occurs on local drive using instances with local SSDs (=75 GB for rd5.large), therefore...
+    // 1. format and mount local SSD drive as /data directory
     await asyncExec("sudo mkfs -t xfs /dev/nvme1n1");
     await asyncExec("sudo mkdir -m 777 /data");  //may dive error
     await asyncExec("sudo mount /dev/nvme1n1 /data");
     await asyncExec("sudo chmod 777 /data");
-    //1. drop the entire index if it exists
-    const delIndex = `curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${index}'`;
-    exec(delIndex).on('exit', ()=> {
-        //2. create the "submissions" index and set the mappings;
-        const createMappings = `curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${index}' -H "Content-Type: application/json" -d '${JSON.stringify(esMappings)}'`;
-        exec(createMappings).on('exit', () => {
-            //3. clear the any remains of last crawl in the /data directory
-            exec('rm -r ' + processControl.directory + '*').on('exit', function (code) {
-                startDownloadManager(processControl, function () {
-                    //this callback is fired when download manager is completely down with all downloads
-                    common.logEvent('ElasticSearch bulk indexing', JSON.stringify(processControl), true);
-                    process.exit();  //exit point of this program
-                });
-            });
-        });
+    //2. clear the any remains of last bulk indexing / seeding in the /data directory
+    await asyncExec('rm -r ' + processControl.directory + '*');
+    //3. drop (if exists) and recreate the main submissions search index
+    await asyncExec(`curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${submissionsIndex}'`);
+    await asyncExec(`curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${submissionsIndex}' -H "Content-Type: application/json" -d '${JSON.stringify(esFullTextSearchMappings)}'`);
+    //4. drop (if exists) and recreate the entity index (autocomplete suggestions)
+    await asyncExec(`curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${entityIndex}'`);
+    await asyncExec(`curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${entityIndex}' -H "Content-Type: application/json" -d '${JSON.stringify(esEntityMappings)}'`);
+    //start the download manager
+    startDownloadManager(processControl, function () {
+        //this callback is fired when download manager is completely down with all downloads
+        common.logEvent('ElasticSearch bulk indexing', JSON.stringify(processControl), true);
+        process.exit();  //exit point of this program
     });
 })();
 
