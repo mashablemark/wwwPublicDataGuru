@@ -230,19 +230,16 @@ function getCompanyHints(control, keysTyped){
                 console.timeEnd(label);
                 console.log('round-trip execution time for '+hintsURL+ ' = '+((new Date()).getTime()-start.getTime())+' ms');
                 console.log(data);
-                var hints = data.branchTopHints;
-                if(data.cikMatch) hints.unshift({CIK:data.cikMatch, entity: data.cikMatchName, tickers: data.cikMatchTickers});
+                var hints = data.hits.hits;
                 var hintDivs = [];
-                var processedCIKs = [];
                 var rgxKeysTyped = new RegExp('('+keysTyped.trim()+')','gi');
                 if(hints.length){
                     for(var h=0;h<hints.length;h++){
-                        if(processedCIKs.indexOf(hints[h].CIK)==-1){
-                            hintDivs.push('<tr class="hint" data="'+ hints[h].entity + ' ('+formatCIK(hints[h].CIK)+')"><td class="hint-entity">'
-                                +((hints[h].entity||'')+(hints[h].tickers?' ('+hints[h].tickers+')':'')).replace(rgxKeysTyped, '<b>$1</b>')
-                                + '</td><td class="hint-cik">' + ((' <i>CIK '+ formatCIK(hints[h].CIK)+'</i>')||'')+'</td></tr>');
-                            processedCIKs.push(hints[h].CIK)
-                        }
+                        const CIK = hints[h]._id,
+                            entityName = hints[h]._source.entity;
+                        hintDivs.push('<tr class="hint" data="'+ entityName + ' (CIK '+formatCIK(CIK)+')"><td class="hint-entity">'
+                            + (entityName||'').replace(rgxKeysTyped, '<b>$1</b>')
+                            + '</td><td class="hint-cik">' + ((' <i>CIK '+ formatCIK(CIK)+'</i>')||'')+'</td></tr>');
                     }
                     $('table.entity-hints').find('tr').remove().end().html(hintDivs.join('')).show().find('tr.hint')
                         .click(function(evt){hintClicked(this)});
