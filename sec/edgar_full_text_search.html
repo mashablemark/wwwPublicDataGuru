@@ -38,7 +38,7 @@
                     </div>
                 </div>
                 <label for="keywords">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
-                    <input id="keywords" type="text" class="company form-control border-onfocus" placeholder="keywords to search on" autocomplete="false" required>
+                    <input id="keywords" type="text" class="company form-control border-onfocus" placeholder="keywords to search on" autocomplete="false">
                 <label for="category-select">Filing Type Category</label>
                 <select name="category-select" id="category-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all" selected>all forms</option>
@@ -62,7 +62,17 @@
                         <input type="text" id="date-from" class="form-control border-onfocus" autocomplete="false"> <span class="mt-1 ml-3 mr-3"> to </span> <input type="text" id="date-to" class="form-control border-onfocus" autocomplete="false">
                     </div>
                 </div>
-                <label for="location-select">State</label><button type="button" id="help-tips-state" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search for the primary location associated with a filing.  The location could be a US state or territory, a Canadian province, or a country.">?</button>
+                <!--label for="location-select">State</label-->
+                <div class="btn-group">
+                    <button type="button" class="btn dropdown-toggle" id="location-type" data-toggle="dropdown">
+                        Located
+                    </button>
+                    <div class="dropdown-menu">
+                        <a class="dropdown-item location-type-option" href="#">Located</a>
+                        <a class="dropdown-item location-type-option" href="#">Incorporated</a>
+                    </div>
+                </div>
+                <button type="button" id="help-tips-state" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search for the primary location associated with a filing.  The location could be a US state or territory, a Canadian province, or a country.">?</button>
                 <select name="loction-select" id="location-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all">View All</option>
                 </select>
@@ -91,7 +101,7 @@
             <div class="accordion md-accordion" id="accordionEx" role="tablist" aria-multiselectable="true">
 
                 <!-- Accordion card -->
-                <div class="card facet" id="entity_filter">
+                <div id="entity_filter" class="card facet">
 
                     <!-- Card header -->
                     <div class="card-header" role="tab">
@@ -112,7 +122,7 @@
                 <!-- Accordion card -->
 
                 <!-- Accordion card -->
-                <div class="card facet"  id="form_filter">
+                <div id="form_filter" class="card facet">
 
                     <!-- Card header -->
                     <div class="card-header" role="tab" id="headingTwo2">
@@ -133,7 +143,7 @@
                 <!-- Accordion card -->
 
                 <!-- Accordion card -->
-                <div class="card"  id="inc_states_filter" class="facet">
+                <div id="inc_states_filter" class="card facet" data-location-type="incorporated">
 
                     <!-- Card header -->
                     <div class="card-header" role="tab" id="headingThree3">
@@ -153,12 +163,33 @@
                 </div>
                 <!-- Accordion card -->
 
+
                 <!-- Accordion card -->
-                <div class="card"  id="sic_filter" class="facet">
+                <div id="biz_states_filter" class="card facet" data-location-type="located">
 
                     <!-- Card header -->
                     <div class="card-header" role="tab" id="headingFour4">
-                        <a class="collapsed" data-toggle="collapse" data-parent="#accordionEx" href="#collapseThree3" aria-expanded="false" aria-controls="collapseThree3">
+                        <a class="collapsed" data-toggle="collapse" data-parent="#accordionEx" href="#collapseFour4" aria-expanded="false" aria-controls="collapseFour4">
+                            <h5 class="mb-0">
+                                Business Located In <i class="fas fa-angle-up rotate-icon"></i>
+                            </h5>
+                        </a>
+                    </div>
+
+                    <!-- Card body -->
+                    <div id="collapseFour4" class="collapse" role="tabpanel" aria-labelledby="headingFour4"
+                         data-parent="#accordionEx">
+                        <div class="card-body facets"></div>
+                    </div>
+
+                </div>
+                <!-- Accordion card -->
+
+                <!-- Accordion card -->
+                <div id="sic_filter" class="card facet">
+                    <!-- Card header -->
+                    <div class="card-header" role="tab" id="headingFive5">
+                        <a class="collapsed" data-toggle="collapse" data-parent="#accordionEx" href="#collapseFive5" aria-expanded="false" aria-controls="collapseFive5">
                             <h5 class="mb-0">
                                 SIC Codes <i class="fas fa-angle-up rotate-icon"></i>
                             </h5>
@@ -166,7 +197,7 @@
                     </div>
 
                     <!-- Card body -->
-                    <div id="collapseFour4" class="collapse" role="tabpanel" aria-labelledby="headingThree3"
+                    <div id="collapseFive5" class="collapse" role="tabpanel" aria-labelledby="headingFive5"
                          data-parent="#accordionEx">
                         <div class="card-body facets"></div>
                     </div>

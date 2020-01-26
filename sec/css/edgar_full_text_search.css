@@ -43,6 +43,15 @@ label {
     margin-top: 12px;
 }
 
+#location-type{
+    padding: 12px 0 8px 0;
+    padding-left: 0;
+    margin-left: 0;
+}
+#search_form .btn.dropdown-toggle, #search_form .btn.dropdown-toggle:hover{
+    color: white;
+}
+
 #search {
     padding: 6px 12px;
     color: #0c213a;
@@ -85,7 +94,7 @@ label {
     height: 100%;
     z-index: 1000;
     background-color: rgba(50,50,50,0.7);
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     display: flex;

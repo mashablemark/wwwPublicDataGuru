@@ -71,8 +71,7 @@ const secDomain = 'https://www.sec.gov';
 
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
-const submissionsIndex = 'submission';
-const entityIndex = 'entity';
+const submissionsIndex = 'edgar_file';
 const processControl = {
     maxFileIngests: 4,  //internal processes to ingest local files leveraging Node's non-blocking model
     maxQueuedDownloads: 3,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
@@ -87,7 +86,9 @@ const processControl = {
     directory: '/data/' //use local 75GB SSD mounted at /data instead of './dayfiles/' on full EBS
 };
 
-let  esFullTextSearchMappings = {
+let  eftsFileIndexMappings = {
+    //the "_id" (returned) which serves as the PK for the index = `${adsh}:${file_name}`
+    // note: adsh is also stored also as a separate searchable keyword field
     "mappings": {
         "_source": {
             "excludes": [
@@ -97,11 +98,10 @@ let  esFullTextSearchMappings = {
         "properties": {
             "doc_text": {
                 "type": "text",
-                //"store": false, //this is the default value, but included to make explicit that a full copy is not stored
+                "store": false, //this is the default value, but included to make explicit that a full copy is not stored
                 "similarity": "BM25", //this is the default value, but included to make explicit the boost algorithm. May need to investigate "boolean"
-                //"doc_values": false, //not retrievable
             },
-            "display_names": { //array of "conformed_name (CIK)"
+            "display_names": { //array of "conformed_name (CIK #########)"
                 "type": "text",
                 "boost": 100,  //if the keyword appear in the name, boost it!
                 "fields": {
@@ -110,40 +110,25 @@ let  esFullTextSearchMappings = {
                     }
                 }
             },
-/*          id (returned) = adsh:file_name therefore these are redundant fields
-            "file_name": {
-                "type": "keyword",
-                "index": false, // not searchable, but needed for display of results
-            },
             "adsh": { //returning!
                 "type": "keyword",
-                "index": false, // not searchable , but needed for display of results
-                //"doc_values": true,
-            },*/
+            },
+            "sequence": {  //ordered matching files within a submission
+                "type": "keyword",
+            },
             "file_description": {
                 "type": "keyword",
                 "index": false, // not searchable, but needed for display of results
-                //"doc_values": true, //retrievable
             },
             "file_type": {  //for searching exhibit types attached to a form
                 "type": "keyword",
             },
-            "film_num": {  //for searching exhibit types attached to a form
-                "type": "keyword",
-                "index": false, // not searchable (root_form is), but needed for display of results
-            },
-            "file_num": {  //for searching exhibit types attached to a form
-                "type": "keyword",
-                "index": false, // not searchable (root_form is), but needed for display of results
-            },
             "file_date": {
                 "type": "date",
                 "format": "yyyy-MM-dd",
-                //"doc_values": true, //retrievable
             },
             "sics": {  //returning!
                 "type": "keyword",
-                //"doc_values": true, //retrievable
             },
             "ciks": { //returning!
                 "type": "keyword",
@@ -160,13 +145,20 @@ let  esFullTextSearchMappings = {
                 "type": "keyword",
             },
             "biz_states": { //returning!
-                "type": "text",
-                //"doc_values": true,
+                "type": "keyword",
             },
             "biz_locations": { //returning!
                 "type": "keyword",
                 "index": false, // not searchable (root_form is), but needed for display of results
                 //"doc_values": true,
+            },
+            "film_num": {  //for searching exhibit types attached to a form
+                "type": "keyword",
+                "index": false, // not searchable (root_form is), but needed for display of results
+            },
+            "file_num": {  //for searching exhibit types attached to a form
+                "type": "keyword",
+                "index": false, // not searchable (root_form is), but needed for display of results
             },
         }
     }
@@ -182,12 +174,10 @@ let  esFullTextSearchMappings = {
     //2. clear the any remains of last bulk indexing / seeding in the /data directory
     await asyncExec('rm -r ' + processControl.directory + '*');
     //3. drop (if exists) and recreate the main submissions search index
+    //    note: edgarEntity index is updated by the nightly Lambda process edgarEntityIndexRebuilder
     await asyncExec(`curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${submissionsIndex}'`);
-    await asyncExec(`curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${submissionsIndex}' -H "Content-Type: application/json" -d '${JSON.stringify(esFullTextSearchMappings)}'`);
-    //4. drop (if exists) and recreate the entity index (autocomplete suggestions)
-    await asyncExec(`curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${entityIndex}'`);
-    await asyncExec(`curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${entityIndex}' -H "Content-Type: application/json" -d '${JSON.stringify(esEntityMappings)}'`);
-    //start the download manager
+    await asyncExec(`curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${submissionsIndex}' -H "Content-Type: application/json" -d '${JSON.stringify(eftsFileIndexMappings)}'`);
+    //4. start the download manager
     startDownloadManager(processControl, function () {
         //this callback is fired when download manager is completely down with all downloads
         common.logEvent('ElasticSearch bulk indexing', JSON.stringify(processControl), true);
@@ -227,7 +217,7 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
         let downloadDate, d;
         //1. check for available process slots and (and restart dead activeDownloads)
         tick++;
-        if(tick/300 == Math.floor(tick/300)) console.log(processControl);  //write status every 5 minutes to console
+        //if(tick/300 == Math.floor(tick/300)) console.log(processControl);  //write status every 5 minutes to console
         let downloadingCount = 0;
         for (d = 1; d <= processControl.maxQueuedDownloads; d++) {
             if (!processControl.activeDownloads["d" + d]  || processControl.activeDownloads["d" + d].status=='504') { //start new download process
@@ -236,7 +226,7 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
                     console.log(downloadDate);
                     downloadingCount++;
                     downloadAndUntarDailyArchive(d, downloadDate, function(downloadControl){//callback invoked by "downloadDailyArchiveCallback" in subroutine
-                        if(downloadControl.status=='untar error'){
+                        if(downloadControl.status=='untar error' || downloadControl.status=='download error'){
                             if(!processControl.activeDownloads["d" + downloadControl.d] || downloadControl.ts != processControl.activeDownloads["d" + downloadControl.d].ts){
                                 //I was killed!  -> requeue for up to 3 retries
                                 addDayToReprocess(downloadControl.archiveDate, downloadControl.status);
@@ -314,6 +304,7 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
             //1. download the archive  
             const ts = Date.now();
             const archiveName = archiveDate.toISOString().substr(0, 10).replace(/-/g, '');
+            const archiveFilePath = processControl.directory + archiveName + '.nc.tar.gz';
             const url = 'https://www.sec.gov/Archives/edgar/Feed/' + archiveDate.getFullYear()
                 + '/QTR' + (Math.floor(archiveDate.getUTCMonth() / 3) + 1) + '/' + archiveName + '.nc.tar.gz';
             const downloadControl = {
@@ -324,47 +315,50 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
                     url: url,
                     status: 'downloading'
                 };
-            const cmd = 'wget "'+url+'" -q -O ' + processControl.directory + archiveName + '.nc.tar.gz';
-            //sample cmd: wget "https://www.sec.gov/Archives/edgar/Feed/2019/QTR1/20190315.nc.tar.gz" -q -O /data/20190315.nc.tar.gz
             processControl.activeDownloads["d" + d] = downloadControl;  //could be replaced if long running process killed!!!
-            
+            const cmd = 'wget "'+url+'" -q -O ' + archiveFilePath;  //wget "https://www.sec.gov/Archives/edgar/Feed/2019/QTR1/20190315.nc.tar.gz" -q -O /data/20190315.nc.tar.gz
             exec(cmd).on('exit', function(code){
                 if(code===null) common.logEvent('ElasticSearch bulk indexer wget returned null for ' + archiveName, cmd, true);
                 if(code){
                     common.logEvent('ElasticSearch bulk indexer unable to download archive (federal holiday?) code: ' + code, archiveName + ' ('+cmd+')', true);
                     downloadControl.status = '504';
-                    exec('rm '+processControl.directory + archiveName + '.nc.tar.gz');  //remove any remains
+                    exec('rm '+ archiveFilePath);  //remove any remains
                     if(downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
                 } else {
-                    console.log('downloaded '+ archiveName+'.nc.tar.gz with code '+code);
-                    processControl.downloadCount++;
-                    
-                    //2. decompress archive
-                    downloadControl.status = 'unarchiving';
-                    downloadControl.timeStamp = Date.now();  //reset timeout timeStamp for unarchiving big files
-                    const  fileStats = fs.statSync(processControl.directory + downloadControl.archiveName + '.nc.tar.gz');  //blocking call
-                    processControl.totalGBytesDownloaded += fileStats.size / (1024 * 1024 * 1024);
-                    const archiveDir = processControl.directory + downloadControl.archiveName;
-                    exec('mkdir -m 777 ' + archiveDir).on('exit', function(code) {
-                        console.log(`${(new Date()).toISOString().substr(11, 10)} Unarchiving ${downloadControl.archiveName }`);
-                        const cmd = 'tar xzf ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz -C ' + archiveDir;
-                        exec(cmd).on('exit', function (code) {
-                            if (code) {  //don't cancel.  Just log it.
-                                common.logEvent("ElasticSearch bulk indexer untar error", code + ' return code for: ' + cmd + ' size in bytes: ' + fileStats.size, true);
-                                exec('rm ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz');  //don't let bad files build up
-                                exec('rm ' + archiveDir + '/*').on('exit', function (code) {
-                                    exec('rmdir ' + archiveDir);
-                                    downloadControl.status = 'untar error';
+                    if(fs.existsSync(archiveFilePath)){ //double check! (should be unnecessary, but experience says otherwise!)
+                        console.log('downloaded '+ archiveName+'.nc.tar.gz with code '+code);
+                        processControl.downloadCount++;
+
+                        //2. decompress archive
+                        downloadControl.status = 'unarchiving';
+                        downloadControl.timeStamp = Date.now();  //reset timeout timeStamp for unarchiving big files
+                        const  fileStats = fs.statSync(archiveFilePath);  //blocking call
+                        processControl.totalGBytesDownloaded += fileStats.size / (1024 * 1024 * 1024);
+                        const archiveDir = processControl.directory + downloadControl.archiveName;
+                        exec('mkdir -m 777 ' + archiveDir).on('exit', function(code) {  //mkdir -m 777 /data/20190315
+                            console.log(`${(new Date()).toISOString().substr(11, 10)} Unarchiving ${downloadControl.archiveName }`);
+                            const cmd = 'tar xzf ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz -C ' + archiveDir;  //tar xzf /data/20190315.nc.tar.gz -C /data/20190315
+                            exec(cmd).on('exit', function (code) {
+                                if (code) {  //don't cancel.  Just log it.
+                                    common.logEvent("ElasticSearch bulk indexer untar error", code + ' return code for: ' + cmd + ' size in bytes: ' + fileStats.size, true);
+                                    exec('rm ' + archiveFilePath);  //don't let bad files build up
+                                    exec('rm ' + archiveDir + '/*').on('exit', function (code) {
+                                        exec('rmdir ' + archiveDir);
+                                        downloadControl.status = 'untar error';
+                                        if (downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
+                                    });
+                                } else {
+                                    common.logEvent("downloaded and unarchived " + downloadControl.archiveName + '.nc.tar.gz', 'size:  ' + (Math.round(fileStats.size / (1024 * 1024))) + ' MB');
+                                    exec('rm ' + archiveFilePath);  //delete tar file (async, but no need to t wait for completion)
+                                    downloadControl.status = 'unarchived';
                                     if (downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
-                                });
-                            } else {
-                                common.logEvent("downloaded and unarchived " + downloadControl.archiveName + '.nc.tar.gz', 'size:  ' + (Math.round(fileStats.size / (1024 * 1024))) + ' MB');
-                                exec('rm ' + processControl.directory + downloadControl.archiveName + '.nc.tar.gz');  //delete tar file (async, but no need to t wait for completion)
-                                downloadControl.status = 'unarchived';
-                                if (downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
-                            }
+                                }
+                            });
                         });
-                    });
+                    } else {
+                        downloadControl.status = 'download error';
+                        if (downloadAndUntarDailyArchiveCallback) downloadAndUntarDailyArchiveCallback(downloadControl);
+                    }
                 }
             });
         }

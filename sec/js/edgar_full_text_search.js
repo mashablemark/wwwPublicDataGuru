@@ -1,6 +1,5 @@
 "use strict";
 
-var categories = {};
 var formTooltips = {};
 var edgarLocations = {};
 var divisionCodes = {};
@@ -22,18 +21,14 @@ $(document).ready(function() {
     $('#form-container button, #form-container label, #form-container input:not(.entity)').focus(hideCompanyHints);
 
     //load form categories from the forms array 
-    for(i in forms){  //first create the categories
-        if(forms[i].category){
-            if(!categories[forms[i].category]) categories[forms[i].category] = [];
-            categories[forms[i].category].push(forms[i].form);
-        }
+    for(i in forms){  //first create a hash table for form tooltips
         if(forms[i].description && forms[i].description.length) formTooltips[forms[i].form] = forms[i].description
     }
+
     //load form categories and configure selection event
-    var categoryOptions = ['<option value="all" data="" selected>View All</option>'],
-        c = 0;
-    for(let cat in categories){
-        categoryOptions.push('<option value="C'+(c++)+'" data="'+categories[cat].join(', ')+'">'+cat+'</option>');
+    var categoryOptions = ['<option value="all" data="" selected>View All</option>'];
+    for(var c=0;c<formCategories.length;c++){
+        categoryOptions.push('<option value="C'+(c)+'" data="'+formCategories[c].forms.join(', ')+'">'+formCategories[c].category+'</option>');
     }
     categoryOptions.push('<option value="custom">User Defined</option>');
     var $forms = $('#filing-types');
@@ -133,6 +128,13 @@ $(document).ready(function() {
         $('#date-to').val(formatDate(endDate.toLocaleDateString()));
     }
 
+    $('.location-type-option ').click(function(evt){
+        evt.preventDefault(); //don't change the hash
+        $('#location-type').html($(this).html()) //change the location search type: business state vs incorporation state
+    });
+
+    $('#search_form select').change(function(){setHashFromForm()});
+
     //hash event and initialization
     hasher.initialized.add(loadFormFromHash); //populate form if values bookmarked/embedded in link
     hasher.initialized.add(executeSearch);//execute search on load if values bookmarked/embedded in link
@@ -164,7 +166,8 @@ function setHashFromForm(e){
         enddt: formatDate($('#date-to').val()),
         category: $('#category-select').val(),
         sics: $('#sic-select').val(),
-        locationCodes: $('#location-select').val(),
+        locationType: $('#location-type').html().toLowerCase(),
+        locationCode: $('#location-select').val(),
         ciks: extractCIK(entityName),
         entityName: entityName,
         forms: forms.length?forms.replace(/[\s;,+]+/g,',').toUpperCase():null
@@ -184,6 +187,7 @@ function loadFormFromHash(hash){
     if(hashValues.enddt) $('#date-to').val(formatDate(hashValues.enddt));
     $('#category-select').val(hashValues.category || 'all');
     $('#location-select').val(hashValues.locationCode || 'all');
+    $('#location-type').html(toTitleCase(hashValues.locationType || 'located'));
     $('.entity').val(hashValues.entityName||'');
     $('#filing-types').val(hashValues.forms ? hashValues.forms.replace(/,/g,', ') : '');
     $('#sic-select').val(hashValues.sics||'');
@@ -208,10 +212,13 @@ function toTitleCase(title){
 }
 
 function extractCIK(entityName){
-    if(entityName.substr(entityName.length-12).match(/\([0-9]{10}\)/))
+    if(entityName.substr(entityName.length-16).match(/\(CIK [0-9]{10}\)/)
+        || entityName.substr(entityName.length-12).match(/\([0-9]{10}\)/)
+    )
         return entityName.substr(entityName.length-11, 10);
-    else
-        return false;
+    if(!isNaN(entityName)&&parseInt(entityName).toString()==entityName&&parseInt(entityName)<1500)
+        return parseInt(entityName);
+    return false;
 }
 
 function getCompanyHints(control, keysTyped){
@@ -280,11 +287,15 @@ function executeSearch(newHash, oldHash){
     var start = new Date(),
         searchParams = hashToObject(newHash);
     if(searchParams.forms) searchParams.forms = searchParams.forms.split(',');
+    if(searchParams.ciks) searchParams.ciks = searchParams.ciks.split(',');
     if(searchParams.sics){
         if(divisionCodes[searchParams.sics])
             searchParams.sics = divisionCodes[searchParams.sics];
         else
             searchParams.sics = [searchParams.sics];
+    }
+    if(searchParams.locationCode && searchParams.locationCode!='all'){
+        searchParams.locationCodes = [searchParams.locationCode];
     }
     console.log(searchParams);
     $.ajax({
@@ -306,6 +317,7 @@ function executeSearch(newHash, oldHash){
             }
             //write the data to the HTML containers
             writeFilters(data, 'inc_states_filter');
+            writeFilters(data, 'biz_states_filter');
             writeFilters(data, 'form_filter');
             writeFilters(data, 'entity_filter');
             writeFilters(data, 'sic_filter');
@@ -355,6 +367,7 @@ function executeSearch(newHash, oldHash){
             $filter = $facetSection.find('.facets'),
             inputControls = {
                 inc_states_filter: '#location-select',
+                biz_states_filter: '#location-select',
                 entity_filter: 'input.entity',
                 form_filter: '#filing-types',
                 sic_filter: '#sic-select'
@@ -368,6 +381,7 @@ function executeSearch(newHash, oldHash){
                     hiddenKey = dataFilters[i].key;
                 switch(filterKey){
                     case 'inc_states_filter':
+                    case 'biz_states_filter':
                         display = edgarLocations[hiddenKey] || hiddenKey;
                         break;
                     case 'sic_filter':
@@ -383,11 +397,14 @@ function executeSearch(newHash, oldHash){
             }
             $filter
                 .html('<table class="table" facet="'+filterKey+'">' + htmlFilters.join('') + '</table>')
-                .find('a').click(function(evt, filterKey){
+                .find('a').click(function(evt){
                     if(evt) evt.preventDefault();
                     var $a = $(this),
-                        filterKey = $a.closest('.facet').attr('id');
-                    $(inputControls[filterKey]).val($a.attr('data-filter-key')); //update the form
+                        filterKey = $a.closest('.facet').attr('id'),
+                        filterType = $a.attr('data-filter-key'),
+                        locationType = $a.closest('.facet').attr('data-location-type');
+                    $(inputControls[filterKey]).val(filterType).keyup(); //update the form
+                    if(locationType) $('#location-type').html(toTitleCase(locationType));
                     setHashFromForm();  //update the hash and trigger a new search -> update results and facets
             });
             $filter.find('[data-toggle="tooltip"]').tooltip({classes: {"ui-tooltip":"popover"}});
@@ -404,6 +421,7 @@ function formatCIK(unpaddedCIK){ //accept int or string and return string with p
 }
 
 function keywordStringToPhrases(keywords){
+    if(!keywords || !keywords.length) return false;
     keywords = keywords.trim().replace(/\s+/,' ');  //remove extra spaces
     var phrases = [], phrase = '', inQuotes = false;
     for(var i=0;i<keywords.length;i++){
@@ -432,14 +450,16 @@ function keywordStringToPhrases(keywords){
 }
 
 function highlightMatchingPhases(text, phrases, isMarkupLanguage){
-    var rgxPhrase ;
-    for(var i=0;i<phrases.length;i++) {
-        if(isMarkupLanguage){
-            rgxPhrase = new RegExp('>([^<]*)\\b('+ phrases[i] + ')\\b', 'gmi');
-            text = text.replace(rgxPhrase, '>$1<span class="sect-efts-search-match-khjdickkwg">$2</span>');
-        } else {
-            rgxPhrase = new RegExp('\\b('+ phrases[i] + ')\\b', 'gmi');
-            text = text.replace(rgxPhrase, '><span class="sect-efts-search-match-khjdickkwg">$1</span>');
+    if(phrases){
+        var rgxPhrase ;
+        for(var i=0;i<phrases.length;i++) {
+            if(isMarkupLanguage){
+                rgxPhrase = new RegExp('>([^<]*)\\b('+ phrases[i] + ')\\b', 'gmi');
+                text = text.replace(rgxPhrase, '>$1<span class="sect-efts-search-match-khjdickkwg">$2</span>');
+            } else {
+                rgxPhrase = new RegExp('\\b('+ phrases[i] + ')\\b', 'gmi');
+                text = text.replace(rgxPhrase, '><span class="sect-efts-search-match-khjdickkwg">$1</span>');
+            }
         }
     }
     return text;
@@ -451,39 +471,45 @@ function previewFile(evt){
         cik = extractCIK($a.closest('tr').find('.name').html()),
         adsh = $a.attr('data-adsh'),
         fileName = $a.attr('data-file-name'),
-        submissionRoot = 'https://www.sec.gov/Archives/edgar/data/'
-            + cik + '/' + adsh.replace(/-/g,'') + '/' ,
+        domain = 'https://www.sec.gov',
+        submissionRoot = domain + '/Archives/edgar/data/' + cik + '/' + adsh.replace(/-/g,'') + '/' ,
         $searchingOverlay = $('.searching-overlay').show();
-    $.get('https://www.publicdata.guru/sec/getWebDoc.php?f='+encodeURIComponent(submissionRoot + fileName),
+    $.get('/sec/getWebDoc.php?f='+encodeURIComponent(submissionRoot + fileName),
         function(data){
             var bodyOpen = data.search(/<body.*>/i),
                 bodyClose= data.search(/<\/body>/i),
                 ext = fileName.split('.').pop().toLowerCase(),
-                isText = ext == 'txt',
-                isHTML = ext == 'htm' || ext == 'html' ,
                 hashValues = hashToObject(),
                 searchedKeywords = hashValues.q,
+                keyPhrases = keywordStringToPhrases(searchedKeywords),
                 html;
             switch(ext){
                 case 'htm':
                 case 'html':
-                case 'xml':
                     html = data.substring(data.search('>', bodyOpen)+1, bodyClose-1).replace(/<img src="/gi, '<img src="'+submissionRoot);
-                    $('#previewer div.modal-body').html(highlightMatchingPhases(html, keywordStringToPhrases(searchedKeywords), isHTML));
+                    $('#previewer div.modal-body').html(highlightMatchingPhases(html, keyPhrases, true));
+                    break;
+                case 'xml':
+                    html = data.substring(data.search('>', bodyOpen)+1, bodyClose-1).replace(/<img src="\//gi, '<img src="'+domain+'/');
+                    $('#previewer div.modal-body').html(highlightMatchingPhases(html, keyPhrases, true));
                     break;
                 case 'txt':
-                    $('#previewer div.modal-body').html('<pre>' + highlightMatchingPhases(html, keywordStringToPhrases(searchedKeywords), isHTML) + '</pre>');
+                    $('#previewer div.modal-body').html('<pre>' + highlightMatchingPhases(html, keyPhrases, false) + '</pre>');
                     break;
                 case 'pdf':
                     $('#previewer div.modal-body').html('Open File to view PDF in new tab');
                     break;
                 default:
-                    $('#previewer div.modal-body').html('unknown file type: '+ext);
+                    $('#previewer div.modal-body').html('unknown file type: ' + ext);
             }
-
-            $('#previewer h4.modal-title strong').html(hashValues.q);
-            $('#previewer .modal-file-name').html(fileName);
-            $('#previewer h4.modal-title span.find-counter').html('<span id="showing-highlight">1</span> of '+ $('span.sect-efts-search-match-khjdickkwg').length);
+            if(keyPhrases && ['txt','xml','htm','html'].indexOf(ext)!=-1){
+                $('#previewer h4.modal-title strong').html(hashValues.q);
+                $('#previewer .modal-file-name').html(fileName);
+                $('#previewer h4.modal-title span.find-counter').html('<span id="showing-highlight">1</span> of '+ $('span.sect-efts-search-match-khjdickkwg').length);
+                $('#previewer h4.modal-title').show();
+            } else {
+                $('#previewer h4.modal-title').hide();
+            }
             $('#open-file').attr('href', submissionRoot + fileName);
             $('#open-submission').attr('href',submissionRoot + adsh + '-index.html');
             $searchingOverlay.hide();
@@ -1632,9 +1658,9 @@ var XLS_Forms = {
     "1-A": "xsl1-A_X01",
     "1-K": "xsl1-K_X01",
     "1-Z": "xsl1-Z_X01",
-    "3": "xslF345_X03",
-    "4": "xslF345_X03",
-    "5": "xslF345_X03",
+    "3": "xslF345X03",
+    "4": "xslF345X03",
+    "5": "xslF345X03",
     "CFPORTAL": "xslCFPORTAL_X01",
     "C": "xslC_X01",
     "EFFECT": "xslEFFECT_X02",
@@ -1645,7 +1671,7 @@ var XLS_Forms = {
     "FormTA": "xslFormTA_X01",
     "13F": "xslForm13F_X01",
     "25": "xslForm25_X02",
-    "D": "xslFormD_X01",
+    "D": "xslFormDX01",
     "N-MFP": "xslFormN-MFP_X01",
     "TA": "xslFormTA_X01",
     "MA-I": "xslMA-I_X01",
@@ -1668,3 +1694,20 @@ var XLS_Forms = {
     "TA-W": "xslTA-W_X06",
     "X-17A-5": "xslX-17A-5_X01",
 };
+
+var formCategories = [
+    {"category": "All Annual, Periodic, and Current Reports", "forms":["1-K","1-SA","1-U","1-Z","1-Z-W","10-D","10-K","10-KT","10-Q","10-QT","11-K","11-KT","13F-HR","13F-NT","15-12B","15-12G","15-15D","15F-12B","15F-12G","15F-15D","18-K","20-F","24F-2NT","25","25-NSE","40-17F2","40-17G","40-F","6-K","8-K","8-K12G3","8-K15D5","ABS-15G","ABS-EE","ANNLRPT","DSTRBRPT","IRANNOTICE","N-30B-2","N-30D","N-CEN","N-CSR","N-CSRS","N-MFP","N-MFP1","N-MFP2","N-PX","N-Q","NPORT-EX","NSAR-A","NSAR-B","NSAR-U","NT 10-D","NT 10-K","NT 10-Q","NT 11-K","NT 20-F","QRTLYRPT","SD","SP 15D2"]},
+
+    {"category": "&nbsp;&nbsp;Operating Company Annual, Periodic, and Current Reports", "forms":["1-U","1-Z","1-Z-W","10-D","10-K","10-KT","10-Q","10-QT","11-K","11-KT","15-12B","15-12G","15-15D","15F-12B","15F-12G","15F-15D","18-K","20-F","25","25-NSE","40-17F2","40-17G","40-F","6-K","8-K","8-K12G3","8-K15D5","ABS-15G","ABS-EE","ANNLRPT","DSTRBRPT","IRANNOTICE","N-30B-2","N-30D","N-CEN","N-CSR","N-CSRS","N-MFP","N-MFP1","N-MFP2","N-PX","N-Q","NPORT-EX","NSAR-A","NSAR-B","NSAR-U","NT 10-D","NT 10-K","NT 10-Q","NT 11-K","NT 20-F","QRTLYRPT","SD","SP 15D2"]},
+    {"category": "&nbsp;&nbsp;Investment Company Annual, Periodic, and Current Reports", "forms":["1-K","1-SA","10-Q","10-QT","13F-HR","13F-NT","24F-2NT","40-17F2","40-17G","40-F","6-K","8-K","8-K12G3","8-K15D5","ABS-15G","ABS-EE","ANNLRPT","DSTRBRPT","IRANNOTICE","N-30B-2","N-30D","N-CEN","N-CSR","N-CSRS","N-MFP","N-MFP1","N-MFP2","N-PX","N-Q","NPORT-EX","NSAR-A","NSAR-B","NSAR-U","NT 10-D","NT 10-K","NT 10-Q","NT 11-K","NT 20-F","QRTLYRPT","SD","SP 15D2"]},
+
+    {"category": "Insider Equity Awards, Transactions, and Ownersip (Section 16 Reports)", "forms":["3","4","5"]},
+    {"category": "Beneficial Ownership Reports", "forms":["SC 13D","SC 13G","SC14D1F"]},
+    {"category": "Exempt Offerings", "forms":["1-A","1-A POS","1-A-W","253G1","253G2","253G3","253G4","D","DOS"]},
+    {"category":"Registration Statements", "forms":["10-12B","10-12G","18-12B","20FR12B","20FR12G","40-24B2","40FR12B","40FR12G","424A","424B1","424B2","424B3","424B4","424B5","424B7","424B8","424H","425","485APOS","485BPOS","485BXT","487","497","497J","497K","8-A12B","8-A12G","AW","AW WD","DEL AM","DRS","F-1","F-10","F-10EF","F-10POS","F-3","F-3ASR","F-3D","F-3DPOS","F-3MEF","F-4","F-4 POS","F-4MEF","F-6","F-6 POS","F-6EF","F-7","F-7 POS","F-8","F-8 POS","F-80","F-80POS","F-9","F-9 POS","F-N","F-X","FWP","N-2","POS AM","POS EX","POS462B","POS462C","POSASR","RW","RW WD","S-1","S-11","S-11MEF","S-1MEF","S-20","S-3","S-3ASR","S-3D","S-3DPOS","S-3MEF","S-4","S-4 POS","S-4EF","S-4MEF","S-6","S-8","S-8 POS","S-B","S-BMEF","SF-1","SF-3","SUPPL","UNDER"]},
+    {"category":"Filing Review Correspondence", "forms":["CORRESP","DOSLTR","DRSLTR","UPLOAD"]},
+    {"category":"SEC Orders and Notices", "forms":["40-APP","CT ORDER","EFFECT","QUALIF","REVOKED"]},
+    {"category":"Proxy Materials", "forms":["ARS","DEF 14A","DEF 14C","DEFA14A","DEFA14C","DEFC14A","DEFC14C","DEFM14A","DEFM14C","DEFN14A","DEFR14A","DEFR14C","DFAN14A","DFRN14A","PRE 14A","PRE 14C","PREC14A","PREC14C","PREM14A","PREM14C","PREN14A","PRER14A","PRER14C","PRRN14A","PX14A6G","PX14A6N","SC 14N"]},
+    {"category":"Tender Offers and Going Private Transactions", "forms":["CB","SC 13E1","SC 13E3","SC 14D9","SC 14F1","SC TO-C","SC TO-I","SC TO-T","SC13E4F","SC14D9C","SC14D9F"]},
+    {"category":"Trust Indenture Filings", "forms":["305B2","T-3"]}
+];

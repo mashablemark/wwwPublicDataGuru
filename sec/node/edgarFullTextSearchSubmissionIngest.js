@@ -47,8 +47,7 @@ const AWS = require('aws-sdk');
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
 const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
-const submissionsIndex = 'submission';
-const entityIndex = 'entity';
+const submissionsIndex = 'edgar_file';
 const type = '_doc';
 
 //const es = new AWS.ES({apiVersion: '2015-01-01'});
@@ -56,7 +55,8 @@ const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
 const rgxTagsAndExtraSpaces = /([\n\s]*<[^>]+>[\n\s]*|[\n\s]{2,})+/gm;  //removes html and xml tags and extra white space
 const rgxTagsExtraSpacesAndNumbers = /([\n\s]*(<[^>]+>|[\n\s]{2,}|-?\$?-?\b[0-9,\.]+\b)[\n\s]*)+/gm;  //removes number words (but not alphanumeric words!) in addition to html and xml tags and extra white space
 const rgxEncodedTagsExtraSpacesAndNumbers =/([\n\s]*(&lt;.+?&gt;|<[^>]+>|[\n\s]{2,}|-?\$?-?\b[0-9,\.]+\b)[\n\s]*)+/gm;;  //removes number words (but not alphanumeric words!) in addition to html and xml tags and html encoded tags embedded in XML values and extra white space
-const rgxExtraSpaces = /[\n\s]{2,}/mg;
+const rgxExtraSpacesAndNumbers = /([\n\s]*([\n\s-+\.]{2,}|-?\$?-?\b[0-9,\.]+\b)[\n\s]*)+/gm;  //removes number words, repeating: white space ....  -----
+const rgxExtraSpaces = /(\s{2,}|\.{2,})/mg; //spaces, ....., -----, _____
 const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
 const lowChatterMode = true;
 const READ_STATES = {
@@ -96,14 +96,17 @@ process.on('message', (processInfo) => {
     });
 
     //preprocessors:
+    function removeWhiteSpacesAndNumbers(text){return text.replace(rgxExtraSpacesAndNumbers, ' ');}
     function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
     function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
+    function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
+
 
     const indexedFileTypes = {
         htm: {indexable: true, process: removeTags},
         html: {indexable: true, process: removeTags},
         xml: {indexable: true, process: decodeAndRemoveTags},
-        txt: {indexable: true},
+        txt: {indexable: true, process: removeWhiteSpacesAndNumbers},
         pdf: {indexable: false},  //todo: indexable PDFs
         gif: {indexable: false},
         jpg: {indexable: false},
@@ -139,8 +142,7 @@ process.on('message', (processInfo) => {
 
     readInterface.on('line', async function(line) {
         let tLine = line.trim();
-        //console.log(submission.readState, tLine);
-        if (submission.readState == READ_STATES.INIT) { //still reading it in
+        if (submission.readState == READ_STATES.INIT) { //submission header prior to first <DOCUMENT>
             if (tLine == '<COMPANY-DATA>' || tLine == '<OWNER-DATA>') entity = {};
             if ((tLine == '</COMPANY-DATA>' || tLine == '</OWNER-DATA>') && entity.cik) {
                 submission.entities.push(entity);
@@ -149,7 +151,7 @@ process.on('message', (processInfo) => {
                     && submission.incorporationStates.indexOf(entity.incorporationState)==-1) submission.incorporationStates.push(entity.incorporationState);
                 if (entity.sic && submission.sics.indexOf(entity.sic)==-1) submission.sics.push(entity.sic);
                 if(submission.ciks.indexOf(entity.cik) == -1) submission.ciks.push(entity.cik);
-                let displayName = `${entity.name || ''} (${entity.cik})`;
+                let displayName = `${entity.name || ''} (CIK ${entity.cik})`;
                 if(submission.displayNames.indexOf(displayName)==-1) submission.displayNames.push(displayName);
             }  //ignores <DEPOSITOR-CIK> && <OWNER-CIK> (see path analysis below)
             if (tLine.startsWith('<CIK>')) entity.cik = tLine.substr('<CIK>'.length);
@@ -174,17 +176,22 @@ process.on('message', (processInfo) => {
             if (tLine == '<DOCUMENT>') {
                 for(let i=0;i<submission.entities.length;i++){
                     let e = submission.entities[i];
-                    submission.businessStates.push( e.businessAddress ? e.businessAddress.state : (e.mailingAddress ? e.mailingAddress.state : null));
-                    submission.businessLocations.push((e.businessAddress ? common.toTitleCase(e.businessAddress.city) + ', ' + edgarLocations[e.businessAddress.state] : null)
-                        || (e.mailingAddress ? common.toTitleCase(e.mailingAddress.city) + ', ' + edgarLocations[e.mailingAddress.state] : null));
+                    let address = e.businessAddress || e.mailingAddress;
+                    if(address){
+                        let state = address.state || '';
+                        let city = common.toTitleCase(address.city||'');
+                        if(state) submission.businessStates.push(state);
+                        if(city || state) submission.businessLocations.push(city + (city && state?', ':'') +state );
+                    }
                 }
                 submission.readState = READ_STATES.DOC_HEADER;
             }
         }
 
-        if (submission.readState == READ_STATES.DOC_FOOTER) { //ordered above the DOC_HEADER processing section to <DOCUMENT> in both
-            if (tLine == '<DOCUMENT>') submission.readState = READ_STATES.DOC_HEADER;
-            if (tLine == '</SUBMISSION>') submission.readState = READ_STATES.READ_COMPLETE;
+        if (submission.readState == READ_STATES.DOC_FOOTER) { //ordered above the DOC_HEADER processing section to add new submission.docs on new <DOCUMENT>
+            if (tLine == '<DOCUMENT>') submission.readState = READ_STATES.DOC_HEADER;  //another doc starting
+            //note: skips over '</DOCUMENT>' line
+            if (tLine == '</SUBMISSION>') submission.readState = READ_STATES.READ_COMPLETE; //end fo submission!
         }
 
         if (submission.readState == READ_STATES.DOC_BODY) {  //ordered above the DOC_HEADER processing section to avoid fall through of <TEXT>
@@ -193,7 +200,7 @@ process.on('message', (processInfo) => {
                 submission.readState = READ_STATES.DOC_FOOTER;
                 submission.docs[d].state = READ_STATES.READ_COMPLETE;
                 //file complete; send to ElasticSearch if not already processing a previous file
-                if(submission.indexState == INDEX_STATES.FREE) { //will only be free if all existing indexable doc have been indexed;
+                if(submission.indexState == INDEX_STATES.FREE) { //will only be free if all indexable docs (isArray(doc.line) && state==READ_COMPLETE) in submission.docs have been indexed;
                     indexPromises.push(indexWithElasticSearch(d));
                 }
             } else {
@@ -201,13 +208,13 @@ process.on('message', (processInfo) => {
                     submission.docs[d].lengthRaw += tLine.length;
                     const fileTypeProcessor = indexedFileTypes[submission.docs[d].fileExtension].process;
                     let processedLine = fileTypeProcessor ? fileTypeProcessor(tLine).trim() : tLine;
-                    if(processedLine.length) submission.docs[d].lines.push(processedLine);
+                    if(processedLine.length && processedLine != ' ') submission.docs[d].lines.push(processedLine);
                 }
             }
         }
 
         if (submission.readState == READ_STATES.DOC_HEADER) {
-            if (tLine == '<DOCUMENT>') {
+            if (tLine == '<DOCUMENT>') {  //fall though from decisions in INIT and DOC_FOOTER sections above
                 submission.docs.push({
                     lengthRaw: 0,
                     lengthIndexed: 0,
@@ -235,7 +242,8 @@ process.on('message', (processInfo) => {
                     submission.readState = READ_STATES.DOC_BODY;
                     const rootForm = submission.form.replace('/A','').toUpperCase();
                     if(submission.docs[d].fileExtension == 'xml'
-                        && (rootForm!= submission.docs[d].fileType.toUpperCase() || !XLS_Forms[submission.docs[d].fileType.toUpperCase()])){
+                        && (submission.form!= submission.docs[d].fileType.toUpperCase() || !XLS_Forms[submission.docs[d].fileType.toUpperCase()])
+                        || submission.docs[d].fileDescription =='IDEA: XBRL DOCUMENT'){
                         submission.docs[d].lines = false; //only index XML file the are the primary XML document of a form with XLS transformation
                     }
                 }
@@ -259,7 +267,7 @@ process.on('message', (processInfo) => {
                 indexedText = fileTypeProcessor ? fileTypeProcessor(submission.docs[d].lines.join('\n')) : submission.docs[d].lines.join('\n');
                 submission.docs[d].lengthIndexed = indexedText.length;
             }
-            if(submission.docs[d].lengthIndexed && submission.docs[d].lengthIndexed > 1){ //skipp
+            if(submission.docs[d].lengthIndexed && submission.docs[d].lengthIndexed > 1){ //process else skip
                 submission.docs[d].lengthRaw += submission.docs[d].lines.length;  //account for carriage returns
                 submission.docs[d].state = INDEX_STATES.INDEXING;
                 readInterface.pause();  //does not immediately stop the line events.  A few more might come, but this stops the torrent
@@ -276,9 +284,11 @@ process.on('message', (processInfo) => {
                     doc_text: indexedText,
                     //adsh: submission.adsh,  //embedded in ID = REDUNDANT FIELD
                     //file_name: submission.docs[d].fileName,  //embedded in ID = REDUNDANT FIELD
+                    adsh: submission.adsh,
+                    file_type: submission.docs[d].fileType,
+                    sequence: submission.docs[d].fileSequence,
                     display_names: submission.displayNames,
                     file_description: submission.docs[d].fileDescription,
-                    file_type: submission.docs[d].fileType,
                     film_num: submission.docs[d].filmNumber,
                     file_num: submission.docs[d].fileNumber,
                     file_date: `${submission.filingDate.substr(0, 4)}-${submission.filingDate.substr(4, 2)}-${submission.filingDate.substr(6, 2)}`,
@@ -306,7 +316,7 @@ process.on('message', (processInfo) => {
                           values (${q(submission.adsh)}, ${submission.docs[d].fileSequence}, ${q(submission.docs[d].fileName)}, ${submission.docs[d].lengthRaw}, 
                           ${submission.docs[d].lengthIndexed}, ${q(submission.docs[d].fileType)}, ${q(submission.docs[d].fileDescription)})
                           on duplicate key update last_indexed = null, tries=tries+1`);
-                client.handleRequest(request, {connectTimeout: 1000, timeout: 55000}, function(response) {
+                client.handleRequest(request, {connectTimeout: 2000, timeout: 55000}, function(response) {
                     //console.log(response.statusCode + ' ' + response.statusMessage);
                     let chunks = [];
                     response.on('data', function (chunk) {
@@ -338,7 +348,7 @@ process.on('message', (processInfo) => {
                         }
                         submission.docs[d].state = INDEX_STATES.INDEXED;
                         //the file record already written above; setting the last_indexed timestamp (from NULL) indicates success
-                        nextDoc();
+                        nextDoc(d);
                     });
                 }, function(error) {
                     console.log('Error sending data to ES: ' + error);
@@ -351,7 +361,7 @@ process.on('message', (processInfo) => {
                         delete request.body;
                         request.error = error;
                         common.logEvent('ElasticSearch communication error', JSON.stringify(request));
-                        nextDoc();
+                        nextDoc(d);
                     }
                 });
                 //while we are waiting for ElasticSearch callback....
@@ -374,12 +384,11 @@ process.on('message', (processInfo) => {
                             values(${e.cik},${q(submission.adsh)})`));
                     }
                     dbPromises.push(common.runQuery(`insert ignore into efts_submissions (adsh, form, filedt) 
-                        values(${q(submission.adsh)}, ${q(submission.form)}, ${q(submission.filingDate)})
-                        on duplicate key update last_indexed = now()`));
+                        values(${q(submission.adsh)}, ${q(submission.form)}, ${q(submission.filingDate)})`));
                     submission.headerWritten = true; //write the header only once per submission (skip for subsequent files & exhibits)
                 }
-                //collect all the db promises
-                for(let i=0;i<dbPromises.length;i++){ let z = await dbPromises[i]}
+                //1. collect all the db promises
+                for(let i=0;i<dbPromises.length;i++){ let z = await dbPromises[i]; }
                 // 2. check free heap size and collect garbage if heap > 1GB free
                 submission.docs[d].lines = 'removed after sending to submissionsIndex'; //but first free up any large arrays or strings
                 let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
@@ -389,37 +398,40 @@ process.on('message', (processInfo) => {
             } else {
                 //console.log(`skipping document #${d} ${submission.docs[d].fileName} in processing of ${submission.adsh}`);
                 submission.docs[d].state = INDEX_STATES.SKIPPED;
-                nextDoc();
-            }
-        }
-        function nextDoc() {
-            if(submission.docs.length-1>d) {
-                if(submission.docs[d+1].state==READ_STATES.READ_COMPLETE) {
-                    indexPromises.push(indexWithElasticSearch(d + 1));
-                } else {
-                    submission.indexState = INDEX_STATES.FREE;
-                    //console.log('resuming (doc not complete)');
-                    readInterface.resume();
-                }
-            } else {
-                if(submission.readState==READ_STATES.READ_COMPLETE) {
-                    messageParentFinished('ok');
-                } else {
-                    submission.indexState = INDEX_STATES.FREE;
-                    if(submission.readState!=READ_STATES.MESSAGED_PARENT) {
-                        //console.log('resuming (submission  not complete)');
-                        readInterface.resume();
-                    }
-                }
+                nextDoc(d);
             }
         }
     }
 
+    function nextDoc(dLast) {
+        if(submission.docs.length-1>dLast) {
+            if(submission.docs[dLast+1].state==READ_STATES.READ_COMPLETE) { //a follow on doc has been indexed
+                indexPromises.push(indexWithElasticSearch(dLast + 1));
+            } else { //a follow on doc is being been indexed
+                submission.indexState = INDEX_STATES.FREE;
+                //console.log('resuming (doc not complete)');
+                readInterface.resume();
+            }
+        } else {
+            submission.indexState = INDEX_STATES.FREE;
+            if(submission.readState==READ_STATES.READ_COMPLETE) {
+                messageParentFinished('ok');
+            } else {
+                if(submission.readState!=READ_STATES.MESSAGED_PARENT) {
+                    //console.log('resuming (submission  not complete)');
+                    readInterface.resume();
+                }
+            }
+        }
+    }
     async function messageParentFinished(status){
         //console.log(`submission complete; messaging parent`);
         submission.readState = READ_STATES.MESSAGED_PARENT;
         readInterface.close();
         stream.close();
+        indexPromises.push(common.runQuery(`update efts_submissions s, 
+            (select count(*) as files_indexed, sum(length_indexed) as bytes_index from efts_submissions_files where adsh='${submission.adsh}') f 
+            set s.last_indexed=now(), s.files_indexed=f.files_indexed, s.bytes_index=f.bytes_index where s.adsh = '${submission.adsh}'`));
         for(let i=0;i<indexPromises.length;i++) await indexPromises;
         let result = {
             status: status,
@@ -435,7 +447,6 @@ process.on('message', (processInfo) => {
         };
         //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
         //console.log(result);
-
         for(let i=0;i<indexPromises.length;i++){ let z = await indexPromises[i]}
         process.send(result);
     }
@@ -482,7 +493,10 @@ process.on('disconnect', async () => {
                 submission.lastSubmissionRunTime = ((new Date()).getTime() - start)/1000;
                 submission.process = 'P'+processNum;
                 if(submission.lastSubmissionRunTime>60){
-                    console.log("disconnected (>60) before done", submission.process, submission.lastSubmissionRunTime, submission.adsh, submission.readState, submission.indexState, submission.indexed, submission.docs[submission.indexed].state);
+                    console.log("disconnected (>60) before done", "p"+submission.process, 'lastSubmissionRunTime '+submission.lastSubmissionRunTime, submission.adsh,
+                        'readState '+(submission.readState||'undefined'), 'indexState '+(submission.indexState||'undefined'), 'submission.indexed '+(submission.indexed||'undefined'),
+                        'docs '+(submission.indexed&&submission.docs&&submission.docs.length>submission.indexed?submission.docs[submission.indexed].state||'undefined':'docs array does submissionsIndex')
+                    );
                 }
             }
             process.exit();

@@ -14,13 +14,18 @@ const HTTPS = require('https');
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
 const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
+const locationTypes = {
+    located: "biz_states",
+    incorporated: "inc_states"
+};
 
 exports.searchEFTS = async (r, context) => {
     //todo: add screens for malicious of prohibited actions};
     let indexToSearch, query;
+    let locationField = locationTypes[r.locationType]||locationTypes.located;
     if(r.keysTyped){
         //suggestions query
-        indexToSearch = 'hints';
+        indexToSearch = 'edgar_entity';
         query = {
             "query": {
                 "bool": {
@@ -28,11 +33,6 @@ exports.searchEFTS = async (r, context) => {
                         {"match": {"entity": {
                                     "query": r.keysTyped,
                                     "operator": "and"}
-                            }
-                        },
-                        {"match": {"id_": {
-                                    "query": r.keysTyped,
-                                    "boost": 1000}
                             }
                         },
                         {"match": {"tickers": {
@@ -46,9 +46,15 @@ exports.searchEFTS = async (r, context) => {
             "from": 0,
             "size": 10, // outer hits, or books
         };
+        if(!isNaN(r.keysTyped)) query.query.bool.should.push(
+            {"match": {"_id": {
+                        "query": parseInt(r.keysTyped),
+                        "boost": 1000}
+                }
+            })
     } else {
         //document search query
-        indexToSearch = 'submissions';
+        indexToSearch = 'edgar_file';
         query = {
             "query": {
                 "bool": {
@@ -80,25 +86,37 @@ exports.searchEFTS = async (r, context) => {
                         "size": 30
                     }
                 },
-                "inc_states_filter": {
+                [locationField+"_filter"]: {
                     "terms": {
-                        "field": "inc_states",
+                        "field": locationField,
                         "size": 30
                     }
                 }
-            }
+            };
         }
 
         if (r.forms && r.forms.length) query.query.bool.filter.push({"terms": {"root_form": r.forms}});
         if (r.sics && r.sics.length) query.query.bool.filter.push({"terms": {"sics": r.sics}});
-        if (r.ciks && r.ciks.length) query.query.bool.filter.push({"terms": {"ciks": r.ciks}});
-        if (r.locationCodes && r.locationCodes) query.query.bool.filter.push({"terms": {"inc_states": {"value": r.locationCodes}}});
-        if (query.query.bool.filter == 0 && (!r.q || !r.q.trim().length || r.q.trim()[0] == '*')) {
-            r.q = 'kjasfdlkhdsf534udaslasefasdkfasdrdsfsd84s' //impossible string to return no results if no search criterion entered at all
+        if (r.locationCodes && r.locationCodes.length) query.query.bool.filter.push({"terms": {[locationField]: r.locationCodes}});
+        if (r.ciks && r.ciks.length) {
+            query.query.bool.filter.push({"terms": {"ciks": r.ciks}}) ;
+        } else {
+            if(r.entityName) query.query.bool.must.push({"match": {"display_names": r.entityName}});
         }
-        const keywords = r.q.split(' ');
-        for (let i = 0; i < keywords.length; i++) {
-            query.query.bool.must.push({"match": {"doc_text": keywords[i]}});
+
+        if (query.query.bool.filter.length==0 && query.query.bool.must.length==0 && (!r.q || !r.q.trim().length || r.q.trim()[0] == '*')) {
+            return {"error": "Blank search not valid.  Either entity, keywords, location, or filing types must be submitted.",
+                "hits": {"hits":[]}
+            };
+        }
+        if(r.q && r.q.trim().length){
+            const keywords = r.q.split(' ');
+            for (let i = 0; i < keywords.length; i++) {
+                if(keywords[i].length) query.query.bool.must.push({"match": {"doc_text": keywords[i]}});
+            }
+        } else {
+            query.query.bool.filter.push({"term": {"sequence": {"value": 1}}});
+            query.sort = [{ "file_date" : {"order" : "desc"}}];
         }
         if (r.startdt && r.enddt) query.query.bool.filter.push({
             "range": {
