@@ -1,0 +1,44 @@
+.rel-none{
+    position: relative;
+    top: 0px;
+    padding: 0;
+    border: none;
+    margin: 0;
+    height: 0;
+    width: 100%;
+}
+div.entity-hints {
+    color: #1e1e1e;
+    background-color: white;
+    border: darkgray thin solid;
+    position: absolute;
+    top: 25px;
+    left: 40px;
+    width: 175%;
+    z-index: 1000;
+    display: none;
+    border-bottom-right-radius: .25rem!important;
+    border-bottom-left-radius: .25rem!important;
+}
+table.entity-hints{
+    width: 100%;
+}
+table.entity-hints, table.entity-hints td,  table.entity-hints th {
+    border: none;
+    padding: 5px;
+}
+table.entity-hints th {
+    font-weight: bold;
+
+}
+table.entity-hints tr.hint {
+    border-top: thin darkgrey solid;
+    padding: 5px 10px;
+    cursor: pointer;
+}
+table.entity-hints tr.hint:hover{
+    background-color: grey;
+}
+table.entity-hints tr:visited{
+    color: #2F64B2;
+}

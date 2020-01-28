@@ -17,13 +17,10 @@ $homepageHTML = str_replace ( ' href="/', ' href="'.$secPath,  $homepageHTML);
 //$homepageHTML = str_replace ( ' src="/', ' src="'.$secPath,  $homepageHTML);
 
 //3. insert smartSearch.js
-$homepageHTML = str_replace ( '<head>', '<head>'
-    . '<link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" />'
-    . '<link  rel="stylesheet" href="global/js/loadmask/jquery.loadmask.css" />'
+$homepageHTML = str_replace ( '</head>', '<link rel="stylesheet" href="css/smartSearch.css" type="text/css">'
     . '<script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>'
-    . '<script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>'
-    . '<script type="text/javascript" src="global/js/loadmask/jquery.loadmask.min.js"></script>'
-    . '<script src="js/smartSearch.js"></script>',  $homepageHTML);
+    . '<script src="js/smartSearch.js"></script>'
+    . '<head>',  $homepageHTML);
 
 //4. modify banner = not official site!
 $homepageHTML = str_replace ( '<a href="https://www.sec.gov/" title="U.S. Securities and Exchange Commission" rel="home" tabindex="3">U.S. Securities and Exchange Commission</a>',
