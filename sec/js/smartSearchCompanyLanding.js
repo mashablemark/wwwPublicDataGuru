@@ -18,30 +18,31 @@ $(document).ready(function(){
     $("input[value='Search']").closest('form')
         .submit(function(event){
             var formValues = {},
-                fullTextUrl = 'https://searchwww.sec.gov/EDGARFSClient/jsp/EDGAR_MainAccess.jsp?isAdv=true';
+                fullTextUrl = 'https://www.publicdata.guru/sec/edgar_full_text_search.html?r=el#/';
             $(this).serializeArray().forEach(function(ele){formValues[ele.name]=ele.value});
             if(formValues.search_text){
-                if(formValues.dateb.length>3 && !isNaN(formValues.dateb)){
-                   formValues.fromDate = parseInt(formValues.dateb.substr(0,4));
-                   if(formValues.dateb.length>5)
-                       formValues.fromDate = formValues.dateb.substr(4,2) + '/' + formValues.fromDate;
-                   else
-                       formValues.fromDate = '01/' + formValues.fromDate;
-                   if(formValues.dateb.length>7)
-                       formValues.fromDate = formValues.dateb.substr(6,2) + '/' + formValues.fromDate;
-                   else
-                       formValues.fromDate = '01/' + formValues.fromDate;
-                   let now = new Date();
-                   formValues.toDate = '12/31/'+now.getFullYear()
+                formValues.entityName = $('.companyName').text().replace(/CIK#: (\d{10}) \(see all company filings\)/, ' (CIK $1)');
+                var startDt = formValues.dateb || '1994';
+                formValues.startdt = parseInt(startDt .substr(0,4))
+                    + '-' + (startDt .length>5?startDt .substr(4,2) :'01')
+                    + '-' + (startDt .length>7?startDt .substr(6,2) :'01');
+                formValues.endate = formatDate(new Date()); //today
+                if(formValues.dateb){
+                    formValues.dateRange = 'custom';
+                    delete formValues.dateb;
+                } else {
+                    formValues.dateRange = 'all';
                 }
-                formValues.search_text = formValues.search_text.replace(/\s+/g,' AND ');
+                formValues.q = formValues.search_text;
+                delete formValues.search_text;
                 for(let name in formValues){
                     switch(name){
                         case "CIK":
-                            fullTextUrl += '&queryCik=' + encodeURIComponent(formValues[name]);
+                            fullTextUrl += '&ciks=' + encodeURIComponent(formValues[name]);
                             break;
                         case "type":
-                            fullTextUrl += '&formType=' + encodeURIComponent(validForms[formValues.type.trim()]?validForms[formValues.type.trim()]:'1');
+                            fullTextUrl += '&forms=' + encodeURIComponent(formValues.type.trim());
+                            fullTextUrl += '&category=custom';
                             break;
                         case "action":
                             break;
@@ -57,5 +58,13 @@ $(document).ready(function(){
             }
         })
         .attr('action', 'https://www.sec.gov/cgi-bin/browse-edgar');
+
+    function formatDate(dateOrString){
+        var dt = new Date(dateOrString),
+            yyyy=dt.getUTCFullYear(),
+            m=dt.getUTCMonth()+1,
+            d=dt.getUTCDate();
+        return yyyy+'-'+(m<10?'0'+m:m)+'-'+(d<10?'0'+d:d);
+    }
 });
 
