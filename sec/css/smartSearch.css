@@ -1,44 +1,44 @@
 .rel-none{
-    position: relative;
-    top: 0px;
-    padding: 0;
-    border: none;
-    margin: 0;
-    height: 0;
-    width: 100%;
+    position: relative!important;
+    top: 0px!important;
+    padding: 0!important;
+    border: none!important;
+    margin: 0!important;
+    height: 0!important;
+    width: 100%!important;
 }
 div.entity-hints {
-    color: #1e1e1e;
-    background-color: white;
-    border: darkgray thin solid;
-    position: absolute;
-    top: 25px;
-    left: 40px;
-    width: 175%;
-    z-index: 1000;
+    color: #1e1e1e!important;
+    background-color: white!important;
+    border: darkgray thin solid!important;
+    position: absolute!important;
+    top: 25px!important;
+    left: 40px!important;
+    width: 175%!important;
+    z-index: 1000!important;
     display: none;
     border-bottom-right-radius: .25rem!important;
     border-bottom-left-radius: .25rem!important;
 }
 table.entity-hints{
-    width: 100%;
+    width: 100%!important;
 }
 table.entity-hints, table.entity-hints td,  table.entity-hints th {
-    border: none;
-    padding: 5px;
+    border: none !important;
+    padding: 5px 10px!important;
 }
 table.entity-hints th {
-    font-weight: bold;
+    font-weight: bold!important;
 
 }
 table.entity-hints tr.hint {
-    border-top: thin darkgrey solid;
-    padding: 5px 10px;
-    cursor: pointer;
+    border-top: thin lightgrey solid!important;
+    padding: 5px 10px!important;
+    cursor: pointer!important;
 }
 table.entity-hints tr.hint:hover{
-    background-color: grey;
+    background-color: grey!important;
 }
 table.entity-hints tr:visited{
-    color: #2F64B2;
+    color: #2F64B2!important;
 }
