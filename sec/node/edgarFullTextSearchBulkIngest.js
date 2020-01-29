@@ -73,8 +73,8 @@ const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
 const submissionsIndex = 'edgar_file';
 const processControl = {
+    maxQueuedDownloads: 3,  //at 1GB per tar.gz file (expanding  to 10GB) and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxFileIngests: 4,  //internal processes to ingest local files leveraging Node's non-blocking model
-    maxQueuedDownloads: 3,  //at 1GB per file and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
     start: new Date("2019-01-01"),  //restart date.  If none, the lesser of the max(filedt) and 2008-01-01 is used

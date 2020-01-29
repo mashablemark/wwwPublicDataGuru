@@ -18,11 +18,8 @@ $homepageHTML = str_replace ( ' href="/', ' href="'.$secPath,  $homepageHTML);
 
 //3. insert smartSearch.js
 $homepageHTML = str_replace ( '<head>', '<head>'
-    . '<link  rel="stylesheet" href="global/js/jquery-ui/jquery-ui.css" />'
-    . '<link  rel="stylesheet" href="global/js/loadmask/jquery.loadmask.css" />'
+    . '<link rel="stylesheet" href="css/smartSearch.css" type="text/css">'
     . '<script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>'
-    . '<script type="text/javascript" src="global/js/jquery-ui/jquery-ui.min.js"></script>'
-    . '<script type="text/javascript" src="global/js/loadmask/jquery.loadmask.min.js"></script>'
     . '<script src="js/smartSearch.js"></script>',  $homepageHTML);
 
 //4. modify banner = not official site!
