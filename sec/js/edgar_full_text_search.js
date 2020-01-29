@@ -130,7 +130,8 @@ $(document).ready(function() {
 
     $('.location-type-option ').click(function(evt){
         evt.preventDefault(); //don't change the hash
-        $('#location-type').html($(this).html()) //change the location search type: business state vs incorporation state
+        $('#location-type').html($(this).html()); //change the location search type: business state vs incorporation state
+        if($('#location-select').val()) setHashFromForm();
     });
 
     $('#search_form select').change(function(){setHashFromForm()});
@@ -281,6 +282,7 @@ function executeSearch(newHash, oldHash){
     if(newHash=='' && !oldHash) return;  //blank form loaded
     var $searchingOverlay = $('.searching-overlay').show();
     $('.tooltip').remove();
+    hideCompanyHints();
     
     const label = 'EFTS ajax call';
     console.time(label);
@@ -304,6 +306,7 @@ function executeSearch(newHash, oldHash){
         type: 'POST',
         url: 'https://search.publicdata.guru/search-index',
         success: function (data, status) {
+            hideCompanyHints();
             let end = new Date();
             console.log('successfully talked to Lambda function!');
             console.timeEnd(label);
@@ -357,6 +360,7 @@ function executeSearch(newHash, oldHash){
         },
         error: function (jqXHR, textStatus, errorThrown) {
             console.log(textStatus);
+            hideCompanyHints();
             $searchingOverlay.hide();
             throw(errorThrown);
         }
@@ -468,8 +472,11 @@ function highlightMatchingPhases(text, phrases, isMarkupLanguage){
 function previewFile(evt){
     if(evt) evt.preventDefault();
     var $a = $(this),
-        cik = extractCIK($a.closest('tr').find('.name').html()),
+        cik = extractCIK($a.closest('tr').find('.name').text()),
+        fileType = $a.text(),
         adsh = $a.attr('data-adsh'),
+        form = $a.closest('tr').find('.form').text(),
+        fileDate = $a.closest('tr').find('.filed').text(),
         fileName = $a.attr('data-file-name'),
         domain = 'https://www.sec.gov',
         submissionRoot = domain + '/Archives/edgar/data/' + cik + '/' + adsh.replace(/-/g,'') + '/' ,
@@ -504,7 +511,7 @@ function previewFile(evt){
             }
             if(keyPhrases && ['txt','xml','htm','html'].indexOf(ext)!=-1){
                 $('#previewer h4.modal-title strong').html(hashValues.q);
-                $('#previewer .modal-file-name').html(fileName);
+                $('#previewer .modal-file-name').html((form!=fileType?fileType+ ' of ':'') + form + ' filed ('+fileDate+')');
                 $('#previewer h4.modal-title span.find-counter').html('<span id="showing-highlight">1</span> of '+ $('span.sect-efts-search-match-khjdickkwg').length);
                 $('#previewer h4.modal-title').show();
             } else {
