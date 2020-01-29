@@ -6,11 +6,11 @@ var companyTicker = {
     TICKER:1,
     COMPANY:2
 };
-
+var $ = jQuery.noConflict();
 $(document).ready(function(){
     //add key press to capture CR
     $('#global-search-box')
-        .on('keydown', function(event){
+        .on('keyup', function(event){
            if(event.keyCode==13 || event.keyCode==27){  //return or ESC
                hideCompanyHints();
            } else {
@@ -22,8 +22,7 @@ $(document).ready(function(){
             '<div class="rel-none container"><div class="entity-hints border border-dark border-top-0 rounded-bottom">' +
             '<table width="100%" class="table table-hover entity-hints"></table>' +
             '</div></div>')
-        .closest('.search-box-container')
-        .css('position','relative');
+        .closest('.search-box-container');
     //hack because Fontastic not installed on PublicData.guru
     $('div.search-box-container span.button-label')
         .removeClass('fa-search')
@@ -56,7 +55,7 @@ function getCompanyHints(control, keysTyped){
                     for(var h=0;h<hints.length;h++){
                         const CIK = hints[h]._id,
                             entityName = hints[h]._source.entity,
-                            href = 'https://www.sec.gov/cgi-bin/browse-edgar?CIK='+CIK+'&Find=Search&owner=exclude&action=getcompany';
+                            href = 'smartSearchCompanyLanding.php?CIK='+CIK;
                         hintDivs.push('<tr class="hint" data="'+ entityName + ' (CIK '+formatCIK(CIK)+')"><td class="hint-entity">'
                             + '<a href="'+href+'">'+(entityName||'').replace(rgxKeysTyped, '<b>$1</b>')+'</a>'
                             + '</td><td class="hint-cik"><a href="'+href+'">' + ((' <i>CIK '+ formatCIK(CIK)+'</i>')||'')+'</a></td></tr>');

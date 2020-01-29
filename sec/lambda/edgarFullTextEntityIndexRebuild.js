@@ -82,7 +82,7 @@ const type = '_bulk';
             bulkInsertAPICommands.push(`{"create": { "_index" : "${index}", "_id" : "${entityRecords.data[i].cik}" } }`);
             bulkInsertAPICommands.push('{"entity": "'+cleanJSONStrings(entityRecords.data[i].name)
                 + (entityRecords.data[i].tickers?' ('+cleanJSONStrings(entityRecords.data[i].tickers)+')':'') + '",'
-                + '"tickers": "' + cleanJSONStrings(entityRecords.data[i].tickers) + '",'
+                + (entityRecords.data[i].tickers?'"tickers": "' + cleanJSONStrings(entityRecords.data[i].tickers) + '",':'')
                 + '"rank": '+ entityRecords.data[i].rank + '}');
         }
         bulkInsertAPICommands.push('');  //creates terminal newline in .join below

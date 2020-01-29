@@ -1,8 +1,9 @@
-// search EFT Lambda function is exposed at https://search.publicdata.guru/edgar via the APIGateway to the internet and
-// safely allows *.sec.gov web pages to access the search API of the AWS ElasticSearch service, which maintains an index
-// of 10 years of EDGAR document text.
-// The APIGateways disallows CORS (cross origin scripting), limited availability to sec.gov web pages.  The Lambda performs
-// input validation and provides/limits external access to only the ElasticSearch search API.
+// search EFT Lambda function is exposed at https://search.publicdata.guru/search-index via the APIGateway to the internet and
+// safely allows *.sec.gov web pages to access specific parts of the search API of the AWS ElasticSearch service, which
+// maintains an index of 10 years of EDGAR document texts.
+
+// The APIGateways disallows CORS (cross origin scripting), limiting availability of the service to sec.gov web pages.
+// The Lambda performs input validation and provides/limits external access to only the ElasticSearch search API.
 
 // estimated cost of Lambda based on current usage of 600,000 searches per month:
 // 128MB Lambda @ $0.000000208/100ms * 200ms/search * 600,000 search / month = $0.24 / month
@@ -30,16 +31,18 @@ exports.searchEFTS = async (r, context) => {
             "query": {
                 "bool": {
                     "should": [
-                        {"match": {"entity": {
-                                    "query": r.keysTyped,
-                                    "operator": "and"}
+                        {   "match": {"entity": {
+                                "query": r.keysTyped,
+                                "operator": "and"}
                             }
                         },
-                        {"match": {"tickers": {
-                                    "query": r.keysTyped,
-                                    "operator": "and",
-                                    "boost": 10}
+                        {   "match": {"tickers": {
+                                "query": r.keysTyped,
+                                "operator": "and",
+                                "boost": 100}
                             }
+                        },
+                        {   "exists": {"field": "tickers", "boost":10}
                         },
                      ]
             }},

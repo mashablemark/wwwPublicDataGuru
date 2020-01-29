@@ -429,6 +429,9 @@ process.on('message', (processInfo) => {
         submission.readState = READ_STATES.MESSAGED_PARENT;
         readInterface.close();
         stream.close();
+        //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
+        //console.log(result);
+        for(let i=0;i<indexPromises.length;i++){ let z = await indexPromises[i]}
         indexPromises.push(common.runQuery(`update efts_submissions s, 
             (select count(*) as files_indexed, sum(length_indexed) as bytes_index from efts_submissions_files where adsh='${submission.adsh}') f 
             set s.last_indexed=now(), s.files_indexed=f.files_indexed, s.bytes_index=f.bytes_index where s.adsh = '${submission.adsh}'`));
@@ -445,9 +448,6 @@ process.on('message', (processInfo) => {
             processNum: processInfo.processNum,
             processTime: (new Date()).getTime()-start,
         };
-        //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
-        //console.log(result);
-        for(let i=0;i<indexPromises.length;i++){ let z = await indexPromises[i]}
         process.send(result);
     }
 });
