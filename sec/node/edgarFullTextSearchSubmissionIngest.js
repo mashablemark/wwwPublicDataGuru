@@ -51,14 +51,37 @@ const submissionsIndex = 'edgar_file';
 const type = '_doc';
 
 //const es = new AWS.ES({apiVersion: '2015-01-01'});
-const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
-const rgxTagsAndExtraSpaces = /([\n\s]*<[^>]+>[\n\s]*|[\n\s]{2,})+/gm;  //removes html and xml tags and extra white space
+//const rgxXML = /<xml>[.\s\S]*<\/xml>/im;
+//const rgxTagsAndExtraSpaces = /([\n\s]*<[^>]+>[\n\s]*|[\n\s]{2,})+/gm;  //removes html and xml tags and extra white space
 const rgxTagsExtraSpacesAndNumbers = /([\n\s]*(<[^>]+>|[\n\s]{2,}|-?\$?-?\b[0-9,\.]+\b)[\n\s]*)+/gm;  //removes number words (but not alphanumeric words!) in addition to html and xml tags and extra white space
 const rgxEncodedTagsExtraSpacesAndNumbers =/([\n\s]*(&lt;.+?&gt;|<[^>]+>|[\n\s]{2,}|-?\$?-?\b[0-9,\.]+\b)[\n\s]*)+/gm;;  //removes number words (but not alphanumeric words!) in addition to html and xml tags and html encoded tags embedded in XML values and extra white space
 const rgxExtraSpacesAndNumbers = /([\n\s]*([\n\s-+\.]{2,}|-?\$?-?\b[0-9,\.]+\b)[\n\s]*)+/gm;  //removes number words, repeating: white space ....  -----
-const rgxExtraSpaces = /(\s{2,}|\.{2,})/mg; //spaces, ....., -----, _____
-const rgxTrim = /^\s+|\s+$/g;  //used to replace (trim) leading and trailing whitespaces include newline chars
-const lowChatterMode = true;
+//const rgxExtraSpaces = /(\s{2,}|\.{2,})/mg; //spaces, ....., -----, _____
+
+//preprocessors:
+function removeWhiteSpacesAndNumbers(text){return text.replace(rgxExtraSpacesAndNumbers, ' ');}
+function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
+function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
+
+const q = (val) => { return common.q(val, true) };  //shortcut clean sql string and add quote (no following comma)
+const indexedFileTypes = {
+        htm: {indexable: true, process: removeTags},
+        html: {indexable: true, process: removeTags},
+        xml: {indexable: true, process: decodeAndRemoveTags},
+        txt: {indexable: true, process: removeWhiteSpacesAndNumbers},
+        pdf: {indexable: false},  //todo: indexable PDFs
+        gif: {indexable: false},
+        jpg: {indexable: false},
+        png: {indexable: false},
+        fil: {indexable: false},
+        xsd: {indexable: false},  //eg. https://www.sec.gov/Archives/edgar/data/940944/000094094419000005
+        js: {indexable: false}, //show.js in 0000940944-19-000005.nc file
+        css: {indexable: false}, //report.css in 0000940944-19-000005.nc file
+        xlsx: {indexable: false}, //.eg https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+        zip: {indexable: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+        json: {indexable: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
+        paper: {indexable: false}  //todo: verify paper is not indexable
+    };
 const READ_STATES = {
         INIT: 'INIT',
         DOC_HEADER: 'HEAD',
@@ -81,7 +104,6 @@ let start;
 
 process.on('message', (processInfo) => {
     //debug: console.log('child get the message:', processInfo);
-    let indexedByteCount = 0;
     submissionCount++;
     start = (new Date()).getTime();
     //if(!processNum)console.log('starting up process '+processInfo.processNum);
@@ -95,32 +117,11 @@ process.on('message', (processInfo) => {
         console: false
     });
 
-    //preprocessors:
-    function removeWhiteSpacesAndNumbers(text){return text.replace(rgxExtraSpacesAndNumbers, ' ');}
-    function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
-    function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
-    function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
 
 
-    const indexedFileTypes = {
-        htm: {indexable: true, process: removeTags},
-        html: {indexable: true, process: removeTags},
-        xml: {indexable: true, process: decodeAndRemoveTags},
-        txt: {indexable: true, process: removeWhiteSpacesAndNumbers},
-        pdf: {indexable: false},  //todo: indexable PDFs
-        gif: {indexable: false},
-        jpg: {indexable: false},
-        png: {indexable: false},
-        fil: {indexable: false},
-        xsd: {indexable: false},  //eg. https://www.sec.gov/Archives/edgar/data/940944/000094094419000005
-        js: {indexable: false}, //show.js in 0000940944-19-000005.nc file
-        css: {indexable: false}, //report.css in 0000940944-19-000005.nc file
-        xlsx: {indexable: false}, //.eg https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
-        zip: {indexable: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
-        json: {indexable: false}, //https://www.sec.gov/Archives/edgar/data/0000940944/000094094419000005
-        paper: {indexable: false}  //todo: verify paper is not indexable
-    };
-    submission = { //module level scope to be able to report out when killed
+    const indexPromises = [],
+        dbPromises = [];
+    submission = { //submission has module level scope to be able to report out when killed
         entities: [],
         ciks: [],
         names: [],
@@ -134,10 +135,9 @@ process.on('message', (processInfo) => {
         indexState: INDEX_STATES.FREE,
         indexed: false,
     };
-    const indexPromises = [];
     let entity,
         address,
-        ext = false,
+        indexedByteCount = 0,
         indexedDocumentCount = 0;
 
     readInterface.on('line', async function(line) {
@@ -184,14 +184,15 @@ process.on('message', (processInfo) => {
                         if(city || state) submission.businessLocations.push(city + (city && state?', ':'') +state );
                     }
                 }
+                writeSubmissionHeaderRecords();  //insert queries run async and promises pushed onto dbPromises array
                 submission.readState = READ_STATES.DOC_HEADER;
             }
         }
 
         if (submission.readState == READ_STATES.DOC_FOOTER) { //ordered above the DOC_HEADER processing section to add new submission.docs on new <DOCUMENT>
             if (tLine == '<DOCUMENT>') submission.readState = READ_STATES.DOC_HEADER;  //another doc starting
-            //note: skips over '</DOCUMENT>' line
-            if (tLine == '</SUBMISSION>') submission.readState = READ_STATES.READ_COMPLETE; //end fo submission!
+            //note: '</DOCUMENT>' line in DOCUMENT footer is ignored
+            if (tLine == '</SUBMISSION>') submission.readState = READ_STATES.READ_COMPLETE; //end of submission!
         }
 
         if (submission.readState == READ_STATES.DOC_BODY) {  //ordered above the DOC_HEADER processing section to avoid fall through of <TEXT>
@@ -201,7 +202,7 @@ process.on('message', (processInfo) => {
                 submission.docs[d].state = READ_STATES.READ_COMPLETE;
                 //file complete; send to ElasticSearch if not already processing a previous file
                 if(submission.indexState == INDEX_STATES.FREE) { //will only be free if all indexable docs (isArray(doc.line) && state==READ_COMPLETE) in submission.docs have been indexed;
-                    indexPromises.push(indexWithElasticSearch(d));
+                    indexPromises.push(indexWithElasticSearch(d)); //index the document and update th doc state and the submission state
                 }
             } else {
                 if (submission.docs[d].lines && tLine.length) { //determined above to have a valid ext and be indexable (and not blank)
@@ -249,6 +250,7 @@ process.on('message', (processInfo) => {
                 }
             }
         }
+
         if (submission.readState == READ_STATES.READ_COMPLETE) {
             const d = submission.docs.length - 1;
             if(submission.indexed == d && (submission.docs[d].state == INDEX_STATES.INDEXED || submission.docs[d].state == INDEX_STATES.SKIPPED || submission.docs[d].state == INDEX_STATES.INDEX_FAILED )){
@@ -257,159 +259,149 @@ process.on('message', (processInfo) => {
         }
     });
 
-    async function indexWithElasticSearch(d) {
-        if(submission.docs[d].state == READ_STATES.READ_COMPLETE){
-            submission.indexState = INDEX_STATES.INDEXING;
-            submission.indexed = d;
-            let indexedText;
-            if(submission.docs[d].lines && submission.docs[d].lines.length){
-                const fileTypeProcessor = indexedFileTypes[submission.docs[d].fileExtension].process;
-                indexedText = fileTypeProcessor ? fileTypeProcessor(submission.docs[d].lines.join('\n')) : submission.docs[d].lines.join('\n');
-                submission.docs[d].lengthIndexed = indexedText.length;
+    function writeSubmissionHeaderRecords(){
+        dbPromises.push(common.runQuery(`insert into efts_submissions (adsh, form, filedt) 
+            values(${q(submission.adsh)}, ${q(submission.form)}, ${q(submission.filingDate)})
+            on duplicate key update last_indexed = null`));
+        for(let i=0;i<submission.entities.length;i++){
+            let e = submission.entities[i];
+            //type field values: OC=operating co; IC=invest co, RP=reporting person
+            dbPromises.push(common.runQuery(`insert into efts_entities (cik,name,state_inc,type,updatedfromadsh) 
+                values(${e.cik},${q(e.name)},${q(e.incorporationState)}, ${q(e.type)}, ${q(submission.adsh)})
+                on duplicate key update name=${q(e.name)}`));
+            dbPromises.push(common.runQuery(`insert ignore into efts_submissions_entities (cik, adsh) 
+            values(${e.cik},${q(submission.adsh)})`));
             }
-            if(submission.docs[d].lengthIndexed && submission.docs[d].lengthIndexed > 1){ //process else skip
-                submission.docs[d].lengthRaw += submission.docs[d].lines.length;  //account for carriage returns
-                submission.docs[d].state = INDEX_STATES.INDEXING;
-                readInterface.pause();  //does not immediately stop the line events.  A few more might come, but this stops the torrent
-                let doc_textLength = 0;
-                //console.log(submission.docs[d].lines);
-                for(let i=0;i<submission.docs[d].lines.length;i++) doc_textLength += submission.docs[d].lines[i].length;
-                //console.log(`P${processNum} about to index a doc`);
-                const startIndexingTime = (new Date()).getTime();
+    }
 
-                let request = new AWS.HttpRequest(endpoint, region);
-                request.method = 'PUT';
-                request.path += `${submissionsIndex}/${type}/${submission.adsh}:${submission.docs[d].fileName}`;
-                request.body = JSON.stringify({  //try not to create unnecessary copies of the document text in memory
-                    doc_text: indexedText,
-                    //adsh: submission.adsh,  //embedded in ID = REDUNDANT FIELD
-                    //file_name: submission.docs[d].fileName,  //embedded in ID = REDUNDANT FIELD
-                    adsh: submission.adsh,
-                    file_type: submission.docs[d].fileType,
-                    sequence: submission.docs[d].fileSequence,
-                    display_names: submission.displayNames,
-                    file_description: submission.docs[d].fileDescription,
-                    film_num: submission.docs[d].filmNumber,
-                    file_num: submission.docs[d].fileNumber,
-                    file_date: `${submission.filingDate.substr(0, 4)}-${submission.filingDate.substr(4, 2)}-${submission.filingDate.substr(6, 2)}`,
-                    sics: submission.sics,
-                    ciks: submission.ciks,
-                    form: submission.form,
-                    root_form: submission.form.replace('/A',''),
-                    inc_states: submission.incorporationStates,
-                    biz_states: submission.businessStates, //searchable
-                    biz_locations:  submission.businessLocations,  //for display; not searchable
-                });
-                //console.log(JSON.parse(request.body));
-                request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
-                request.headers['Content-Type'] = 'application/json';
-                // Content-Length is only needed for DELETE requests that include a request body
-                var credentials = new AWS.EnvironmentCredentials('AWS');
-                var signer = new AWS.Signers.V4(request, 'es');
-                //signer.addAuthorization(credentials, new Date());
-
-                //send to index
-                let client = new AWS.HttpClient();
-                //initialize/reinitialize file record
-                let q = (val) => { return common.q(val, true) };  //clean sql string and add quote (no following comma)
-                await common.runQuery(`insert into efts_submissions_files (adsh, sequence, filename, length_raw, length_indexed, name, description) 
-                          values (${q(submission.adsh)}, ${submission.docs[d].fileSequence}, ${q(submission.docs[d].fileName)}, ${submission.docs[d].lengthRaw}, 
-                          ${submission.docs[d].lengthIndexed}, ${q(submission.docs[d].fileType)}, ${q(submission.docs[d].fileDescription)})
-                          on duplicate key update last_indexed = null, tries=tries+1`);
-                client.handleRequest(request, {connectTimeout: 2000, timeout: 55000}, function(response) {
-                    //console.log(response.statusCode + ' ' + response.statusMessage);
-                    let chunks = [];
-                    response.on('data', function (chunk) {
-                        chunks.push(chunk);
-                    });
-                    response.on('end', async function (chunk) {
-                        if(chunk) chunks.push(chunk);
-                        try{
-                            let responseBody = chunks.join('');
-                            let esResponse = JSON.parse(responseBody);
-                            if(response.statusCode>201 || esResponse._shards.failed!=0){
-                                console.log('Bad response. statusCode: ' + response.statusCode);
-                                console.log(responseBody + ' for ' + submission.docs[d].fileName + ' in ' + submission.adsh);
-                                request.bodyTuncated = request.body.substr(0,2000);
-                                delete request.body;
-                                await common.logEvent('failed ElasticSearch submissionsIndex', JSON.stringify(request), true);
-                            } else {
-                                if(submission.docs[d].tries) console.log('success on retry #'+submission.docs[d].tries);
-                                await common.runQuery(`update efts_submissions_files  set last_indexed = now()
-                                    where adsh=${q(submission.adsh)} and sequence=${submission.docs[d].fileSequence}`);
-                                indexedByteCount = indexedByteCount + (doc_textLength || 0);
-                                indexedDocumentCount++;
-                            }
-                        } catch (e) {
-                            request.bodyTuncated = request.body.substr(0,2000);
-                            delete request.body;
-                            request.responseCode = response.statusCode;
-                            await common.logEvent('ElasticSearch submissionsIndex error', JSON.stringify(request), true);
-                        }
-                        submission.docs[d].state = INDEX_STATES.INDEXED;
-                        //the file record already written above; setting the last_indexed timestamp (from NULL) indicates success
-                        nextDoc(d);
-                    });
-                }, function(error) {
-                    console.log('Error sending data to ES: ' + error);
-                    submission.docs[d].state = INDEX_STATES.INDEX_FAILED;
-                    submission.docs[d].tries = (submission.docs[d].tries||1)+1;
-                    if(submission.docs[d].tries<=3){
-                        indexPromises.push(indexWithElasticSearch(d));
-                    } else {
-                        request.bodyTuncated = request.body.substr(0,2000);
-                        delete request.body;
-                        request.error = error;
-                        common.logEvent('ElasticSearch communication error', JSON.stringify(request));
-                        nextDoc(d);
-                    }
-                });
-                //while we are waiting for ElasticSearch callback....
-                // 1. write the efts_ table (submision, entities, files...)
-                const dbPromises = [];
-
-                if(!submission.headerWritten){ //write the header records only once per submission (skip for subsequent files & exhibits)
-                    for(let i=0;i<submission.entities.length;i++){
-                        let e = submission.entities[i];
-                        //type values: OC=operating co; IC=invest co, RP=reporting person
-                        //todo:  make the entity update into a SPROC with transaction to avoid race conditions
-                        //FIRST DB CONNECTION USES AWAIT TO SECURE THE CONNECTION FOR FOLLOWING QUERIES:
-                        let result = await common.runQuery(`select * from efts_entities where cik=${e.cik}`);
-                        if(result.data && result.data.length==0){
-                            //console.log(`inserting {q(e.name)} (${e.cik})$`);
-                            dbPromises.push(common.runQuery(`insert ignore into efts_entities (cik,name,state_inc,type,updatedfromadsh) 
-                                      values(${e.cik},${q(e.name)},${q(e.incorporationState)}, ${q(e.type)}, ${q(submission.adsh)})` ));
-                        }
-                        dbPromises.push(common.runQuery(`insert ignore into efts_submissions_entities (cik, adsh) 
-                            values(${e.cik},${q(submission.adsh)})`));
-                    }
-                    dbPromises.push(common.runQuery(`insert ignore into efts_submissions (adsh, form, filedt) 
-                        values(${q(submission.adsh)}, ${q(submission.form)}, ${q(submission.filingDate)})`));
-                    submission.headerWritten = true; //write the header only once per submission (skip for subsequent files & exhibits)
+    function indexWithElasticSearch(d) {
+        return new Promise(async (resolve, reject)=>{
+            const document = submission.docs[d];
+            let request;
+            if(document.state == READ_STATES.READ_COMPLETE || document.state == INDEX_STATES.INDEX_FAILED){
+                submission.indexState = INDEX_STATES.INDEXING;
+                submission.indexed = d;
+                let indexedText;
+                if(document.lines && document.lines.length){
+                    const fileTypeProcessor = indexedFileTypes[document.fileExtension].process;
+                    indexedText = fileTypeProcessor ? fileTypeProcessor(document.lines.join('\n')) : document.lines.join('\n');
+                    document.lengthIndexed = indexedText.length;
                 }
-                //1. collect all the db promises
-                for(let i=0;i<dbPromises.length;i++){ let z = await dbPromises[i]; }
-                // 2. check free heap size and collect garbage if heap > 1GB free
-                submission.docs[d].lines = 'removed after sending to submissionsIndex'; //but first free up any large arrays or strings
-                let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
-                if(memoryUsage.heapUsed > 0.75*1024*1024*1024) runGarbageCollection(processInfo); //if more than 0.75GB used (out of 1GB)
-                //readInterface.resume();
-                //console.log(`P${processNum} indexed a doc #${d} from submission #${submissionCount} in ${(new Date()).getTime()-startIndexingTime}ms`);
-            } else {
-                //console.log(`skipping document #${d} ${submission.docs[d].fileName} in processing of ${submission.adsh}`);
-                submission.docs[d].state = INDEX_STATES.SKIPPED;
-                nextDoc(d);
+                if(document.lengthIndexed && document.lengthIndexed > 1){ //process else skip
+                    document.lengthRaw += document.lines.length;  //account for carriage returns
+                    document.state = INDEX_STATES.INDEXING;
+                    readInterface.pause();  //does not immediately stop the line events.  A few more might come, but this stops the torrent
+                    let doc_textLength = 0;
+                    for(let i=0;i<document.lines.length;i++) doc_textLength += document.lines[i].length;
+                    //console.log(`P${processNum} about to index a doc`);
+
+                    request = new AWS.HttpRequest(endpoint, region);
+                    request.method = 'PUT';
+                    request.path += `${submissionsIndex}/${type}/${submission.adsh}:${document.fileName}`;
+                    request.body = JSON.stringify({  //try not to create unnecessary copies of the document text in memory
+                        doc_text: indexedText,
+                        //adsh: submission.adsh,  //embedded in ID = REDUNDANT FIELD
+                        //file_name: document.fileName,  //embedded in ID = REDUNDANT FIELD
+                        adsh: submission.adsh,
+                        file_type: document.fileType,
+                        sequence: document.fileSequence,
+                        display_names: submission.displayNames,
+                        file_description: document.fileDescription,
+                        film_num: document.filmNumber,
+                        file_num: document.fileNumber,
+                        file_date: `${submission.filingDate.substr(0, 4)}-${submission.filingDate.substr(4, 2)}-${submission.filingDate.substr(6, 2)}`,
+                        sics: submission.sics,
+                        ciks: submission.ciks,
+                        form: submission.form,
+                        root_form: submission.form.replace('/A',''),
+                        inc_states: submission.incorporationStates,
+                        biz_states: submission.businessStates, //searchable
+                        biz_locations:  submission.businessLocations,  //for display; not searchable
+                    });
+                    //console.log(JSON.parse(request.body));
+                    request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
+                    request.headers['Content-Type'] = 'application/json';
+                    // Content-Length is only needed for DELETE requests that include a request body
+                    var credentials = new AWS.EnvironmentCredentials('AWS');
+                    var signer = new AWS.Signers.V4(request, 'es');
+                    //signer.addAuthorization(credentials, new Date());
+
+                    //send to index
+                    let client = new AWS.HttpClient();
+                    //initialize/reinitialize file record
+                    const insertPromise = common.runQuery(`insert into efts_submissions_files (adsh, sequence, filename, length_raw, length_indexed, name, description) 
+                        values (${q(submission.adsh)}, ${document.fileSequence}, ${q(document.fileName)}, ${document.lengthRaw}, 
+                        ${document.lengthIndexed}, ${q(document.fileType)}, ${q(document.fileDescription)})
+                        on duplicate key update last_indexed = null, tries=tries+1`);
+                    client.handleRequest(request, {connectTimeout: 2000, timeout: 55000}, function(response) {
+                        //console.log(response.statusCode + ' ' + response.statusMessage);
+                        let chunks = [];
+                        response.on('data', function (chunk) {
+                            chunks.push(chunk);
+                        });
+                        response.on('end', async function (chunk) {
+                            if(chunk) chunks.push(chunk);
+                            try{
+                                let responseBody = chunks.join('');
+                                let esResponse = JSON.parse(responseBody);
+                                if(response.statusCode>201 || esResponse._shards.failed!=0){
+                                    indexFailed('Bad response. statusCode: ' + response.statusCode);
+                                } else {
+                                    if(document.tries) console.log('success on retry #'+document.tries);
+                                    await insertPromise;  //make sure record has been insert before we try to update it
+                                    dbPromises.push(common.runQuery(
+                                        `update efts_submissions_files  
+                                        set last_indexed = now()
+                                        where adsh=${q(submission.adsh)} and sequence=${document.fileSequence}`
+                                    ));
+                                    document.state = INDEX_STATES.INDEXED;
+                                    document.lines = 'removed after successful indexing'; //but first free up any large arrays or strings
+                                    indexedByteCount = indexedByteCount + (doc_textLength || 0);
+                                    indexedDocumentCount++;
+                                    //console.log(`P${processNum} indexed a doc #${d} from submission #${submissionCount} in ${(new Date()).getTime()-startIndexingTime}ms`);
+                                    nextDoc(d);
+                                    resolve({doc: d, status: 'success'});
+                                }
+                            } catch (e) {
+                                indexFailed('Bad response. statusCode: ' + response.statusCode);
+                            }
+                        });
+                    }, function(error) {
+                        indexFailed('Error sending data to ES: ' + error);
+                    });
+                    //while we are waiting for ElasticSearch callback check free heap size and collect garbage if heap > 1GB free
+                    let memoryUsage = process.memoryUsage();  //returns memory in KB for: {rss, heapTotal, heapUsed, external}
+                    if(memoryUsage.heapUsed > 0.75*1024*1024*1024) runGarbageCollection(processInfo); //if more than 0.75GB used (out of 1GB)
+                } else {
+                    //console.log(`skipping document #${d} ${document.fileName} in processing of ${submission.adsh}`);
+                    document.state = INDEX_STATES.SKIPPED;
+                    nextDoc(d);
+                    resolve({doc: d, status: 'skipped'});
+                }
             }
-        }
+            function indexFailed(reason){
+                //the file record already written above; setting the last_indexed timestamp (from NULL) indicates success
+                document.state = INDEX_STATES.INDEX_FAILED;
+                common.logEvent('ElasticSearch submissionsIndex error #'+(document.tries||1), reason, true);
+                document.tries = (document.tries||1)+1;
+                if(document.tries<=3){
+                    indexPromises.push(indexWithElasticSearch(d));
+                } else {
+                    common.logEvent('ElasticSearch submissionsIndex error #'+document.tries, request.body.substr(0,2000), true);
+                    document.lines = 'removed after indexing failure #3'; //free up memory of any large array
+                    nextDoc(d);
+                }
+                resolve({doc: d, status: 'error'});
+            }
+        });
     }
 
     function nextDoc(dLast) {
         if(submission.docs.length-1>dLast) {
-            if(submission.docs[dLast+1].state==READ_STATES.READ_COMPLETE) { //a follow on doc has been indexed
+            if(submission.docs[dLast+1].state==READ_STATES.READ_COMPLETE) { //a follow on doc has been read and is ready to be processed (indexed if it had lines)
                 indexPromises.push(indexWithElasticSearch(dLast + 1));
-            } else { //a follow on doc is being been indexed
+            } else { //a follow on doc is being read (not complete yet)
                 submission.indexState = INDEX_STATES.FREE;
-                //console.log('resuming (doc not complete)');
                 readInterface.resume();
             }
         } else {
@@ -426,16 +418,20 @@ process.on('message', (processInfo) => {
     }
     async function messageParentFinished(status){
         //console.log(`submission complete; messaging parent`);
-        submission.readState = READ_STATES.MESSAGED_PARENT;
         readInterface.close();
         stream.close();
         //console.log(`indexed form ${result.form} in ${result.processTime}ms`);
         //console.log(result);
-        for(let i=0;i<indexPromises.length;i++){ let z = await indexPromises[i]}
-        indexPromises.push(common.runQuery(`update efts_submissions s, 
-            (select count(*) as files_indexed, sum(length_indexed) as bytes_index from efts_submissions_files where adsh='${submission.adsh}') f 
-            set s.last_indexed=now(), s.files_indexed=f.files_indexed, s.bytes_index=f.bytes_index where s.adsh = '${submission.adsh}'`));
-        for(let i=0;i<indexPromises.length;i++) await indexPromises;
+        for(let i=0;i<indexPromises.length;i++) await indexPromises[i];
+        for(let i=0;i<dbPromises.length;i++) await dbPromises[i];
+        await common.runQuery(
+            `update efts_submissions
+            set last_indexed=now(), 
+            files_total=${submission.docs.length}, 
+            files_indexed=${submission.docs.reduce((count, doc)=> {return count + (doc.lengthIndexed?1:0)}, 0)}, 
+            bytes_index=${submission.docs.reduce((bytes, doc)=> {return bytes + (doc.lengthIndexed||0)}, 0)}
+            where adsh = '${submission.adsh}'`
+        );
         let result = {
             status: status,
             filePath: processInfo.path,
@@ -449,6 +445,7 @@ process.on('message', (processInfo) => {
             processTime: (new Date()).getTime()-start,
         };
         process.send(result);
+        submission.readState = READ_STATES.MESSAGED_PARENT;
     }
 });
 

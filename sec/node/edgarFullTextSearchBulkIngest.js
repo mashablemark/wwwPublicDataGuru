@@ -217,19 +217,20 @@ async function startDownloadManager(processControl, startDownloadManagerCallback
         let downloadDate, d;
         //1. check for available process slots and (and restart dead activeDownloads)
         tick++;
-        //if(tick/300 == Math.floor(tick/300)) console.log(processControl);  //write status every 5 minutes to console
+        if(tick/(30*60) == Math.floor(tick/(30*60))) console.log(processControl);  //write status every 5 minutes to console
         let downloadingCount = 0;
         for (d = 1; d <= processControl.maxQueuedDownloads; d++) {
-            if (!processControl.activeDownloads["d" + d]  || processControl.activeDownloads["d" + d].status=='504') { //start new download process
+            if (!processControl.activeDownloads["d" + d]  || processControl.activeDownloads["d" + d].status=='504'
+                || processControl.activeDownloads["d" + d].status=='untar error' || processControl.activeDownloads["d" + d].status=='download error') { //start new download process
                 downloadDate = nextWeekday();
                 if(downloadDate) {
                     console.log(downloadDate);
                     downloadingCount++;
                     downloadAndUntarDailyArchive(d, downloadDate, function(downloadControl){//callback invoked by "downloadDailyArchiveCallback" in subroutine
                         if(downloadControl.status=='untar error' || downloadControl.status=='download error'){
-                            if(!processControl.activeDownloads["d" + downloadControl.d] || downloadControl.ts != processControl.activeDownloads["d" + downloadControl.d].ts){
-                                //I was killed!  -> requeue for up to 3 retries
-                                addDayToReprocess(downloadControl.archiveDate, downloadControl.status);
+                            addDayToReprocess(downloadControl.archiveDate, downloadControl.status);  //requeue for up to 3 retries
+                            if(processControl.activeDownloads["d" + downloadControl.d] && downloadControl.ts == processControl.activeDownloads["d" + downloadControl.d].ts){
+                                delete processControl.activeDownloads["d" + downloadControl.d]; //open download process slot
                             }
                         }
                     });
