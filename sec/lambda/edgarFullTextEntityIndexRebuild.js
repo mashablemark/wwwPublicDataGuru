@@ -143,7 +143,7 @@ const type = '_bulk';
     console.log('refresing index...');
     await asyncExec(`curl -XPOST 'https://${domain}.${region}.es.amazonaws.com/${index}/_refresh'`);
     console.log('Done!  Test index from command line with:');
-    const testQuery = `{"query":{"match":{"entity":{"query":"Apple I","operator":"and"}}}}`;
+    const testQuery = '{"query":{"bool":{"must": [{"match":{"entity":"Apple"}}]}}}';
     console.log(`curl -XPOST 'https://${domain}.${region}.es.amazonaws.com/${index}/_search' -H "Content-Type: application/json" -d '${testQuery}'`);
     const endTime = new Date();
     console.log(endTime.toISOString()+': edgarFullTextEntityIndexRebuild ended');
