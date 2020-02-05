@@ -12,7 +12,8 @@ $(document).ready(function() {
 
     //configure company hints event on both keywords and company text boxes
     $('.entity')
-        .keyup(function(event){ getCompanyHints(this, $(this).val())})
+        .keyup(function(event){
+            getCompanyHints(this, $(this).val(), event.key)})
         .blur(function(evt){console.log(evt.relatedTarget)})
         .keypress(
             function(evt){console.log(evt.relatedTarget)
@@ -222,8 +223,8 @@ function extractCIK(entityName){
     return false;
 }
 
-function getCompanyHints(control, keysTyped){
-    if(keysTyped && keysTyped.trim()){
+function getCompanyHints(control, keysTyped, keyPressed){
+    if(keyPressed!='Enter' && keyPressed!='Escape' && keysTyped && keysTyped.trim()){
         const hintsURL = 'https://search.publicdata.guru/search-index';
         const label = 'ajax call to ' + hintsURL + ' for suggestion for "' + keysTyped + '"';
         console.time(label);
@@ -272,9 +273,15 @@ function hintClicked(row){
     var $row = $(row);
     $('.entity').val($(row).attr('data'));
     hideCompanyHints();
+    setHashFromForm();
 }
 function hideCompanyHints(){
     $('div.entity-hints').hide();
+}
+function showFullForm(){
+    $('#search_form .hide-on-short-form').removeClass('d-none');
+    $('#search_form .hide-on-full-form').hide();
+    $('#search_form input.entity').attr('placeholder', 'Company Name, Ticker, CIK Number or Reporter\'s last name');
 }
 
 
@@ -351,6 +358,7 @@ function executeSearch(newHash, oldHash){
                     console.log("error processing search hit:", hits[i]);
                 }
             }
+            showFullForm();
             $('#hits table tbody')
                 .html(rows.join(''))
                 .find('a.preview-file').click(previewFile);

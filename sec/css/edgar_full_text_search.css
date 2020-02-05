@@ -214,3 +214,7 @@ footer li.menu__item a {
 a.collapsed h5 i.fas.fa-angle-up.rotate-icon:before {
     content: "\f107" !important;
 }
+
+.forms-input-group{
+    display: none;
+}

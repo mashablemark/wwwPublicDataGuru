@@ -25,69 +25,79 @@
     <div class="spinner-border text-warning"></div>
 </div>
 <div  id="search_form" class="efstsearch-form">
-<h2 class="mx-auto">EDGAR Full Text Search Prototype using Elastic Search</h2>
-    <div id="form-container" class="container rounded-lg mb-4">
+    <nav class="nav nav--wide">
+        <ul class="nav__list">
+            <li class="nav__list-item">
+                <a href="guide-searching-edgar.html" class="nav__link" target="_blank" rel="noopener noreferrer">FAQ</a>
+            </li>
+            <li class="nav__list-item">
+                <a href="/search/search.htm" class="nav__link">Other Search Tools</a>
+            </li>
+        </ul>
+    </nav>
+    <h2 class="hide-on-full-form container mx-auto pt-5 mx-5">The new EDGAR advanced search gives you access to the full text of electronic filings since 1992.</h2>
+    <div id="form-container" class="container rounded-lg mb-4 pt-4">
         <form autocomplete="off">
         <div class="form-group row">
             <div class="col-sm-8">
-                <label>Company Name, Ticker, CIK Number or Reporter's last name</label>
-                <input type="text"  class="entity form-control border-onfocus" placeholder="Company name, ticker symbol, reporter last name or CIK" autocomplete="false">
+                <label for="keywords" class="d-none hide-on-short-form">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm d-none hide-on-short-form" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
+                <input id="keywords" type="text" class="company form-control border-onfocus d-none hide-on-short-form" placeholder="keywords to search on" autocomplete="false">
+                <label id="entity" class="d-none hide-on-short-form">Company Name, Ticker, CIK Number or Reporter's last name</label>
+                <input type="text"  class="entity form-control border-onfocus" placeholder="Search by Keyword, Ticker, Company Name, CIK Number or Reporter's last name" autocomplete="false">
                 <div class="rel-none container">
                     <div class="entity-hints border border-dark border-top-0 rounded-bottom">
                         <table id="asdf" class="table table-hover entity-hints"></table>
                     </div>
                 </div>
-                <label for="keywords">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
-                    <input id="keywords" type="text" class="company form-control border-onfocus" placeholder="keywords to search on" autocomplete="false">
-                <label for="category-select">Filing Type Category</label>
-                <select name="category-select" id="category-select" class="custom-select border-onfocus" autocomplete="false">
+                <label for="category-select" class="d-none hide-on-short-form">Filing Type Category</label>
+                <select name="category-select" id="category-select" class="custom-select border-onfocus d-none hide-on-short-form" autocomplete="false">
                     <option value="all" selected>all forms</option>
                     <option value="reports">Annual reports, quarterly reports, and financial statement</option>
                 </select>
-                <label for="filing-types">Filing Types</label><span id="browse-filing-types" class="browse">Browse Filing Types</span>
-                <input id="filing-types" type="text"  class="form-control border-onfocus" autocomplete="false">
+                <label for="filing-types" class="forms-input-group d-none">Filing Types</label><span id="browse-filing-types" class="forms-input-group browse d-none hide-on-short-form">Browse Filing Types</span>
+                <input id="filing-types" type="text"  class="forms-input-group form-control border-onfocus d-none hide-on-short-form" autocomplete="false">
             </div>
             <div class="col-sm-4">
-                <label for="date-range-select">Date Range</label>
-                <select name="date-range-select" id="date-range-select" class="custom-select border-onfocus" autocomplete="false">
+                <label for="date-range-select" class="d-none hide-on-short-form">Date Range</label>
+                <select name="date-range-select" id="date-range-select" class="custom-select border-onfocus d-none hide-on-short-form" autocomplete="false">
                     <option value="30d">Last 30 Days</option>
                     <option value="1y" selected>Last Year</option>
                     <option value="5y">Last 5 Years</option>
                     <option value="all">All (since 1994)</option>
                     <option value="custom">Custom</option>
                 </select>
-                <label>Custom Date Range</label>
-                <div class="input-group mb3">
-                    <div class="input-group-prepend">
-                        <input type="text" id="date-from" class="form-control border-onfocus" autocomplete="false"> <span class="mt-1 ml-3 mr-3"> to </span> <input type="text" id="date-to" class="form-control border-onfocus" autocomplete="false">
+                <label class="d-none hide-on-short-form">Custom Date Range</label>
+                <div class="input-group mb3 d-none hide-on-short-form">
+                    <div class="input-group-prepend d-none hide-on-short-form">
+                        <input type="text" id="date-from" class="form-control border-onfocus d-none hide-on-short-form" autocomplete="false"> <span class="mt-1 ml-3 mr-3"> to </span> <input type="text" id="date-to" class="form-control border-onfocus" autocomplete="false">
                     </div>
                 </div>
                 <!--label for="location-select">State</label-->
-                <div class="btn-group">
+                <div class="btn-group d-none hide-on-short-form">
                     <button type="button" class="btn dropdown-toggle" id="location-type" data-toggle="dropdown">
-                        Located
+                        Location of Pricipal Executive Offices
                     </button>
                     <div class="dropdown-menu">
                         <a class="dropdown-item location-type-option" href="#">Located</a>
                         <a class="dropdown-item location-type-option" href="#">Incorporated</a>
                     </div>
                 </div>
-                <button type="button" id="help-tips-state" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="Search for the primary location associated with a filing.  The location could be a US state or territory, a Canadian province, or a country.">?</button>
-                <select name="loction-select" id="location-select" class="custom-select border-onfocus" autocomplete="false">
+                <button type="button" id="help-tips-state" class="btn btn-primary btn-circle btn-sm d-none hide-on-short-form" data-toggle="tooltip" title="Search for the primary location associated with a filing.  The location could be a US state or territory, a Canadian province, or a country.">?</button>
+                <select name="loction-select" id="location-select" class="custom-select border-onfocus d-none hide-on-short-form mb-3" autocomplete="false">
                     <option value="all">View All</option>
                 </select>
-                <label for="sic-select">SIC Codes</label><button type="button" id="help-tips-sic-codes" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="The US Standard Industrial Classification (SIC) code system is used to classify the primary activities of a corporation.">?</button><span id="browse-sic-codes" class="browse">Browse SIC Codes</span>
-                <select name="sic-select" id="sic-select" class="custom-select border-onfocus" autocomplete="false">
+                <!--label for="sic-select">SIC Codes</label><button type="button" id="help-tips-sic-codes" class="btn btn-primary btn-circle btn-sm" data-toggle="tooltip" title="The US Standard Industrial Classification (SIC) code system is used to classify the primary activities of a corporation.">?</button><span id="browse-sic-codes" class="browse">Browse SIC Codes</span>
+                <select-- name="sic-select" id="sic-select" class="custom-select border-onfocus" autocomplete="false">
                     <option value="all">View All</option>
-                </select>
+                </select-->
                 <!--label>Display</label><button type="button" id="help-tips-insider" class="btn btn-primary btn-circle btn-sm">?</button><br />
                 <input type="checkbox" id="include-insider" class="form-conxtrol"> <label for="loction-select">Include Ownership Filings</label-->
+                <button type="submit" id="search" class="btn  border-onfocus float-right">SEARCH</button>
+                <button type="reset" id="clear" class="btn btn-light float-right mr-3">Clear All</button>
             </div>
         </div>
         <div class="form-group row">
             <div class="col">
-                <button type="reset" id="clear" class="btn btn-light">Clear All</button>
-                <button type="submit" id="search" class="btn  border-onfocus">SEARCH</button>
             </div>
         </div>
         </form>
