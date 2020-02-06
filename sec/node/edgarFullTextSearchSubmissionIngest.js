@@ -62,6 +62,9 @@ const rgxExtraSpacesAndNumbers = /([\n\s]*([\n\s-+\.]{2,}|-?\$?-?\b[0-9,\.]+\b)[
 function removeWhiteSpacesAndNumbers(text){return text.replace(rgxExtraSpacesAndNumbers, ' ');}
 function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
 function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
+function base64decode(text) {
+    let buff = new Buffer(data, 'base64');
+    fs.writeFileSync('stack-abuse-logo-out.png', buff); }
 
 const q = (val) => { return common.q(val, true) };  //shortcut clean sql string and add quote (no following comma)
 const indexedFileTypes = {
@@ -69,7 +72,7 @@ const indexedFileTypes = {
         html: {indexable: true, process: removeTags},
         xml: {indexable: true, process: decodeAndRemoveTags},
         txt: {indexable: true, process: removeWhiteSpacesAndNumbers},
-        pdf: {indexable: false},  //todo: indexable PDFs
+        pdf: {indexable: true, process: base64decode},  //todo: indexable PDFs
         gif: {indexable: false},
         jpg: {indexable: false},
         png: {indexable: false},
@@ -241,9 +244,9 @@ process.on('message', (processInfo) => {
                 if (tLine.startsWith('<SEQUENCE>')) submission.docs[d].fileSequence = tLine.substr('<SEQUENCE>'.length);
                 if (tLine == '<TEXT>') {
                     submission.readState = READ_STATES.DOC_BODY;
-                    const rootForm = submission.form.replace('/A','').toUpperCase();
+                    const rootForm = submission.form.toUpperCase().replace('/A','');
                     if(submission.docs[d].fileExtension == 'xml'
-                        && (submission.form!= submission.docs[d].fileType.toUpperCase() || !XLS_Forms[submission.docs[d].fileType.toUpperCase()])
+                        && (submission.form.toUpperCase() != submission.docs[d].fileType.toUpperCase() || !XLS_Forms[rootForm])
                         || submission.docs[d].fileDescription =='IDEA: XBRL DOCUMENT'){
                         submission.docs[d].lines = false; //only index XML file the are the primary XML document of a form with XLS transformation
                     }
