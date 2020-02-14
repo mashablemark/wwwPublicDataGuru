@@ -1,0 +1,5 @@
+rm nodejs/node_modules/common.js
+cp /var/www/html/sec/lambda/common.js nodejs/node_modules/common.js 
+zip -r common.zip nodejs/node_modules/common.js nodejs/node_modules/secure.js nodejs/node_modules/mysql nodejs/node_modules/htmlparser2 nodejs/node_modules/entities nodejs/node_modules/cheerio nodejs/node_modules/inherits nodejs/node_modules/domhandler nodejs/node_modules/domelementtype nodejs/node_modules/lodash nodejs/node_modules/parse5 nodejs/node_modules/dom-serializer nodejs/node_modules/css-select nodejs/node_modules/domutils nodejs/node_modules/nth-check nodejs/node_modules/boolbase nodejs/node_modules/css-what nodejs/node_modules/bignumber.js nodejs/node_modules/readable-stream nodejs/node_modules/core-util-is nodejs/node_modules/isarray nodejs/node_modules/process-nextick-args nodejs/node_modules/safe-buffer nodejs/node_modules/string_decoder nodejs/node_modules/safe-buffer nodejs/node_modules/util-deprecate nodejs/node_modules/safe-buffer nodejs/node_modules/sqlstring
+cp common.zip /var/www/html/sec/lambda
+
