@@ -42,6 +42,7 @@ const fs = require('fs');
 const readLine = require('readline');
 const common = require('common.js');  //custom set of common dB & S3 routines used by custom Lambda functions & Node programs
 //const pdfUtil = require('pdf-to-text'); //only extracts from file; can't pass in string
+const exec = require('child_process').exec;
 const AWS = require('aws-sdk');
 
 const region = 'us-east-1';
@@ -62,17 +63,44 @@ const rgxExtraSpacesAndNumbers = /([\n\s]*([\n\s-+\.]{2,}|-?\$?-?\b[0-9,\.]+\b)[
 function removeWhiteSpacesAndNumbers(text){return text.replace(rgxExtraSpacesAndNumbers, ' ');}
 function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
 function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
-function base64decode(text) {
-    let buff = new Buffer(data, 'base64');
-    fs.writeFileSync('stack-abuse-logo-out.png', buff); }
+function pdfToText(base64Data, processInfo) {
+    const start = new Date();
+    base64Data.shift(); //e.g.: begin 644 ex991to13da108016015_010219.pdf
+    base64Data.pop();  //e.g.: end
+
+    const fileURI = processInfo.path + 'P'+ processNum + '_' + processInfo.name.split('.')[0] + '.pdf';
+    let buff = Buffer.from(base64Data.join(''), 'base64');
+    fs.writeFileSync(fileURI, buff);
+    return new Promise(function(resolve, reject) {
+        console.log('Going to run pdftotext on: ' + fileURI);
+        console.log('System Path: ' + process.env.PATH);
+        const cmd = `./pdftotext "${fileURI}" - ` ;
+        let texts = [];
+        const child = exec(cmd);
+        // Log process stdout and stderr
+        child.stderr.on('data', function (error){
+            throw new Error(`Failed to run command: ${cmd} with error: ${error}`)
+        });
+        child.stdout.on('data', function(data) {
+            texts.push(data.toString());
+        });
+        child.on('close', function(code) {
+            console.log(`stdout result of first line in ${(new Date()).getTime()-start.getTime()}ms: ${texts[0]}`);
+            console.log(texts.join('\n'));
+            process.exit();
+            resolve(texts);
+        });
+    });
+}
+
 
 const q = (val) => { return common.q(val, true) };  //shortcut clean sql string and add quote (no following comma)
 const indexedFileTypes = {
-        htm: {indexable: true, process: removeTags},
-        html: {indexable: true, process: removeTags},
-        xml: {indexable: true, process: decodeAndRemoveTags},
-        txt: {indexable: true, process: removeWhiteSpacesAndNumbers},
-        pdf: {indexable: true, process: base64decode},  //todo: indexable PDFs
+        htm: {indexable: false, preprocessor: removeTags},
+        html: {indexable: false, preprocessor: removeTags},
+        xml: {indexable: false, preprocessor: decodeAndRemoveTags},
+        txt: {indexable: false, preprocessor: removeWhiteSpacesAndNumbers},
+        pdf: {indexable: true, postprocessor: pdfToText},  //todo: indexable PDFs
         gif: {indexable: false},
         jpg: {indexable: false},
         png: {indexable: false},
@@ -210,8 +238,8 @@ process.on('message', (processInfo) => {
             } else {
                 if (submission.docs[d].lines && tLine.length) { //determined above to have a valid ext and be indexable (and not blank)
                     submission.docs[d].lengthRaw += tLine.length;
-                    const fileTypeProcessor = indexedFileTypes[submission.docs[d].fileExtension].process;
-                    let processedLine = fileTypeProcessor ? fileTypeProcessor(tLine).trim() : tLine;
+                    const fileTypeProcessor = indexedFileTypes[submission.docs[d].fileExtension].preprocessor;
+                    let processedLine = fileTypeProcessor ? fileTypeProcessor(tLine).trim() : line;  //don't trim base64 encoded lines
                     if(processedLine.length && processedLine != ' ') submission.docs[d].lines.push(processedLine);
                 }
             }
@@ -286,8 +314,13 @@ process.on('message', (processInfo) => {
                 submission.indexed = d;
                 let indexedText;
                 if(document.lines && document.lines.length){
-                    const fileTypeProcessor = indexedFileTypes[document.fileExtension].process;
-                    indexedText = fileTypeProcessor ? fileTypeProcessor(document.lines.join('\n')) : document.lines.join('\n');
+                    const fileTypeProcessor = indexedFileTypes[document.fileExtension].preprocessor;
+                    const arrayPostprocessor =  indexedFileTypes[document.fileExtension].postprocessor;
+                    if(arrayPostprocessor) {
+                        indexedText = arrayPostprocessor(document.lines, processInfo);
+                    } else {
+                        indexedText = fileTypeProcessor ? fileTypeProcessor(document.lines.join('\n')) : document.lines.join('\n');
+                    }
                     document.lengthIndexed = indexedText.length;
                 }
                 if(document.lengthIndexed && document.lengthIndexed > 1){ //process else skip

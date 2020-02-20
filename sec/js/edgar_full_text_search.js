@@ -330,7 +330,6 @@ function executeSearch(newHash, oldHash){
             writeFilters(data, 'biz_states_filter');
             writeFilters(data, 'form_filter');
             writeFilters(data, 'entity_filter');
-            writeFilters(data, 'sic_filter');
             var hits = data.hits.hits,
                 rows = [];
             for(var i=0;i<hits.length;i++){
