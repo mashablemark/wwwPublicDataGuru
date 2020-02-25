@@ -77,14 +77,13 @@ function pdfToText(uuencodedLines, processInfo) {
     uuencodedLines.pop();   //</PDF>
     uuencodedLines.shift(); //begin 644 ex991to13da108016015_010219.pdf
     uuencodedLines.pop();  //end
-    console.log('UUE LENGTH: '+ uuencodedLines.join('\n').length);
+    //console.log('UUE LENGTH: '+ uuencodedLines.join('\n').length);
 
     const filePathRootName = processInfo.path + 'P'+ processNum + '_' + processInfo.name.split('.')[0];
     fs.writeFileSync(filePathRootName+'.pdf', uuencode.decode(uuencodedLines.join('\n')), 'binary'); //works!
     return new Promise(function(resolve, reject) {
-        console.log('Going to run pdftotext on: ' + filePathRootName);
-        //todo: find converter that works consistently
-        const cmd = `./pdftotext "${filePathRootName}.pdf"`;  //problem!!!
+        //todo: find converter that works consistently!!
+        const cmd = `./pdftotext "${filePathRootName}.pdf" -`;  //problem!!!
         let texts = [];
         const child = exec(cmd);
         // Log process stdout and stderr
@@ -95,10 +94,9 @@ function pdfToText(uuencodedLines, processInfo) {
             texts.push(data.toString());
         });
         child.on('close', function(code) {
-            console.log(`stdout result of first line in ${(new Date()).getTime()-start.getTime()}ms: ${texts[0]}`);
-            console.log(texts.join('\n'));
-            process.exit();
-            resolve(texts);
+            //console.log(`first line of text from ${filePathRootName}.pdf in ${(new Date()).getTime()-start.getTime()}ms: ${texts[0]}`);
+            //console.log(texts.join('\n'));
+            resolve(texts.join('\n'));
         });
     });
 }
@@ -106,10 +104,10 @@ function pdfToText(uuencodedLines, processInfo) {
 
 const q = (val) => { return common.q(val, true) };  //shortcut clean sql string and add quote (no following comma)
 const indexedFileTypes = {
-        htm: {indexable: false, preprocessor: removeTags},
-        html: {indexable: false, preprocessor: removeTags},
-        xml: {indexable: false, preprocessor: decodeAndRemoveTags},
-        txt: {indexable: false, preprocessor: removeWhiteSpacesAndNumbers},
+        htm: {indexable: true, preprocessor: removeTags},
+        html: {indexable: true, preprocessor: removeTags},
+        xml: {indexable: true, preprocessor: decodeAndRemoveTags},
+        txt: {indexable: true, preprocessor: removeWhiteSpacesAndNumbers},
         pdf: {indexable: true, preprocessor: uunencodePadding, postprocessor: pdfToText},  //todo: indexable PDFs
         gif: {indexable: false},
         jpg: {indexable: false},
@@ -207,7 +205,7 @@ process.on('message', (processInfo) => {
 
 
             if (tLine.startsWith('<TYPE>')) submission.form = tLine.substr('<TYPE>'.length).toUpperCase();
-            if (tLine.startsWith('<PERIOD>')) submission.form = tLine.substr('<PERIOD>'.length).toUpperCase();
+            if (tLine.startsWith('<PERIOD>')) submission.periodEnding = tLine.substr('<PERIOD>'.length).toUpperCase();
 
             if (tLine.startsWith('<FILING-DATE>')) submission.filingDate = tLine.substr('<FILING-DATE>'.length);
             if (tLine.startsWith('<ACCEPTANCE-DATETIME>')) submission.acceptanceDateTime = tLine.substr('<ACCEPTANCE-DATETIME>'.length);
@@ -327,7 +325,7 @@ process.on('message', (processInfo) => {
                     const fileTypeProcessor = indexedFileTypes[document.fileExtension].preprocessor;
                     const arrayPostprocessor =  indexedFileTypes[document.fileExtension].postprocessor;
                     if(arrayPostprocessor) {
-                        indexedText = arrayPostprocessor(document.lines, processInfo);
+                        indexedText = await arrayPostprocessor(document.lines, processInfo);
                     } else {
                         indexedText = fileTypeProcessor ? fileTypeProcessor(document.lines.join('\n')) : document.lines.join('\n');
                     }
@@ -356,6 +354,7 @@ process.on('message', (processInfo) => {
                         film_num: document.filmNumber,
                         file_num: document.fileNumber,
                         file_date: `${submission.filingDate.substr(0, 4)}-${submission.filingDate.substr(4, 2)}-${submission.filingDate.substr(6, 2)}`,
+                        period_ending: submission.periodEnding?`${submission.periodEnding.substr(0, 4)}-${submission.periodEnding.substr(4, 2)}-${submission.periodEnding.substr(6, 2)}`:null,
                         sics: submission.sics,
                         ciks: submission.ciks,
                         form: submission.form,

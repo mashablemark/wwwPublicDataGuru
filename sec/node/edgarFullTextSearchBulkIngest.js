@@ -160,6 +160,9 @@ let  eftsFileIndexMappings = {
                 "type": "keyword",
                 "index": false, // not searchable (root_form is), but needed for display of results
             },
+            "period_ending": { //returning!
+                "type": "keyword",
+            },
         }
     }
 };
