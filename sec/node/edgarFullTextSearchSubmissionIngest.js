@@ -44,6 +44,8 @@ const common = require('common.js');  //custom set of common dB & S3 routines us
 //const pdfUtil = require('pdf-to-text'); //only extracts from file; can't pass in string
 const exec = require('child_process').exec;
 const AWS = require('aws-sdk');
+const uuencode = require('uuencode');
+//const uue = require('uue'); //npm install uue
 
 const region = 'us-east-1';
 const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
@@ -60,21 +62,29 @@ const rgxExtraSpacesAndNumbers = /([\n\s]*([\n\s-+\.]{2,}|-?\$?-?\b[0-9,\.]+\b)[
 //const rgxExtraSpaces = /(\s{2,}|\.{2,})/mg; //spaces, ....., -----, _____
 
 //preprocessors:
-function removeWhiteSpacesAndNumbers(text){return text.replace(rgxExtraSpacesAndNumbers, ' ');}
-function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ');}
-function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ');}
-function pdfToText(base64Data, processInfo) {
+function removeWhiteSpacesAndNumbers(text){return text.replace(rgxExtraSpacesAndNumbers, ' ').trim();}
+function removeTags(text){return text.replace(rgxTagsExtraSpacesAndNumbers, ' ').trim();}
+function decodeAndRemoveTags(text){return text.replace(rgxEncodedTagsExtraSpacesAndNumbers, ' ').trim();}
+function uunencodePadding(text){ //critical to pad lines
+    const UUENCODE_PADDED_LINE_LENGTH = 61;
+    let paddingLength =  Math.max(0, UUENCODE_PADDED_LINE_LENGTH-text.length);
+    return text + (paddingLength?' '.repeat(paddingLength):'');
+}
+//non-standard postprocessors
+function pdfToText(uuencodedLines, processInfo) {
     const start = new Date();
-    base64Data.shift(); //e.g.: begin 644 ex991to13da108016015_010219.pdf
-    base64Data.pop();  //e.g.: end
+    uuencodedLines.shift(); //<PDF>
+    uuencodedLines.pop();   //</PDF>
+    uuencodedLines.shift(); //begin 644 ex991to13da108016015_010219.pdf
+    uuencodedLines.pop();  //end
+    console.log('UUE LENGTH: '+ uuencodedLines.join('\n').length);
 
-    const fileURI = processInfo.path + 'P'+ processNum + '_' + processInfo.name.split('.')[0] + '.pdf';
-    let buff = Buffer.from(base64Data.join(''), 'base64');
-    fs.writeFileSync(fileURI, buff);
+    const filePathRootName = processInfo.path + 'P'+ processNum + '_' + processInfo.name.split('.')[0];
+    fs.writeFileSync(filePathRootName+'.pdf', uuencode.decode(uuencodedLines.join('\n')), 'binary'); //works!
     return new Promise(function(resolve, reject) {
-        console.log('Going to run pdftotext on: ' + fileURI);
-        console.log('System Path: ' + process.env.PATH);
-        const cmd = `./pdftotext "${fileURI}" - ` ;
+        console.log('Going to run pdftotext on: ' + filePathRootName);
+        //todo: find converter that works consistently
+        const cmd = `./pdftotext "${filePathRootName}.pdf"`;  //problem!!!
         let texts = [];
         const child = exec(cmd);
         // Log process stdout and stderr
@@ -100,7 +110,7 @@ const indexedFileTypes = {
         html: {indexable: false, preprocessor: removeTags},
         xml: {indexable: false, preprocessor: decodeAndRemoveTags},
         txt: {indexable: false, preprocessor: removeWhiteSpacesAndNumbers},
-        pdf: {indexable: true, postprocessor: pdfToText},  //todo: indexable PDFs
+        pdf: {indexable: true, preprocessor: uunencodePadding, postprocessor: pdfToText},  //todo: indexable PDFs
         gif: {indexable: false},
         jpg: {indexable: false},
         png: {indexable: false},
@@ -147,8 +157,6 @@ process.on('message', (processInfo) => {
         input: stream,
         console: false
     });
-
-
 
     const indexPromises = [],
         dbPromises = [];
@@ -199,6 +207,8 @@ process.on('message', (processInfo) => {
 
 
             if (tLine.startsWith('<TYPE>')) submission.form = tLine.substr('<TYPE>'.length).toUpperCase();
+            if (tLine.startsWith('<PERIOD>')) submission.form = tLine.substr('<PERIOD>'.length).toUpperCase();
+
             if (tLine.startsWith('<FILING-DATE>')) submission.filingDate = tLine.substr('<FILING-DATE>'.length);
             if (tLine.startsWith('<ACCEPTANCE-DATETIME>')) submission.acceptanceDateTime = tLine.substr('<ACCEPTANCE-DATETIME>'.length);
             if (tLine.startsWith('<ACCESSION-NUMBER>')) submission.adsh = tLine.substr('<ACCESSION-NUMBER>'.length);
@@ -239,7 +249,7 @@ process.on('message', (processInfo) => {
                 if (submission.docs[d].lines && tLine.length) { //determined above to have a valid ext and be indexable (and not blank)
                     submission.docs[d].lengthRaw += tLine.length;
                     const fileTypeProcessor = indexedFileTypes[submission.docs[d].fileExtension].preprocessor;
-                    let processedLine = fileTypeProcessor ? fileTypeProcessor(tLine).trim() : line;  //don't trim base64 encoded lines
+                    let processedLine = fileTypeProcessor ? fileTypeProcessor(line) : line;  //don't trim base64 encoded lines
                     if(processedLine.length && processedLine != ' ') submission.docs[d].lines.push(processedLine);
                 }
             }

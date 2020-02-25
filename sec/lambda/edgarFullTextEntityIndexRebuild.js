@@ -79,7 +79,7 @@ const type = '_bulk';
         let entityRecords = await common.runQuery(`${sql} limit ${cursorIndex},${pageLength}`);
         const bulkInsertAPICommands = [];
         for (let i = 0; i < entityRecords.data.length; i++) {
-            bulkInsertAPICommands.push(`{"create": { "_index" : "${index}", "_id" : "${entityRecords.data[i].cik}" } }`);
+            bulkInsertAPICommands.push(`{"create": { "_id" : "${entityRecords.data[i].cik}" } }`);
             bulkInsertAPICommands.push('{"entity": "'+cleanJSONStrings(entityRecords.data[i].name)
                 + (entityRecords.data[i].tickers?' ('+cleanJSONStrings(entityRecords.data[i].tickers)+')':'') + '",'
                 + (entityRecords.data[i].tickers?'"tickers": "' + cleanJSONStrings(entityRecords.data[i].tickers) + '",':'')
