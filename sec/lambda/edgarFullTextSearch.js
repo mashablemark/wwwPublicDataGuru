@@ -31,12 +31,12 @@ exports.searchEFTS = async (r, context) => {
             "query": {
                 "bool": {
                     "should": [
-                        {   "match": {"entity": {
+                        {   "match": {"entity": {  //edge-ngram field of: entity_name and ticker list
                                 "query": r.keysTyped,
                                 "operator": "and"}
                             }
                         },
-                        {   "match": {"tickers": {
+                        {   "match": {"tickers": { //text (non edge-ngram) field to boost complete ticker match
                                 "query": r.keysTyped,
                                 "operator": "and",
                                 "boost": 100}
@@ -44,7 +44,14 @@ exports.searchEFTS = async (r, context) => {
                         },
                         {   "exists": {"field": "tickers", "boost":10}
                         },
-                     ]
+                     ],
+                    "must": [  //don't return stuff is absolutely nothing matches
+                        {   "match": {"entity": {
+                                    "query": r.keysTyped,
+                                    "operator": "and"}
+                            }
+                        }
+                    ]
             }},
             "from": 0,
             "size": 10, // outer hits, or books
@@ -62,6 +69,7 @@ exports.searchEFTS = async (r, context) => {
             "query": {
                 "bool": {
                     "must": [],
+                    "must_not": [],
                     "filter": []
                 },
             },
@@ -97,12 +105,11 @@ exports.searchEFTS = async (r, context) => {
                 }
             };
         }
-
-        if (r.forms && r.forms.length) query.query.bool.filter.push({"terms": {"root_form": r.forms}});
-        if (r.sics && r.sics.length) query.query.bool.filter.push({"terms": {"sics": r.sics}});
-        if (r.locationCodes && r.locationCodes.length) query.query.bool.filter.push({"terms": {[locationField]: r.locationCodes}});
+        addTerms('root_form', r.forms);
+        addTerms('sics', r.sics);
+        addTerms(locationField, r.locationCodes);
         if (r.ciks && r.ciks.length) {
-            query.query.bool.filter.push({"terms": {"ciks": r.ciks}}) ;
+            addTerms('ciks', r.ciks);
         } else {
             if(r.entityName) query.query.bool.must.push({"match": {"display_names": r.entityName}});
         }
@@ -112,10 +119,16 @@ exports.searchEFTS = async (r, context) => {
                 "hits": {"hits":[]}
             };
         }
-        if(r.q && r.q.trim().length){
-            const keywords = r.q.split(' ');
-            for (let i = 0; i < keywords.length; i++) {
-                if(keywords[i].length) query.query.bool.must.push({"match": {"doc_text": keywords[i]}});
+        const phrases = keywordStringToPhrases(r.q);  //words in double quotes and unquote words returned as phrases
+        if(phrases){
+            const keywords = r.q.trim().split(' ');
+            for (let i = 0; i < phrases.length; i++) {
+                if(phrases[i].length) {
+                    if(phrases[i][0]=='-')
+                        query.query.bool.must_not.push({"match_phrase": {"doc_text": phrases[i].substr(1)}});
+                    else
+                        query.query.bool.must.push({"match_phrase": {"doc_text": phrases[i]}});
+                }
             }
         } else {
             query.query.bool.filter.push({"term": {"sequence": {"value": 1}}});
@@ -151,7 +164,9 @@ exports.searchEFTS = async (r, context) => {
             });
             response.on('end', () => {
                 try{
-                    resolve(JSON.parse(chunks.join('')));
+                    const searchResults = JSON.parse(chunks.join(''));
+                    searchResults.query = query;
+                    resolve(searchResults);
                 } catch (e) {
                     resolve('invalid JSON in: '+(chunks.join('')));
                 }
@@ -166,7 +181,54 @@ exports.searchEFTS = async (r, context) => {
         request.write(querystring);  //send payload
         request.end(); //end the request and wait for the response (handled in callback above, which resolved the promise)
     });
+
+    function addTerms(fieldName, allTerms){
+        if(allTerms && allTerms.length){
+            let separatedTerms = {positiveTerms: [], negativeTerms: []};
+            for(let i=0;i<allTerms.length;i++){
+                if(allTerms[i].trim()[0]=='-'){
+                    separatedTerms.negativeTerms.push(allTerms[i].trim().substr(1));
+                } else {
+                    separatedTerms.positiveTerms.push(allTerms[i].trim());
+                }
+            }
+            if(separatedTerms.positiveTerms.length) query.query.bool.filter.push({"terms": {[fieldName]: separatedTerms.positiveTerms}});
+            if(separatedTerms.negativeTerms.length) query.query.bool.must_not.push({"terms": {[fieldName]: separatedTerms.negativeTerms}});
+        }
+    }
+
+    function keywordStringToPhrases(keywords){
+        if(!keywords || !keywords.length) return false;
+        keywords = keywords.replace(/\s+/,' ').trim();  //remove extra spaces
+        var phrases = [], phrase = '', inQuotes = false;
+        for(var i=0;i<keywords.length;i++){
+            switch(keywords[i]){
+                case '"':
+                    if(phrase.trim().length) {
+                        phrases.push(phrase);
+                        phrase = '';
+                    }
+                    inQuotes = !inQuotes;
+                    break;
+                case ' ':
+                    if(!inQuotes){
+                        if(phrase.length) {
+                            phrases.push(phrase);
+                            phrase = '';
+                            break;
+                        }
+                    } //else condition falls through to default
+                default:
+                    phrase += keywords[i];
+            }
+        }
+        if(phrase.trim().length) phrases.push(phrase); //final word/phrase
+        return phrases;
+    }
+
 };
+
+
 
 
 /*//////////////////////  TEST CARD  //////////////////////////////////////////////////

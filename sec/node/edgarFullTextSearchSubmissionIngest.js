@@ -71,7 +71,8 @@ function uunencodePadding(text){ //critical to pad lines
     return text + (paddingLength?' '.repeat(paddingLength):'');
 }
 //non-standard postprocessors
-function pdfToText(uuencodedLines, processInfo) {
+function pdfToText(document, processInfo) {
+    const uuencodedLines = document.lines;
     const start = new Date();
     uuencodedLines.shift(); //<PDF>
     uuencodedLines.pop();   //</PDF>
@@ -80,15 +81,17 @@ function pdfToText(uuencodedLines, processInfo) {
     //console.log('UUE LENGTH: '+ uuencodedLines.join('\n').length);
 
     const filePathRootName = processInfo.path + 'P'+ processNum + '_' + processInfo.name.split('.')[0];
-    fs.writeFileSync(filePathRootName+'.pdf', uuencode.decode(uuencodedLines.join('\n')), 'binary'); //works!
+    const tempFileName = filePathRootName + '.' + document.fileName;  //fileName has PDF extension
+    fs.writeFileSync(tempFileName, uuencode.decode(uuencodedLines.join('\n')), 'binary'); //works!
     return new Promise(function(resolve, reject) {
-        //todo: find converter that works consistently!!
-        const cmd = `./pdftotext "${filePathRootName}.pdf" -`;  //problem!!!
+        const cmd = `./text-extractor/pdftotext -q "${tempFileName}" -`;  //install directions on EC2: https://github.com/skylander86/lambda-text-extractor/blob/master/BuildingBinaries.md
         let texts = [];
         const child = exec(cmd);
         // Log process stdout and stderr
         child.stderr.on('data', function (error){
-            throw new Error(`Failed to run command: ${cmd} with error: ${error}`)
+            const text = texts.join('\n');
+            common.logEvent('pdftotext error', `${cmd} ended with error: ${error} (extracted text length=${text.length})`, true);
+            //resolve(text);
         });
         child.stdout.on('data', function(data) {
             texts.push(data.toString());
@@ -175,7 +178,9 @@ process.on('message', (processInfo) => {
     let entity,
         address,
         indexedByteCount = 0,
-        indexedDocumentCount = 0;
+        indexedDocumentCount = 0,
+        entityTickersPromise,
+        entityTickers = {};
 
     readInterface.on('line', async function(line) {
         let tLine = line.trim();
@@ -188,8 +193,6 @@ process.on('message', (processInfo) => {
                     && submission.incorporationStates.indexOf(entity.incorporationState)==-1) submission.incorporationStates.push(entity.incorporationState);
                 if (entity.sic && submission.sics.indexOf(entity.sic)==-1) submission.sics.push(entity.sic);
                 if(submission.ciks.indexOf(entity.cik) == -1) submission.ciks.push(entity.cik);
-                let displayName = `${entity.name || ''} (CIK ${entity.cik})`;
-                if(submission.displayNames.indexOf(displayName)==-1) submission.displayNames.push(displayName);
             }  //ignores <DEPOSITOR-CIK> && <OWNER-CIK> (see path analysis below)
             if (tLine.startsWith('<CIK>')) entity.cik = tLine.substr('<CIK>'.length);
             if (tLine.startsWith('<ASSIGNED-SIC>')) entity.sic = tLine.substr('<ASSIGNED-SIC>'.length);
@@ -213,16 +216,6 @@ process.on('message', (processInfo) => {
             if (tLine.startsWith('<FILE-NUMBER>')) submission.fileNumber = tLine.substr('<FILE-NUMBER>'.length);
             if (tLine.startsWith('<FILM-NUMBER>')) submission.filmNumber = tLine.substr('<FILM-NUMBER>'.length);
             if (tLine == '<DOCUMENT>') {
-                for(let i=0;i<submission.entities.length;i++){
-                    let e = submission.entities[i];
-                    let address = e.businessAddress || e.mailingAddress;
-                    if(address){
-                        let state = address.state || '';
-                        let city = common.toTitleCase(address.city||'');
-                        if(state) submission.businessStates.push(state);
-                        if(city || state) submission.businessLocations.push(city + (city && state?', ':'') +state );
-                    }
-                }
                 writeSubmissionHeaderRecords();  //insert queries run async and promises pushed onto dbPromises array
                 submission.readState = READ_STATES.DOC_HEADER;
             }
@@ -309,8 +302,13 @@ process.on('message', (processInfo) => {
                 values(${e.cik},${q(e.name)},${q(e.incorporationState)}, ${q(e.type)}, ${q(submission.adsh)})
                 on duplicate key update name=${q(e.name)}`));
             dbPromises.push(common.runQuery(`insert ignore into efts_submissions_entities (cik, adsh) 
-            values(${e.cik},${q(submission.adsh)})`));
-            }
+                values(${e.cik},${q(submission.adsh)})`));
+
+        }
+        entityTickersPromise = common.runQuery(`SELECT cik, group_concat(ticker order by length(ticker), ticker SEPARATOR ', ')  as tickers
+            FROM efts_entity_tickers 
+            WHERE cik in (${submission.ciks.join(',')}) 
+            group by cik`);
     }
 
     function indexWithElasticSearch(d) {
@@ -325,12 +323,34 @@ process.on('message', (processInfo) => {
                     const fileTypeProcessor = indexedFileTypes[document.fileExtension].preprocessor;
                     const arrayPostprocessor =  indexedFileTypes[document.fileExtension].postprocessor;
                     if(arrayPostprocessor) {
-                        indexedText = await arrayPostprocessor(document.lines, processInfo);
+                        indexedText = await arrayPostprocessor(document, processInfo);
                     } else {
                         indexedText = fileTypeProcessor ? fileTypeProcessor(document.lines.join('\n')) : document.lines.join('\n');
                     }
                     document.lengthIndexed = indexedText.length;
                 }
+                if(entityTickersPromise){ //the tickers must by gotten and the display names composed before indexing any files
+                    let entityTickerResults = await entityTickersPromise;
+                    entityTickersPromise = false;
+                    for(let row=0; row<entityTickerResults.data.length; row++){
+                        entityTickers[formatCIK(entityTickerResults.data[row].cik)] = entityTickerResults.data[row].tickers;
+                    }
+
+                    for(let i=0;i<submission.entities.length;i++){
+                        let e = submission.entities[i];
+                        let address = e.businessAddress;
+                        if(address){
+                            let state = address.state || '';
+                            let city = common.toTitleCase(address.city||'');
+                            if(state) submission.businessStates.push(state);
+                            if(city || state) submission.businessLocations.push(city + (city && state?', ':'') +state );
+                        }
+                        let displayName = `${entity.name || ''} ${entityTickers[entity.cik]? ' ('+entityTickers[entity.cik]+') ': ''} (CIK ${entity.cik})`;
+                        if(submission.displayNames.indexOf(displayName)==-1) submission.displayNames.push(displayName);
+                    }
+
+                }
+
                 if(document.lengthIndexed && document.lengthIndexed > 1){ //process else skip
                     document.lengthRaw += document.lines.length;  //account for carriage returns
                     document.state = INDEX_STATES.INDEXING;
@@ -491,6 +511,9 @@ process.on('message', (processInfo) => {
         };
         process.send(result);
         submission.readState = READ_STATES.MESSAGED_PARENT;
+    }
+    function formatCIK(unpaddedCIK){ //accept int or string and return string with padded zero
+        return '0'.repeat(10-unpaddedCIK.toString().length) + unpaddedCIK.toString()
     }
 });
 

@@ -48,7 +48,7 @@ const type = '_bulk';
             "properties": {
                 "entity": { //entity name and tickers
                     "type": "text",
-                    "analyzer": "autocomplete",
+                    "analyzer": "autocomplete",  //edge-ngram
                     "search_analyzer": "autocomplete_search"
                 },
                 "tickers": { //used to boost exact matches of ticker symbols and ciks
