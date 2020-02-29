@@ -36,54 +36,70 @@
         </ul>
     </nav>
     <h2 class="hide-on-full-form container mx-auto pt-5 mx-5">The new EDGAR advanced search gives you access to the full text of electronic filings since 1992.</h2>
+
+
     <div id="form-container" class="container rounded-lg mb-4 pt-4">
+
         <form autocomplete="off">
-        <div class="form-group row">
+
+        <div class="form-group row mb-0">
             <div class="col-sm-8">
-                <label for="keywords" class="d-none hide-on-short-form">Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm d-none hide-on-short-form" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
-                <input id="keywords" type="text" class="company form-control border-onfocus d-none hide-on-short-form" placeholder="keywords to search on" autocomplete="false">
+                <label for="keywords" class="d-none hide-on-short-form">Document Word or Phase</label><button type="button" id="help-tips-search_text" class="btn btn-primary btn-circle btn-sm d-none hide-on-short-form" data-toggle="tooltip" title="Search filings for a word or a list of words. A filing must contain all the words to return.  To search for an exact phrase, use double quote, like &quot;fiduciary product&quot;.">?</button>
+                <input id="keywords" type="text" class="company form-control border-onfocus d-none hide-on-short-form text-black" placeholder="keywords to search for in filing documents" autocomplete="false">
                 <label id="entity" class="d-none hide-on-short-form">Company Name, Ticker, CIK Number or Reporter's last name</label>
-                <input type="text"  class="entity form-control border-onfocus" placeholder="Search by Keyword, Ticker, Company Name, CIK Number or Reporter's last name" autocomplete="false">
+                <input type="text"  class="entity form-control border-onfocus text-black" placeholder="Search by Keyword, Ticker, Company Name, CIK Number or Reporter's last name" autocomplete="false">
+                <span class="hide-on-full-form float-right pt-1 pb-0 mb-0"><a href="#" id="show-full-search-form" class="text-white">+ more search options</a></span>
                 <div class="rel-none container">
                     <div class="entity-hints border border-dark border-top-0 rounded-bottom">
                         <table id="asdf" class="table table-hover entity-hints"></table>
                     </div>
                 </div>
-                <label for="category-select" class="d-none hide-on-short-form">Filing Type Category</label>
-                <select name="category-select" id="category-select" class="custom-select border-onfocus d-none hide-on-short-form" autocomplete="false">
-                    <option value="all" selected>all forms</option>
-                    <option value="reports">Annual reports, quarterly reports, and financial statement</option>
-                </select>
-                <label for="filing-types" class="forms-input-group d-none">Filing Types</label><span id="browse-filing-types" class="forms-input-group browse d-none hide-on-short-form">Browse Filing Types</span>
-                <input id="filing-types" type="text"  class="forms-input-group form-control border-onfocus d-none hide-on-short-form" autocomplete="false">
+                <div class="form-cat-select-group hide-on-short-form d-none">
+                    <label for="category-select">Filing Type Category</label>
+                    <select name="category-select" id="category-select" class="custom-select border-onfocus text-black" autocomplete="false">
+                        <option value="all" selected>all forms</option>
+                    </select>
+                </div>
+                <div class="forms-input-group hide-on-short-form">
+                    <label for="filing-types">Filing Types</label><span id="browse-filing-types" class="forms-input-group browse d-none hide-on-short-form">Browse Filing Types</span>
+                    <div class="input-group mb-3">
+                        <input  id="filing-types" type="text" class="form-control border-onfocus text-black" placeholder="">
+                        <div class="input-group-append">
+                            <button id="custom-forms-cancel" class="btn btn-primary" type="button">cancel</button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!--input id="filing-types" type="text"  class="forms-input-group form-control border-onfocus d-none hide-on-short-form text-black" autocomplete="false"-->
             </div>
             <div class="col-sm-4">
                 <label for="date-range-select" class="d-none hide-on-short-form">Date Range</label>
-                <select name="date-range-select" id="date-range-select" class="custom-select border-onfocus d-none hide-on-short-form" autocomplete="false">
+                <select name="date-range-select" id="date-range-select" class="custom-select border-onfocus d-none hide-on-short-form text-black" autocomplete="false">
                     <option value="30d">Last 30 Days</option>
                     <option value="1y" selected>Last Year</option>
                     <option value="5y">Last 5 Years</option>
                     <option value="all">All (since 1994)</option>
                     <option value="custom">Custom</option>
                 </select>
-                <label class="d-none hide-on-short-form">Custom Date Range</label>
+                <label class="d-none hide-on-short-form">&nbsp;</label>
                 <div class="input-group mb3 d-none hide-on-short-form">
                     <div class="input-group-prepend d-none hide-on-short-form">
-                        <input type="text" id="date-from" class="form-control border-onfocus d-none hide-on-short-form" autocomplete="false"> <span class="mt-1 ml-3 mr-3"> to </span> <input type="text" id="date-to" class="form-control border-onfocus" autocomplete="false">
+                        <input type="text" id="date-from" class="form-control border-onfocus d-none hide-on-short-form text-black" autocomplete="false"> <span class="mt-1 ml-3 mr-3"> to </span> <input type="text" id="date-to" class="form-control border-onfocus text-black" autocomplete="false">
                     </div>
                 </div>
                 <!--label for="location-select">State</label-->
                 <div class="btn-group d-none hide-on-short-form">
-                    <button type="button" class="btn dropdown-toggle" id="location-type" data-toggle="dropdown">
-                        Location of Pricipal Executive Offices
+                    <button type="button" class="btn dropdown-toggle" id="location-type" data-toggle="dropdown" data="located">
+                        Principal Executive Offices in
                     </button>
                     <div class="dropdown-menu">
-                        <a class="dropdown-item location-type-option" href="#">Located</a>
-                        <a class="dropdown-item location-type-option" href="#">Incorporated</a>
+                        <a class="dropdown-item location-type-option" href="#" id="located">Principal Executive Offices in</a>
+                        <a class="dropdown-item location-type-option" href="#" id="incorporated">Incorporated in</a>
                     </div>
                 </div>
                 <button type="button" id="help-tips-state" class="btn btn-primary btn-circle btn-sm d-none hide-on-short-form" data-toggle="tooltip" title="Search for the primary location associated with a filing.  The location could be a US state or territory, a Canadian province, or a country.">?</button>
-                <select name="loction-select" id="location-select" class="custom-select border-onfocus d-none hide-on-short-form mb-3" autocomplete="false">
+                <select name="loction-select" id="location-select" class="custom-select border-onfocus d-none hide-on-short-form mb-3 text-black" autocomplete="false">
                     <option value="all">View All</option>
                 </select>
                 <button type="submit" id="search" class="btn  border-onfocus float-right">SEARCH</button>
@@ -175,7 +191,7 @@
                     <div class="card-header" role="tab" id="headingFour4">
                         <a class="collapsed" data-toggle="collapse" data-parent="#accordionEx" href="#collapseFour4" aria-expanded="false" aria-controls="collapseFour4">
                             <h5 class="mb-0">
-                                Business Located In <i class="fas fa-angle-up rotate-icon"></i>
+                                Principal Executive Offices Located In <i class="fas fa-angle-up rotate-icon"></i>
                             </h5>
                         </a>
                     </div>
@@ -200,9 +216,9 @@
             <table class="table ">
                 <thead>
                     <tr>
-                        <th class="file">File</th>
-                        <th class="file">Form</th>
+                        <th class="file">Form &amp; File</th>
                         <th class="filed">Filed</th>
+                        <th class="filed">Period Ending</th>
                         <th class="name">Entity Name (CIK)</th>
                         <th class="located">Located</th>
                         <th class="incorporate">Incorporated</th>

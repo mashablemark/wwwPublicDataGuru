@@ -12,12 +12,26 @@ $(document).ready(function() {
 
     //configure company hints event on both keywords and company text boxes
     $('.entity')
-        .keyup(function(event){
-            getCompanyHints(this, $(this).val(), event.key)})
-        .blur(function(evt){console.log(evt.relatedTarget)})
-        .keypress(
-            function(evt){console.log(evt.relatedTarget)
-            });
+        .keydown(function(event) { //capture tab on keydown as focus is lost before keyup can fire
+            var code = event.keyCode || event.which;
+            if(code==9 || code == 13) $('table.entity-hints tr.selected').click();
+        })
+        .keyup(function(event){ //not reliable to capture tab key as focus has left
+            var code = event.keyCode || event.which;
+            if(code == 38 || code == 40){  //up arrow or down arrow
+                var currentSelectedIndex = $('table.entity-hints tr.selected').removeClass('selected').index(),
+                    hintCount = $('table.entity-hints tr').length,
+                    newSelectedIndex = Math.min(Math.max(currentSelectedIndex + (code==38?-1:1) ,0), hintCount-1);
+                $('table.entity-hints tr:eq('+newSelectedIndex+')').addClass('selected');
+                return;
+            }
+            if(code == 13){ //enter accepts the highlighted
+                $('table.entity-hints tr.selected').click();
+                hideCompanyHints();
+                return;
+            }
+            getCompanyHints(this, $(this).val(), event.key);
+        });
     $('#form-container').blur(hideCompanyHints);
     $('#form-container button, #form-container label, #form-container input:not(.entity)').focus(hideCompanyHints);
 
@@ -36,9 +50,18 @@ $(document).ready(function() {
     var $category = $('#category-select') 
         .html(categoryOptions.join(''))
         .change(function(event){
-            if($(this).val() !='custom') $forms.val($category.find('option:selected').attr('data'));
+            if($category.val() !='custom') {
+                $forms.val($category.find('option:selected').attr('data'));
+                $('.form-cat-select-group').slideDown();
+                $('.forms-input-group').slideUp();
+            } else {
+                $('.form-cat-select-group').slideUp();
+                $('.forms-input-group').slideDown();
+            }
         });
-
+    $('#custom-forms-cancel').click(function(){
+        $category.val('all').change();
+    });
     //configure the forms text event
     $forms.keyup(function(){ $category.val('custom'); });
 
@@ -74,6 +97,11 @@ $(document).ready(function() {
         $dateRangeSelect.val('custom')
     });
 
+    $('#show-full-search-form').click(function(evt){
+        showFullForm();
+        evt.stopPropagation();
+    });
+
     //load the SIC selector
     var optionsSIC = ['<option value="">View All</option>'], divID, start_sic, end_sic, codeSIC;
     for(i=0; i<SIC_Codes.length;i++){
@@ -94,7 +122,9 @@ $(document).ready(function() {
     $('#sic-select').html(optionsSIC.join(''));
 
     //over-ride default form submit
-    $('#form-container form').submit(setHashFromForm); //intercept form submit events; also called programmatically
+    $('#form-container form').submit(function(evt){
+        setHashFromForm();
+    }); //intercept form submit events; also called programmatically
 
     //clear button behavior
     $('#clear').click(function(){
@@ -105,6 +135,18 @@ $(document).ready(function() {
     //modal form events
     $('#highlight-previous').click(function(){showHighlight (-1)});
     $('#highlight-next').click(function(){showHighlight (1)});
+
+    $('.location-type-option ').click(function(evt){
+        evt.preventDefault(); //don't change the hash
+        var newLocationType =  $(this).attr("id"),
+            $this = $(this),
+            $locationType = $('#location-type'),
+            oldLocationType = $locationType.attr('data');
+        if(newLocationType!=oldLocationType){
+            $locationType .attr('data', this.id).html($this.html()); //change the location search type: business state vs incorporation state
+            if($('#location-select').val()) setHashFromForm();
+        }
+    });
 
     function setDatesFromRange(){
         var startDate = new Date(),
@@ -128,12 +170,6 @@ $(document).ready(function() {
         $('#date-from').val(formatDate(startDate.toLocaleDateString()));
         $('#date-to').val(formatDate(endDate.toLocaleDateString()));
     }
-
-    $('.location-type-option ').click(function(evt){
-        evt.preventDefault(); //don't change the hash
-        $('#location-type').html($(this).html()); //change the location search type: business state vs incorporation state
-        if($('#location-select').val()) setHashFromForm();
-    });
 
     $('#search_form select').change(function(){setHashFromForm()});
 
@@ -168,7 +204,7 @@ function setHashFromForm(e){
         enddt: formatDate($('#date-to').val()),
         category: $('#category-select').val(),
         sics: $('#sic-select').val(),
-        locationType: $('#location-type').html().toLowerCase(),
+        locationType: $('#location-type').attr('data'),
         locationCode: $('#location-select').val(),
         ciks: extractCIK(entityName),
         entityName: entityName,
@@ -176,7 +212,7 @@ function setHashFromForm(e){
     };
     let hashValues = [];
     for(let p in formValues){
-        if(formValues[p]) hashValues.push(p+'='+formValues[p]);
+        if(formValues[p]) hashValues.push(p+'='+encodeURIComponent(formValues[p]));
     }
     hasher.setHash(hashValues.join('&')); //this trigger the listener (= executeSearch)
     return formValues;
@@ -189,7 +225,7 @@ function loadFormFromHash(hash){
     if(hashValues.enddt) $('#date-to').val(formatDate(hashValues.enddt));
     $('#category-select').val(hashValues.category || 'all');
     $('#location-select').val(hashValues.locationCode || 'all');
-    $('#location-type').html(toTitleCase(hashValues.locationType || 'located'));
+    $('#location-type').html($('#'+(hashValues.locationType || 'located')).html());
     $('.entity').val(hashValues.entityName||'');
     $('#filing-types').val(hashValues.forms ? hashValues.forms.replace(/,/g,', ') : '');
     $('#sic-select').val(hashValues.sics||'');
@@ -246,11 +282,12 @@ function getCompanyHints(control, keysTyped, keyPressed){
                     for(var h=0;h<hints.length;h++){
                         const CIK = hints[h]._id,
                             entityName = hints[h]._source.entity;
-                        hintDivs.push('<tr class="hint" data="'+ entityName + ' (CIK '+formatCIK(CIK)+')"><td class="hint-entity">'
+                        hintDivs.push('<tr class="hint'+(h==0?' selected':'')+'" data="'+ entityName + ' (CIK '+formatCIK(CIK)+')"><td class="hint-entity">'
                             + (entityName||'').replace(rgxKeysTyped, '<b>$1</b>')
                             + '</td><td class="hint-cik">' + ((' <i>CIK '+ formatCIK(CIK)+'</i>')||'')+'</td></tr>');
                     }
-                    $('table.entity-hints').find('tr').remove().end().html(hintDivs.join('')).show().find('tr.hint')
+                    $('table.entity-hints').find('tr').remove()
+                        .end().html(hintDivs.join('')).show().find('tr.hint')
                         .click(function(evt){hintClicked(this)});
                     $('div.entity-hints').show();
                 } else {
@@ -276,7 +313,7 @@ function hintClicked(row){
     setHashFromForm();
 }
 function hideCompanyHints(){
-    $('div.entity-hints').hide();
+    $('div.entity-hints').hide().find('tr').remove();
 }
 function showFullForm(){
     $('#search_form .hide-on-short-form').removeClass('d-none');
@@ -345,10 +382,10 @@ function executeSearch(newHash, oldHash){
                     if(XLS_Forms[form]!=-1 && fileNameExt.toUpperCase()=='XML') //this is an XML file with a transformation
                         fileName = XLS_Forms[form] + '/' + fileNameMain + '.' + fileNameExt;
                     rows.push('<tr>'
-                        + '<td class="file"><a href="#0" class="preview-file" data-adsh="' + adsh + '" data-file-name="'
-                        +     fileName+'">' + fileType + '</a></td>'
-                        + '<td class="form">' + form + '</td>'
+                        + '<td class="file"><a href="#'+fileName+'" class="preview-file" data-adsh="' + adsh + '" data-file-name="'
+                        +     fileName+'">' + form + (form==fileType?'':' '+ fileType ) + '</a></td>'
                         + '<td class="filed" nowrap>' + hits[i]._source.file_date + '</td>'
+                        + '<td class="filed" nowrap>' + (hits[i]._source.period_ending||'') + '</td>'
                         + '<td class="name">' + hits[i]._source.display_names.join('<br> ') + '</td>'
                         + '<td class="biz-location">' + hits[i]._source.biz_locations.join('<br>') + '</td>'
                         + '<td class="incorporated">' + hits[i]._source.inc_states.map(function (code){return edgarLocations[code]||code}).join('<br>') + '</td>'
@@ -433,7 +470,7 @@ function formatCIK(unpaddedCIK){ //accept int or string and return string with p
 
 function keywordStringToPhrases(keywords){
     if(!keywords || !keywords.length) return false;
-    keywords = keywords.trim().replace(/\s+/,' ');  //remove extra spaces
+    keywords = keywords.replace(/\s+/,' ').trim();  //remove extra spaces
     var phrases = [], phrase = '', inQuotes = false;
     for(var i=0;i<keywords.length;i++){
         switch(keywords[i]){
@@ -446,12 +483,12 @@ function keywordStringToPhrases(keywords){
                 break;
             case ' ':
                 if(!inQuotes){
-                    if(phrase.trim().length) {
+                    if(phrase.length) {
                         phrases.push(phrase);
                         phrase = '';
                         break;
                     }
-                }
+                } //else condition falls through to default
             default:
                 phrase += keywords[i];
         }
@@ -500,7 +537,7 @@ function previewFile(evt){
             switch(ext){
                 case 'htm':
                 case 'html':
-                    html = data.substring(data.search('>', bodyOpen)+1, bodyClose-1).replace(/<img src="/gi, '<img src="'+submissionRoot);
+                    html = data.substring(data.search('>', bodyOpen)+1, bodyClose-1).replace(/<img ([^>]*)src="/gi, '<img $1 src="'+submissionRoot);
                     $('#previewer div.modal-body').html(highlightMatchingPhases(html, keyPhrases, true));
                     break;
                 case 'xml':
@@ -1710,12 +1747,9 @@ var XLS_Forms = {
 };
 
 var formCategories = [
+    {"category": "&nbsp;&nbsp;exclude Insider Equity Awards, Transactions, and Ownership (Section 16 Reports)", "forms":["-3","-4","-5"]},
     {"category": "All Annual, Periodic, and Current Reports", "forms":["1-K","1-SA","1-U","1-Z","1-Z-W","10-D","10-K","10-KT","10-Q","10-QT","11-K","11-KT","13F-HR","13F-NT","15-12B","15-12G","15-15D","15F-12B","15F-12G","15F-15D","18-K","20-F","24F-2NT","25","25-NSE","40-17F2","40-17G","40-F","6-K","8-K","8-K12G3","8-K15D5","ABS-15G","ABS-EE","ANNLRPT","DSTRBRPT","IRANNOTICE","N-30B-2","N-30D","N-CEN","N-CSR","N-CSRS","N-MFP","N-MFP1","N-MFP2","N-PX","N-Q","NPORT-EX","NSAR-A","NSAR-B","NSAR-U","NT 10-D","NT 10-K","NT 10-Q","NT 11-K","NT 20-F","QRTLYRPT","SD","SP 15D2"]},
-
-    {"category": "&nbsp;&nbsp;Operating Company Annual, Periodic, and Current Reports", "forms":["1-U","1-Z","1-Z-W","10-D","10-K","10-KT","10-Q","10-QT","11-K","11-KT","15-12B","15-12G","15-15D","15F-12B","15F-12G","15F-15D","18-K","20-F","25","25-NSE","40-17F2","40-17G","40-F","6-K","8-K","8-K12G3","8-K15D5","ABS-15G","ABS-EE","ANNLRPT","DSTRBRPT","IRANNOTICE","N-30B-2","N-30D","N-CEN","N-CSR","N-CSRS","N-MFP","N-MFP1","N-MFP2","N-PX","N-Q","NPORT-EX","NSAR-A","NSAR-B","NSAR-U","NT 10-D","NT 10-K","NT 10-Q","NT 11-K","NT 20-F","QRTLYRPT","SD","SP 15D2"]},
-    {"category": "&nbsp;&nbsp;Investment Company Annual, Periodic, and Current Reports", "forms":["1-K","1-SA","10-Q","10-QT","13F-HR","13F-NT","24F-2NT","40-17F2","40-17G","40-F","6-K","8-K","8-K12G3","8-K15D5","ABS-15G","ABS-EE","ANNLRPT","DSTRBRPT","IRANNOTICE","N-30B-2","N-30D","N-CEN","N-CSR","N-CSRS","N-MFP","N-MFP1","N-MFP2","N-PX","N-Q","NPORT-EX","NSAR-A","NSAR-B","NSAR-U","NT 10-D","NT 10-K","NT 10-Q","NT 11-K","NT 20-F","QRTLYRPT","SD","SP 15D2"]},
-
-    {"category": "Insider Equity Awards, Transactions, and Ownersip (Section 16 Reports)", "forms":["3","4","5"]},
+    {"category": "Insider Equity Awards, Transactions, and Ownership (Section 16 Reports)", "forms":["3","4","5"]},
     {"category": "Beneficial Ownership Reports", "forms":["SC 13D","SC 13G","SC14D1F"]},
     {"category": "Exempt Offerings", "forms":["1-A","1-A POS","1-A-W","253G1","253G2","253G3","253G4","D","DOS"]},
     {"category":"Registration Statements", "forms":["10-12B","10-12G","18-12B","20FR12B","20FR12G","40-24B2","40FR12B","40FR12G","424A","424B1","424B2","424B3","424B4","424B5","424B7","424B8","424H","425","485APOS","485BPOS","485BXT","487","497","497J","497K","8-A12B","8-A12G","AW","AW WD","DEL AM","DRS","F-1","F-10","F-10EF","F-10POS","F-3","F-3ASR","F-3D","F-3DPOS","F-3MEF","F-4","F-4 POS","F-4MEF","F-6","F-6 POS","F-6EF","F-7","F-7 POS","F-8","F-8 POS","F-80","F-80POS","F-9","F-9 POS","F-N","F-X","FWP","N-2","POS AM","POS EX","POS462B","POS462C","POSASR","RW","RW WD","S-1","S-11","S-11MEF","S-1MEF","S-20","S-3","S-3ASR","S-3D","S-3DPOS","S-3MEF","S-4","S-4 POS","S-4EF","S-4MEF","S-6","S-8","S-8 POS","S-B","S-BMEF","SF-1","SF-3","SUPPL","UNDER"]},

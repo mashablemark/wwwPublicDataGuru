@@ -62,7 +62,7 @@ label {
 }
 
 #clear {
-    padding: 6px 12px;
+    padding: 10px 12px;
     color: white;
     background-color: #12659c;
     border-radius: 36px;
@@ -144,6 +144,11 @@ table.entity-hints tr.hint{
 table.entity-hints tr.hint:hover{
     background-color: grey;
 }
+
+table.entity-hints tr.hint.selected{
+    background-color: lightskyblue;
+}
+
 #results{
     margin: 0;
     display: none;
@@ -215,6 +220,10 @@ a.collapsed h5 i.fas.fa-angle-up.rotate-icon:before {
     content: "\f107" !important;
 }
 
-.forms-input-group{
-    display: none;
+.text-black{
+    color: black;
+}
+
+.btn-primary{
+    background-color: #12659c;
 }
