@@ -56,6 +56,18 @@ exports.searchEFTS = async (r, context) => {
             "from": 0,
             "size": 10, // outer hits, or books
         };
+        if(r.narrow){ //required completed words to be present
+            let words = r.keysTyped.split(' ');
+            if(words.length>1){
+                words.pop(); //assume last word is still being typeed
+                query.query.bool.must.push({"match": {
+                    "entity_words": {
+                        "query": words.join(' '),
+                        "operator": "and"
+                    }
+                }});
+            }
+        }
         if(!isNaN(r.keysTyped)) query.query.bool.should.push(
             {"match": {"_id": {
                         "query": parseInt(r.keysTyped),

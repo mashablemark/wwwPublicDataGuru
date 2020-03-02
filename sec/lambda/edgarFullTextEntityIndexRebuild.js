@@ -51,6 +51,9 @@ const type = '_bulk';
                     "analyzer": "autocomplete",  //edge-ngram
                     "search_analyzer": "autocomplete_search"
                 },
+                "entity_words": { //used to find key matches of finished words (defined as having trailing space)
+                    "type": "text",
+                },
                 "tickers": { //used to boost exact matches of ticker symbols and ciks
                     "type": "text",
                 },
@@ -79,11 +82,13 @@ const type = '_bulk';
         let entityRecords = await common.runQuery(`${sql} limit ${cursorIndex},${pageLength}`);
         const bulkInsertAPICommands = [];
         for (let i = 0; i < entityRecords.data.length; i++) {
-            bulkInsertAPICommands.push(`{"create": { "_id" : "${entityRecords.data[i].cik}" } }`);
-            bulkInsertAPICommands.push('{"entity": "'+cleanJSONStrings(entityRecords.data[i].name)
-                + (entityRecords.data[i].tickers?' ('+cleanJSONStrings(entityRecords.data[i].tickers)+')':'') + '",'
-                + (entityRecords.data[i].tickers?'"tickers": "' + cleanJSONStrings(entityRecords.data[i].tickers) + '",':'')
-                + '"rank": '+ entityRecords.data[i].rank + '}');
+            let entity = entityRecords.data[i];
+            bulkInsertAPICommands.push(`{"create": { "_id" : "${entity.cik}" } }`);
+            let entityName = cleanJSONStrings(entity.name)+ (entity.tickers?' ('+cleanJSONStrings(entity.tickers)+')':'');
+            bulkInsertAPICommands.push(
+                `{"entity": "${entityName}", "entity_words": "${entityName}",`
+                + (entity.tickers?'"tickers": "' + cleanJSONStrings(entity.tickers) + '",':'')
+                + '"rank": '+ entity.rank + '}');
         }
         bulkInsertAPICommands.push('');  //creates terminal newline in .join below
 
