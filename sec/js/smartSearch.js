@@ -10,12 +10,31 @@ var $ = jQuery.noConflict();
 $(document).ready(function(){
     //add key press to capture CR
     $('#global-search-box')
+        .keydown(function(event) { //capture tab on keydown as focus is lost before keyup can fire
+            var keyCode = event.keyCode || event.which;
+            if(keyCode==9 || keyCode == 13) {
+                var $selected = $('table.entity-hints tr.hint.selected-hint');
+                if($selected.length){
+                    event.stopPropagation();
+                    $selected.find('td.hint-entity a').click();
+                }
+            }
+        })
         .on('keyup', function(event){
-           if(event.keyCode==13 || event.keyCode==27){  //return or ESC
-               hideCompanyHints();
-           } else {
-               getCompanyHints(this,$(this).val())
-           }
+            var keyCode = event.keyCode || event.which;
+            if(keyCode==27){  //return or ESC
+                hideCompanyHints();
+            } else {
+                if(keyCode!=9 && keyCode!=13 && keyCode!=38 && keyCode != 40){
+                    getCompanyHints(this, $(this).val())
+                }
+            }
+            var hintCount = $('table.entity-hints tr.hint').length;
+            if(hintCount && (keyCode == 38 || keyCode == 40)){  //up arrow or down arrow
+                var currentSelectedIndex = $('table.entity-hints tr.hint.selected-hint').removeClass('selected-hint').index()-1,
+                    newSelectedIndex = Math.min(Math.max(currentSelectedIndex + (keyCode==38?-1:1) ,0), hintCount-1);
+                $('table.entity-hints tr.hint:eq('+newSelectedIndex+')').addClass('selected-hint');
+            }
         })
         //.blur(function(){setTimeout(hideCompanyHints,500)})
         .after(
@@ -83,13 +102,12 @@ function getCompanyHints(control, keysTyped){
 }
 
 function hintClicked(row){
-    console.log('hintClicked', (new Date()).getTime());
-    var $row = $(row);
-    $('.entity').val($(row).attr('data'));
-    hideCompanyHints();
+    var a = $(row).find('a:first').get(0);
+    a.click();  //javascript event; firing the jQuery event errored out (due to conflicting libraries?)
 }
+
 function hideCompanyHints(){
-    $('div.entity-hints').hide();
+    $('div.entity-hints').hide().find('tr.hint').remove();
 }
 
 

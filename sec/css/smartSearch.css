@@ -12,7 +12,7 @@ div.entity-hints {
     background-color: white!important;
     border: darkgray thin solid!important;
     position: absolute!important;
-    top: 25px!important;
+    top: 30px!important;
     left: 40px!important;
     width: 175%!important;
     z-index: 1000!important;
@@ -23,6 +23,7 @@ div.entity-hints {
 table.entity-hints{
     width: 100%!important;
 }
+
 table.entity-hints, table.entity-hints td,  table.entity-hints th {
     border: none !important;
     padding: 5px 10px!important;
@@ -38,6 +39,9 @@ table.entity-hints tr.hint {
 }
 table.entity-hints tr.hint:hover{
     background-color: grey!important;
+}
+table.entity-hints tr.hint.selected-hint{
+    background-color: lightblue;
 }
 table.entity-hints tr:visited{
     color: #2F64B2!important;
