@@ -11,10 +11,9 @@
 //module level variables (note: these persist between handler calls when containers are reused = prevalent during high usage periods)
 var AWS = require('aws-sdk');
 const HTTPS = require('https');
+const cluster = require('edgarFullTextSearchCredentials');
 
-const region = 'us-east-1';
-const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
-const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
+const endpoint = new AWS.Endpoint(`${cluster.domain}.${cluster.region}.es.amazonaws.com`);
 const locationTypes = {
     located: "biz_states",
     incorporated: "inc_states"
@@ -158,7 +157,7 @@ exports.searchEFTS = async (r, context) => {
     const querystring = JSON.stringify(query);
     console.log(querystring); //debug only!
     const options = {
-        hostname: `${domain}.${region}.es.amazonaws.com`,
+        hostname: `${cluster.domain}.${cluster.region}.es.amazonaws.com`,
         port: 443,
         path: `/${indexToSearch}/_search`,
         method: 'POST',

@@ -6,10 +6,10 @@ const common = require('common.js');  //custom set of common dB & S3 routines us
 const exec = require('child_process').exec;
 const AWS = require('aws-sdk');
 const HTTPS = require('https');
+const cluster = require('edgarFullTextSearchCredentials');
+console.log(cluster);
 
-const region = 'us-east-1';
-const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
-const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
+const endpoint = new AWS.Endpoint(`${cluster.domain}.${cluster.region}.es.amazonaws.com`);
 const index = 'edgar_entity';
 const type = '_bulk';
 
@@ -65,8 +65,8 @@ const type = '_bulk';
     };
 
     //1. drop (if exist) and recreate the entity index (used for automcomplete suggestions)
-    await asyncExec(`curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${index}'`);
-    console.log(await asyncExec(`curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${index}' -H "Content-Type: application/json" -d '${JSON.stringify(esEntityMappings)}'`));
+    await asyncExec(`curl -XDELETE 'https://${cluster.domain}.${cluster.egion}.es.amazonaws.com/${index}'`);
+    console.log(await asyncExec(`curl -XPUT 'https://${cluster.domain}.${cluster.region}.es.amazonaws.com/${index}' -H "Content-Type: application/json" -d '${JSON.stringify(esEntityMappings)}'`));
     console.log('recreated index '+index);
     await common.runQuery(`call efts_update_ranks();`);
     console.log('updated ranks');
@@ -92,12 +92,12 @@ const type = '_bulk';
         }
         bulkInsertAPICommands.push('');  //creates terminal newline in .join below
 
-        let request = new AWS.HttpRequest(endpoint, region);
+        let request = new AWS.HttpRequest(endpoint, cluster.region);
         request.method = 'POST';
         request.path += `${index}/${type}`;
         request.body = bulkInsertAPICommands.join('\n');
         //console.log(request.body);  //DEBUG!!!!!!!!!!!!!!!!!!!
-        request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
+        request.headers['host'] = `${cluster.domain}.${cluster.region}.es.amazonaws.com`;
         request.headers['Content-Type'] = 'application/json';
 
         var credentials = new AWS.EnvironmentCredentials('AWS');
@@ -146,10 +146,10 @@ const type = '_bulk';
     }
 
     console.log('refresing index...');
-    await asyncExec(`curl -XPOST 'https://${domain}.${region}.es.amazonaws.com/${index}/_refresh'`);
+    await asyncExec(`curl -XPOST 'https://${cluster.domain}.${cluster.region}.es.amazonaws.com/${index}/_refresh'`);
     console.log('Done!  Test index from command line with:');
     const testQuery = '{"query":{"bool":{"must": [{"match":{"entity":"Apple"}}]}}}';
-    console.log(`curl -XPOST 'https://${domain}.${region}.es.amazonaws.com/${index}/_search' -H "Content-Type: application/json" -d '${testQuery}'`);
+    console.log(`curl -XPOST 'https://${cluster.domain}.${cluster.region}.es.amazonaws.com/${index}/_search' -H "Content-Type: application/json" -d '${testQuery}'`);
     const endTime = new Date();
     console.log(endTime.toISOString()+': edgarFullTextEntityIndexRebuild ended');
     console.log(Math.round(endTime.getTime() - startTime.getTime()/100)/10 + ' seconds total execution time');  //about 1 min 30 seconds for 1 years data

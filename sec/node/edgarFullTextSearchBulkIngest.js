@@ -67,24 +67,25 @@ const fs = require('fs');
 const exec = require('child_process').exec;
 const fork = require('child_process').fork;
 const common = require('common');
-const secDomain = 'https://www.sec.gov';
+const cluster = require('edgarFullTextSearchCredentials');
+console.log(cluster); //show which cluster we are using
 
-const region = 'us-east-1';
-const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
 const submissionsIndex = 'edgar_file';
 const processControl = {
+    deleteIndex: true,
     maxQueuedDownloads: 3,  //at 1GB per tar.gz file (expanding  to 10GB) and 20 seconds to download, 10s timer stay well below SEC.gov 10 requests per second limit and does not occupy too much disk space
     maxFileIngests: 4,  //internal processes to ingest local files leveraging Node's non-blocking model
     maxRetries: 3,
     retries: {},  // record of retried archive downloads / unzips
-    start: new Date("2016-01-01"),  //restart date.  If none, the lesser of the max(filedt) and 2008-01-01 is used
-    end: new Date("2020-02-27"), //if false or not set, scrape continues up to today
+    start: new Date("2019-01-01"),  //restart date.  If none, the lesser of the max(filedt) and 2008-01-01 is used
+    end: new Date("2019-01-10"), //if false or not set, scrape continues up to today
     days: [
     ], //ingest specific days (also used as retry queue) e.g. ['2013-08-12', '2013-08-14', '2013-11-13', '2013-11-15', '2014-03-04', '2014-08-04', '2014-11-14', '2015-03-31','2015-04-30', '2016-02-18', '2016-02-26', '2016-02-29', '2017-02-24', '2017-02-28', '2017-04-27','2017-05-10', '2017-08-03', '2017-08-04', '2017-08-08', '2017-10-16', '2017-10-23', '2017-10-30', '2017-11-03','2017-11-06', '2017-12-20', '2018-04-26', '2018-04-27', '2018-04-30', '2018-05-01', '2018-11-14']],
     processes: {},
     activeDownloads: {},
     directory: '/data/' //use local 75GB SSD mounted at /data instead of './dayfiles/' on full EBS
 };
+
 
 let  eftsFileIndexMappings = {
     //the "_id" (returned) which serves as the PK for the index = `${adsh}:${file_name}`
@@ -176,10 +177,11 @@ let  eftsFileIndexMappings = {
     await asyncExec("sudo chmod 777 /data");
     //2. clear the any remains of last bulk indexing / seeding in the /data directory
     await asyncExec('rm -r ' + processControl.directory + '*');
-    //3. drop (if exists) and recreate the main submissions search index
-    //    note: edgarEntity index is updated by the nightly Lambda process edgarEntityIndexRebuilder
-    await asyncExec(`curl -XDELETE 'https://${domain}.${region}.es.amazonaws.com/${submissionsIndex}'`);
-    await asyncExec(`curl -XPUT 'https://${domain}.${region}.es.amazonaws.com/${submissionsIndex}' -H "Content-Type: application/json" -d '${JSON.stringify(eftsFileIndexMappings)}'`);
+    //optional: 3. drop (if exists) and recreate the main submissions search index
+    if(processControl.deleteIndex){//    note: edgarEntity index is updated by the nightly Lambda process edgarEntityIndexRebuilder
+        await asyncExec(`curl -XDELETE 'https://${cluster.domain}.${cluster.region}.es.amazonaws.com/${submissionsIndex}'`);
+        await asyncExec(`curl -XPUT 'https://${cluster.domain}.${cluster.region}.es.amazonaws.com/${submissionsIndex}' -H "Content-Type: application/json" -d '${JSON.stringify(eftsFileIndexMappings)}'`);
+    }
     //4. start the download manager
     startDownloadManager(processControl, function () {
         //this callback is fired when download manager is completely down with all downloads

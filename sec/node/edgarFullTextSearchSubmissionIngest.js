@@ -41,15 +41,12 @@ after the last component file, the .txt archive always ends with
 const fs = require('fs');
 const readLine = require('readline');
 const common = require('common.js');  //custom set of common dB & S3 routines used by custom Lambda functions & Node programs
-//const pdfUtil = require('pdf-to-text'); //only extracts from file; can't pass in string
 const exec = require('child_process').exec;
 const AWS = require('aws-sdk');
 const uuencode = require('uuencode');
-//const uue = require('uue'); //npm install uue
+const cluster = require('edgarFullTextSearchCredentials');
 
-const region = 'us-east-1';
-const domain = 'search-edgar-wac76mpm2eejvq7ibnqiu24kka'; // e.g. search-domain.region.es.amazonaws.com
-const endpoint = new AWS.Endpoint(`${domain}.${region}.es.amazonaws.com`);
+const endpoint = new AWS.Endpoint(`${cluster.domain}.${cluster.region}.es.amazonaws.com`);
 const submissionsIndex = 'edgar_file';
 const type = '_doc';
 
@@ -359,7 +356,7 @@ process.on('message', (processInfo) => {
                     for(let i=0;i<document.lines.length;i++) doc_textLength += document.lines[i].length;
                     //console.log(`P${processNum} about to index a doc`);
 
-                    request = new AWS.HttpRequest(endpoint, region);
+                    request = new AWS.HttpRequest(endpoint, cluster.region);
                     request.method = 'PUT';
                     request.path += `${submissionsIndex}/${type}/${submission.adsh}:${document.fileName}`;
                     request.body = JSON.stringify({  //try not to create unnecessary copies of the document text in memory
@@ -384,7 +381,7 @@ process.on('message', (processInfo) => {
                         biz_locations:  submission.businessLocations,  //for display; not searchable
                     });
                     //console.log(JSON.parse(request.body));
-                    request.headers['host'] = `${domain}.${region}.es.amazonaws.com`;
+                    request.headers['host'] = `${cluster.domain}.${cluster.region}.es.amazonaws.com`;
                     request.headers['Content-Type'] = 'application/json';
                     // Content-Length is only needed for DELETE requests that include a request body
                     var credentials = new AWS.EnvironmentCredentials('AWS');
