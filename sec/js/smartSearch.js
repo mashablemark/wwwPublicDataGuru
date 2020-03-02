@@ -39,7 +39,7 @@ function getCompanyHints(control, keysTyped){
         console.time(label);
         var start = new Date();
         $.ajax({
-            data: JSON.stringify({keysTyped: keysTyped}),
+            data: JSON.stringify({keysTyped: keysTyped, narrow: true}),
             dataType: 'JSON',
             type: 'POST',
             url: hintsURL,
