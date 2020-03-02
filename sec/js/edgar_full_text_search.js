@@ -42,27 +42,62 @@ $(document).ready(function() {
 
     //load form categories and configure selection event
     var categoryOptions = ['<option value="all" data="" selected>View All</option>'];
+    var formCatTree = {};
     for(var c=0;c<formCategories.length;c++){
-        categoryOptions.push('<option value="C'+(c)+'" data="'+formCategories[c].forms.join(', ')+'">'+formCategories[c].category+'</option>');
+        categoryOptions.push('<option value="form-cat'+(c)+'" data="'+formCategories[c].forms.join(', ')+'">'+formCategories[c].category+'</option>');
+        for(var f in formCategories[c].forms) formCatTree[formCategories[c].forms[f]] = 'form-cat'+ c; //used to set classes in modal forms broswer
     }
     categoryOptions.push('<option value="custom">User Defined</option>');
     var $forms = $('#filing-types');
     var $category = $('#category-select') 
         .html(categoryOptions.join(''))
-        .change(function(event){
-            if($category.val() !='custom') {
-                $forms.val($category.find('option:selected').attr('data'));
-                $('.form-cat-select-group').slideDown();
-                $('.forms-input-group').slideUp();
-            } else {
-                $('.form-cat-select-group').slideUp();
-                $('.forms-input-group').slideDown();
-            }
-        });
+        .change(categoryChanged);
+    $('.forms-input-group').hide(); //needs to be not hide on load to allow bootstrap to calculate width of input box
     $('#custom-forms-cancel').click(function(){
         $category.val('all').change();
     });
-    //configure the forms text event
+
+    //also set the modal forms browser category selector, but leave out the 'exclude ownership' category
+    categoryOptions.pop();  //custom option at end
+    categoryOptions.splice(1,1);  //exclude the exclude insider transaction category
+    categoryOptions.push('<option value="selectall" selected>Select All</option>');
+    $('#category-filter')
+        .html(categoryOptions.join(''))
+        .change(function(){
+            var value = $(this).val();
+            var $allCheckBoxes = $('#forms-browser .form-check');
+            if(value=='selectall' || value=='all'){
+                if(value=='selectall'){
+                    $allCheckBoxes.find('input').attr('checked', 'true');  //selectall
+                } else {
+                    $allCheckBoxes.find('input').removeAttr('checked');
+                }
+                $allCheckBoxes.show();
+            } else {
+                $allCheckBoxes.hide().find('input').removeAttr('checked');
+                $allCheckBoxes.filter('.'+value).show().find('input').attr('checked', 'true');
+            }
+        });
+    //create the modal browse form's checkboxes
+    var checkBoxes = [];
+    for(var i=0;i<forms.length;i++){
+        checkBoxes.push('<div id="fcbd-'+ forms[i].form.replace(' ','_') +'" class="custom-control custom-checkbox form-check '+(formCatTree[forms[i].form]||'')+'" alt="'+forms[i].description+'">\n' +
+            '    <input type="checkbox" class="custom-control-input" id="fcb'+i+'">\n' +
+            '    <label class="custom-control-label" for="fcb'+i+'">'+forms[i].form+'</label>\n' +
+            '  </div>');
+    }
+    $('#forms-browser .modal-body').html(checkBoxes.join(''));
+    //lastly, return the select form types and trigger a search on "filter"
+    $('#custom_forms_set').click(function(){
+        var selectedForms = [];
+        $('#forms-browser .form-check input:checked').parent().find('label').each(function(){
+            selectedForms.push($(this).text())
+        });
+        $('#filing-types').val(selectedForms.join(', '));
+        setHashFromForm();  //trigger search
+    });
+
+    //set to forms category to custom when the forms field is edited
     $forms.keyup(function(){ $category.val('custom'); });
 
     //load locations selector and configure selection xevent
@@ -73,6 +108,10 @@ $(document).ready(function() {
         edgarLocations[locationsArray[i][0]] = locationsArray[i][1];
     }
     $locations.html(locationOptions.join(''));
+    //show modal on "browse filing types" click
+    $('#browse-filing-types').click(function(){
+        $('#forms-browser').modal();
+    });
 
     //configure date range selector and data pickers
     var $dateRangeSelect = $('#date-range-select').change(setDatesFromRange);
@@ -101,25 +140,6 @@ $(document).ready(function() {
         showFullForm();
         evt.stopPropagation();
     });
-
-    //load the SIC selector
-    var optionsSIC = ['<option value="">View All</option>'], divID, start_sic, end_sic, codeSIC;
-    for(i=0; i<SIC_Codes.length;i++){
-        if(SIC_Codes[i].start_sic){  //SIC division
-            divID = SIC_Codes[i].id;
-            start_sic = parseInt(SIC_Codes[i].start_sic);
-            end_sic = parseInt(SIC_Codes[i].end_sic);
-            divisionCodes[divID] = [];
-            optionsSIC.push('<option class="sic-division font-weight-bold" value="'+divID+'">'+start_sic+'-'+end_sic+' '+SIC_Codes[i].label.toUpperCase()+'</option>')
-        } else { // individual SIC classification
-            var codeSIC = parseInt(SIC_Codes[i].id),
-                label = toTitleCase(SIC_Codes[i].label);
-            sicLabels[codeSIC] = label;
-            optionsSIC.push('<option class="sic-sector" value="'+codeSIC+'">&nbsp;&nbsp;'+codeSIC+'&nbsp;'+label+'</option>');
-            if(codeSIC>=start_sic && codeSIC<=end_sic) divisionCodes[divID].push(codeSIC);
-        }
-    }
-    $('#sic-select').html(optionsSIC.join(''));
 
     //over-ride default form submit
     $('#form-container form').submit(function(evt){
@@ -171,6 +191,8 @@ $(document).ready(function() {
         $('#date-to').val(formatDate(endDate.toLocaleDateString()));
     }
 
+
+
     $('#search_form select').change(function(){setHashFromForm()});
 
     //hash event and initialization
@@ -180,6 +202,19 @@ $(document).ready(function() {
     hasher.changed.add(executeSearch); //execute search on hash change from form submit or pn navigate
     hasher.init();
 });
+
+function categoryChanged(event){
+    var $category = $('#category-select'),
+        $forms = $('#filing-types');
+    if($category.val() !='custom') {
+        $forms.val($category.find('option:selected').attr('data'));
+        $('.form-cat-select-group').slideDown();
+        $('.forms-input-group').slideUp();
+    } else {
+        $('.form-cat-select-group').slideUp();
+        $('.forms-input-group').slideDown();
+    }
+}
 
 function hashToObject(hashString){
     var hashObject = {};
@@ -229,6 +264,7 @@ function loadFormFromHash(hash){
     $('.entity').val(hashValues.entityName||'');
     $('#filing-types').val(hashValues.forms ? hashValues.forms.replace(/,/g,', ') : '');
     $('#sic-select').val(hashValues.sics||'');
+    categoryChanged();
 }
 
 function formatDate(dateOrString){
@@ -568,6 +604,12 @@ function previewFile(evt){
             showHighlight(1);
         }
     );
+}
+
+function browserForms(){
+    const $browser = $('#forms-browser').modal();
+
+
 }
 
 function showHighlight (change){
@@ -1247,464 +1289,6 @@ const forms = [
   {"form":"S-4EF","category":"Registration Statements","description":"Auto effective registration statement for securities issued in connection with the formation of a bank or savings and loan holding company in compliance with General Instruction G"}
 ];
 
-var SIC_Codes= [
-    {"id":"D1","label":"Agriculture, Forestry and Fishing","start_sic":"100","end_sic":"999"},
-    {"id":"100","label":"AGRICULTURAL PRODUCTION-CROPS"},
-    {"id":"200","label":"AGRICULTURAL PROD-LIVESTOCK & ANIMAL SPECIALTIES"},
-    {"id":"700","label":"AGRICULTURAL SERVICES"},
-    {"id":"800","label":"FORESTRY"},
-    {"id":"900","label":"FISHING, HUNTING AND TRAPPING"},
-    {"id":"D2","label":"Mining","start_sic":"1000","end_sic":"1499"},
-    {"id":"1000","label":"METAL MINING"},
-    {"id":"1040","label":"GOLD AND SILVER ORES"},
-    {"id":"1090","label":"MISCELLANEOUS METAL ORES"},
-    {"id":"1220","label":"BITUMINOUS COAL & LIGNITE MINING"},
-    {"id":"1221","label":"BITUMINOUS COAL & LIGNITE SURFACE MINING"},
-    {"id":"1311","label":"CRUDE PETROLEUM & NATURAL GAS"},
-    {"id":"1381","label":"DRILLING OIL & GAS WELLS"},
-    {"id":"1382","label":"OIL & GAS FIELD EXPLORATION SERVICES"},
-    {"id":"1389","label":"OIL & GAS FIELD SERVICES, NEC"},
-    {"id":"1400","label":"MINING & QUARRYING OF NONMETALLIC MINERALS (NO FUELS)"},
-    {"id":"D3","label":"Construction","start_sic":"1500","end_sic":"1799"},
-    {"id":"1520","label":"GENERAL BLDG CONTRACTORS - RESIDENTIAL BLDGS"},
-    {"id":"1531","label":"OPERATIVE BUILDERS"},
-    {"id":"1540","label":"GENERAL BLDG CONTRACTORS - NONRESIDENTIAL BLDGS"},
-    {"id":"1600","label":"HEAVY CONSTRUCTION OTHER THAN BLDG CONST - CONTRACTORS"},
-    {"id":"1623","label":"WATER, SEWER, PIPELINE, COMM & POWER LINE CONSTRUCTION"},
-    {"id":"1700","label":"CONSTRUCTION - SPECIAL TRADE CONTRACTORS"},
-    {"id":"1731","label":"ELECTRICAL WORK"},
-    {"id":"D4","label":"Manufacturing","start_sic":"2000","end_sic":"3999"},
-    {"id":"2000","label":"FOOD AND KINDRED PRODUCTS"},
-    {"id":"2011","label":"MEAT PACKING PLANTS"},
-    {"id":"2013","label":"SAUSAGES & OTHER PREPARED MEAT PRODUCTS"},
-    {"id":"2015","label":"POULTRY SLAUGHTERING AND PROCESSING"},
-    {"id":"2020","label":"DAIRY PRODUCTS"},
-    {"id":"2024","label":"ICE CREAM & FROZEN DESSERTS"},
-    {"id":"2030","label":"CANNED, FROZEN & PRESERVD FRUIT, VEG & FOOD SPECIALTIES"},
-    {"id":"2033","label":"CANNED, FRUITS, VEG, PRESERVES, JAMS & JELLIES"},
-    {"id":"2040","label":"GRAIN MILL PRODUCTS"},
-    {"id":"2050","label":"BAKERY PRODUCTS"},
-    {"id":"2052","label":"COOKIES & CRACKERS"},
-    {"id":"2060","label":"SUGAR & CONFECTIONERY PRODUCTS"},
-    {"id":"2070","label":"FATS & OILS"},
-    {"id":"2080","label":"BEVERAGES"},
-    {"id":"2082","label":"MALT BEVERAGES"},
-    {"id":"2086","label":"BOTTLED & CANNED SOFT DRINKS & CARBONATED WATERS"},
-    {"id":"2090","label":"MISCELLANEOUS FOOD PREPARATIONS & KINDRED PRODUCTS"},
-    {"id":"2092","label":"PREPARED FRESH OR FROZEN FISH & SEAFOODS"},
-    {"id":"2100","label":"TOBACCO PRODUCTS"},
-    {"id":"2111","label":"CIGARETTES"},
-    {"id":"2200","label":"TEXTILE MILL PRODUCTS"},
-    {"id":"2211","label":"BROADWOVEN FABRIC MILLS, COTTON"},
-    {"id":"2221","label":"BROADWOVEN FABRIC MILLS, MAN MADE FIBER & SILK"},
-    {"id":"2250","label":"KNITTING MILLS"},
-    {"id":"2253","label":"KNIT OUTERWEAR MILLS"},
-    {"id":"2273","label":"CARPETS & RUGS"},
-    {"id":"2300","label":"APPAREL & OTHER FINISHD PRODS OF FABRICS & SIMILAR MATL"},
-    {"id":"2320","label":"MEN'S & BOYS' FURNISHGS, WORK CLOTHG, & ALLIED GARMENTS"},
-    {"id":"2330","label":"WOMEN'S, MISSES', AND JUNIORS OUTERWEAR"},
-    {"id":"2340","label":"WOMEN'S, MISSES', CHILDREN'S & INFANTS' UNDERGARMENTS"},
-    {"id":"2390","label":"MISCELLANEOUS FABRICATED TEXTILE PRODUCTS"},
-    {"id":"2400","label":"LUMBER & WOOD PRODUCTS (NO FURNITURE)"},
-    {"id":"2421","label":"SAWMILLS & PLANTING MILLS, GENERAL"},
-    {"id":"2430","label":"MILLWOOD, VENEER, PLYWOOD, & STRUCTURAL WOOD MEMBERS"},
-    {"id":"2451","label":"MOBILE HOMES"},
-    {"id":"2452","label":"PREFABRICATED WOOD BLDGS & COMPONENTS"},
-    {"id":"2510","label":"HOUSEHOLD FURNITURE"},
-    {"id":"2511","label":"WOOD HOUSEHOLD FURNITURE, (NO UPHOLSTERED)"},
-    {"id":"2520","label":"OFFICE FURNITURE"},
-    {"id":"2522","label":"OFFICE FURNITURE (NO WOOD)"},
-    {"id":"2531","label":"PUBLIC BLDG & RELATED FURNITURE"},
-    {"id":"2540","label":"PARTITIONS, SHELVG, LOCKERS, & OFFICE & STORE FIXTURES"},
-    {"id":"2590","label":"MISCELLANEOUS FURNITURE & FIXTURES"},
-    {"id":"2600","label":"PAPERS & ALLIED PRODUCTS"},
-    {"id":"2611","label":"PULP MILLS"},
-    {"id":"2621","label":"PAPER MILLS"},
-    {"id":"2631","label":"PAPERBOARD MILLS"},
-    {"id":"2650","label":"PAPERBOARD CONTAINERS & BOXES"},
-    {"id":"2670","label":"CONVERTED PAPER & PAPERBOARD PRODS (NO CONTANERS\/BOXES)"},
-    {"id":"2673","label":"PLASTICS, FOIL & COATED PAPER BAGS"},
-    {"id":"2711","label":"NEWSPAPERS: PUBLISHING OR PUBLISHING & PRINTING"},
-    {"id":"2721","label":"PERIODICALS: PUBLISHING OR PUBLISHING & PRINTING"},
-    {"id":"2731","label":"BOOKS: PUBLISHING OR PUBLISHING & PRINTING"},
-    {"id":"2732","label":"BOOK PRINTING"},
-    {"id":"2741","label":"MISCELLANEOUS PUBLISHING"},
-    {"id":"2750","label":"COMMERCIAL PRINTING"},
-    {"id":"2761","label":"MANIFOLD BUSINESS FORMS"},
-    {"id":"2771","label":"GREETING CARDS"},
-    {"id":"2780","label":"BLANKBOOKS, LOOSELEAF BINDERS & BOOKBINDG & RELATD WORK"},
-    {"id":"2790","label":"SERVICE INDUSTRIES FOR THE PRINTING TRADE"},
-    {"id":"2800","label":"CHEMICALS & ALLIED PRODUCTS"},
-    {"id":"2810","label":"INDUSTRIAL INORGANIC CHEMICALS"},
-    {"id":"2820","label":"PLASTIC MATERIAL, SYNTH RESIN\/RUBBER, CELLULOS (NO GLASS)"},
-    {"id":"2821","label":"PLASTIC MATERIALS, SYNTH RESINS & NONVULCAN ELASTOMERS"},
-    {"id":"2833","label":"MEDICINAL CHEMICALS & BOTANICAL PRODUCTS"},
-    {"id":"2834","label":"PHARMACEUTICAL PREPARATIONS"},
-    {"id":"2835","label":"IN VITRO & IN VIVO DIAGNOSTIC SUBSTANCES"},
-    {"id":"2836","label":"BIOLOGICAL PRODUCTS, (NO DISGNOSTIC SUBSTANCES)"},
-    {"id":"2840","label":"SOAP, DETERGENTS, CLEANG PREPARATIONS, PERFUMES, COSMETICS"},
-    {"id":"2842","label":"SPECIALTY CLEANING, POLISHING AND SANITATION PREPARATIONS"},
-    {"id":"2844","label":"PERFUMES, COSMETICS & OTHER TOILET PREPARATIONS"},
-    {"id":"2851","label":"PAINTS, VARNISHES, LACQUERS, ENAMELS & ALLIED PRODS"},
-    {"id":"2860","label":"INDUSTRIAL ORGANIC CHEMICALS"},
-    {"id":"2870","label":"AGRICULTURAL CHEMICALS"},
-    {"id":"2890","label":"MISCELLANEOUS CHEMICAL PRODUCTS"},
-    {"id":"2891","label":"ADHESIVES & SEALANTS"},
-    {"id":"2911","label":"PETROLEUM REFINING"},
-    {"id":"2950","label":"ASPHALT PAVING & ROOFING MATERIALS"},
-    {"id":"2990","label":"MISCELLANEOUS PRODUCTS OF PETROLEUM & COAL"},
-    {"id":"3011","label":"TIRES & INNER TUBES"},
-    {"id":"3021","label":"RUBBER & PLASTICS FOOTWEAR"},
-    {"id":"3050","label":"GASKETS, PACKG & SEALG DEVICES & RUBBER & PLASTICS HOSE"},
-    {"id":"3060","label":"FABRICATED RUBBER PRODUCTS, NEC"},
-    {"id":"3080","label":"MISCELLANEOUS PLASTICS PRODUCTS"},
-    {"id":"3081","label":"UNSUPPORTED PLASTICS FILM & SHEET"},
-    {"id":"3086","label":"PLASTICS FOAM PRODUCTS"},
-    {"id":"3089","label":"PLASTICS PRODUCTS, NEC"},
-    {"id":"3100","label":"LEATHER & LEATHER PRODUCTS"},
-    {"id":"3140","label":"FOOTWEAR, (NO RUBBER)"},
-    {"id":"3211","label":"FLAT GLASS"},
-    {"id":"3220","label":"GLASS & GLASSWARE, PRESSED OR BLOWN"},
-    {"id":"3221","label":"GLASS CONTAINERS"},
-    {"id":"3231","label":"GLASS PRODUCTS, MADE OF PURCHASED GLASS"},
-    {"id":"3241","label":"CEMENT, HYDRAULIC"},
-    {"id":"3250","label":"STRUCTURAL CLAY PRODUCTS"},
-    {"id":"3260","label":"POTTERY & RELATED PRODUCTS"},
-    {"id":"3270","label":"CONCRETE, GYPSUM & PLASTER PRODUCTS"},
-    {"id":"3272","label":"CONCRETE PRODUCTS, EXCEPT BLOCK & BRICK"},
-    {"id":"3281","label":"CUT STONE & STONE PRODUCTS"},
-    {"id":"3290","label":"ABRASIVE, ASBESTOS & MISC NONMETALLIC MINERAL PRODS"},
-    {"id":"3310","label":"STEEL WORKS, BLAST FURNACES & ROLLING & FINISHING MILLS"},
-    {"id":"3312","label":"STEEL WORKS, BLAST FURNACES & ROLLING MILLS (COKE OVENS)"},
-    {"id":"3317","label":"STEEL PIPE & TUBES"},
-    {"id":"3320","label":"IRON & STEEL FOUNDRIES"},
-    {"id":"3330","label":"PRIMARY SMELTING & REFINING OF NONFERROUS METALS"},
-    {"id":"3334","label":"PRIMARY PRODUCTION OF ALUMINUM"},
-    {"id":"3341","label":"SECONDARY SMELTING & REFINING OF NONFERROUS METALS"},
-    {"id":"3350","label":"ROLLING DRAWING & EXTRUDING OF NONFERROUS METALS"},
-    {"id":"3357","label":"DRAWING & INSULATING OF NONFERROUS WIRE"},
-    {"id":"3360","label":"NONFERROUS FOUNDRIES (CASTINGS)"},
-    {"id":"3390","label":"MISCELLANEOUS PRIMARY METAL PRODUCTS"},
-    {"id":"3411","label":"METAL CANS"},
-    {"id":"3412","label":"METAL SHIPPING BARRELS, DRUMS, KEGS & PAILS"},
-    {"id":"3420","label":"CUTLERY, HANDTOOLS & GENERAL HARDWARE"},
-    {"id":"3430","label":"HEATING EQUIP, EXCEPT ELEC & WARM AIR; & PLUMBING FIXTURES"},
-    {"id":"3433","label":"HEATING EQUIPMENT, EXCEPT ELECTRIC & WARM AIR FURNACES"},
-    {"id":"3440","label":"FABRICATED STRUCTURAL METAL PRODUCTS"},
-    {"id":"3442","label":"METAL DOORS, SASH, FRAMES, MOLDINGS & TRIM"},
-    {"id":"3443","label":"FABRICATED PLATE WORK (BOILER SHOPS)"},
-    {"id":"3444","label":"SHEET METAL WORK"},
-    {"id":"3448","label":"PREFABRICATED METAL BUILDINGS & COMPONENTS"},
-    {"id":"3451","label":"SCREW MACHINE PRODUCTS"},
-    {"id":"3452","label":"BOLTS, NUTS, SCREWS, RIVETS & WASHERS"},
-    {"id":"3460","label":"METAL FORGINGS & STAMPINGS"},
-    {"id":"3470","label":"COATING, ENGRAVING & ALLIED SERVICES"},
-    {"id":"3480","label":"ORDNANCE & ACCESSORIES, (NO VEHICLES\/GUIDED MISSILES)"},
-    {"id":"3490","label":"MISCELLANEOUS FABRICATED METAL PRODUCTS"},
-    {"id":"3510","label":"ENGINES & TURBINES"},
-    {"id":"3523","label":"FARM MACHINERY & EQUIPMENT"},
-    {"id":"3524","label":"LAWN & GARDEN TRACTORS & HOME LAWN & GARDENS EQUIP"},
-    {"id":"3530","label":"CONSTRUCTION, MINING & MATERIALS HANDLING MACHINERY & EQUIP"},
-    {"id":"3531","label":"CONSTRUCTION MACHINERY & EQUIP"},
-    {"id":"3532","label":"MINING MACHINERY & EQUIP (NO OIL & GAS FIELD MACH & EQUIP)"},
-    {"id":"3533","label":"OIL & GAS FIELD MACHINERY & EQUIPMENT"},
-    {"id":"3537","label":"INDUSTRIAL TRUCKS, TRACTORS, TRAILORS & STACKERS"},
-    {"id":"3540","label":"METALWORKG MACHINERY & EQUIPMENT"},
-    {"id":"3541","label":"MACHINE TOOLS, METAL CUTTING TYPES"},
-    {"id":"3550","label":"SPECIAL INDUSTRY MACHINERY (NO METALWORKING MACHINERY)"},
-    {"id":"3555","label":"PRINTING TRADES MACHINERY & EQUIPMENT"},
-    {"id":"3559","label":"SPECIAL INDUSTRY MACHINERY, NEC"},
-    {"id":"3560","label":"GENERAL INDUSTRIAL MACHINERY & EQUIPMENT"},
-    {"id":"3561","label":"PUMPS & PUMPING EQUIPMENT"},
-    {"id":"3562","label":"BALL & ROLLER BEARINGS"},
-    {"id":"3564","label":"INDUSTRIAL & COMMERCIAL FANS & BLOWERS & AIR PURIFING EQUIP"},
-    {"id":"3567","label":"INDUSTRIAL PROCESS FURNACES & OVENS"},
-    {"id":"3569","label":"GENERAL INDUSTRIAL MACHINERY & EQUIPMENT, NEC"},
-    {"id":"3570","label":"COMPUTER & OFFICE EQUIPMENT"},
-    {"id":"3571","label":"ELECTRONIC COMPUTERS"},
-    {"id":"3572","label":"COMPUTER STORAGE DEVICES"},
-    {"id":"3575","label":"COMPUTER TERMINALS"},
-    {"id":"3576","label":"COMPUTER COMMUNICATIONS EQUIPMENT"},
-    {"id":"3577","label":"COMPUTER PERIPHERAL EQUIPMENT, NEC"},
-    {"id":"3578","label":"CALCULATING & ACCOUNTING MACHINES (NO ELECTRONIC COMPUTERS)"},
-    {"id":"3579","label":"OFFICE MACHINES, NEC"},
-    {"id":"3580","label":"REFRIGERATION & SERVICE INDUSTRY MACHINERY"},
-    {"id":"3585","label":"AIR-COND & WARM AIR HEATG EQUIP & COMM & INDL REFRIG EQUIP"},
-    {"id":"3590","label":"MISC INDUSTRIAL & COMMERCIAL MACHINERY & EQUIPMENT"},
-    {"id":"3600","label":"ELECTRONIC & OTHER ELECTRICAL EQUIPMENT (NO COMPUTER EQUIP)"},
-    {"id":"3612","label":"POWER, DISTRIBUTION & SPECIALTY TRANSFORMERS"},
-    {"id":"3613","label":"SWITCHGEAR & SWITCHBOARD APPARATUS"},
-    {"id":"3620","label":"ELECTRICAL INDUSTRIAL APPARATUS"},
-    {"id":"3621","label":"MOTORS & GENERATORS"},
-    {"id":"3630","label":"HOUSEHOLD APPLIANCES"},
-    {"id":"3634","label":"ELECTRIC HOUSEWARES & FANS"},
-    {"id":"3640","label":"ELECTRIC LIGHTING & WIRING EQUIPMENT"},
-    {"id":"3651","label":"HOUSEHOLD AUDIO & VIDEO EQUIPMENT"},
-    {"id":"3652","label":"PHONOGRAPH RECORDS & PRERECORDED AUDIO TAPES & DISKS"},
-    {"id":"3661","label":"TELEPHONE & TELEGRAPH APPARATUS"},
-    {"id":"3663","label":"RADIO & TV BROADCASTING & COMMUNICATIONS EQUIPMENT"},
-    {"id":"3669","label":"COMMUNICATIONS EQUIPMENT, NEC"},
-    {"id":"3670","label":"ELECTRONIC COMPONENTS & ACCESSORIES"},
-    {"id":"3672","label":"PRINTED CIRCUIT BOARDS"},
-    {"id":"3674","label":"SEMICONDUCTORS & RELATED DEVICES"},
-    {"id":"3677","label":"ELECTRONIC COILS, TRANSFORMERS & OTHER INDUCTORS"},
-    {"id":"3678","label":"ELECTRONIC CONNECTORS"},
-    {"id":"3679","label":"ELECTRONIC COMPONENTS, NEC"},
-    {"id":"3690","label":"MISCELLANEOUS ELECTRICAL MACHINERY, EQUIPMENT & SUPPLIES"},
-    {"id":"3695","label":"MAGNETIC & OPTICAL RECORDING MEDIA"},
-    {"id":"3711","label":"MOTOR VEHICLES & PASSENGER CAR BODIES"},
-    {"id":"3713","label":"TRUCK & BUS BODIES"},
-    {"id":"3714","label":"MOTOR VEHICLE PARTS & ACCESSORIES"},
-    {"id":"3715","label":"TRUCK TRAILERS"},
-    {"id":"3716","label":"MOTOR HOMES"},
-    {"id":"3720","label":"AIRCRAFT & PARTS"},
-    {"id":"3721","label":"AIRCRAFT"},
-    {"id":"3724","label":"AIRCRAFT ENGINES & ENGINE PARTS"},
-    {"id":"3728","label":"AIRCRAFT PARTS & AUXILIARY EQUIPMENT, NEC"},
-    {"id":"3730","label":"SHIP & BOAT BUILDING & REPAIRING"},
-    {"id":"3743","label":"RAILROAD EQUIPMENT"},
-    {"id":"3751","label":"MOTORCYCLES, BICYCLES & PARTS"},
-    {"id":"3760","label":"GUIDED MISSILES & SPACE VEHICLES & PARTS"},
-    {"id":"3790","label":"MISCELLANEOUS TRANSPORTATION EQUIPMENT"},
-    {"id":"3812","label":"SEARCH, DETECTION, NAVAGATION, GUIDANCE, AERONAUTICAL SYS"},
-    {"id":"3821","label":"LABORATORY APPARATUS & FURNITURE"},
-    {"id":"3822","label":"AUTO CONTROLS FOR REGULATING RESIDENTIAL & COMML ENVIRONMENTS"},
-    {"id":"3823","label":"INDUSTRIAL INSTRUMENTS FOR MEASUREMENT, DISPLAY, AND CONTROL"},
-    {"id":"3824","label":"TOTALIZING FLUID METERS & COUNTING DEVICES"},
-    {"id":"3825","label":"INSTRUMENTS FOR MEAS & TESTING OF ELECTRICITY & ELEC SIGNALS"},
-    {"id":"3826","label":"LABORATORY ANALYTICAL INSTRUMENTS"},
-    {"id":"3827","label":"OPTICAL INSTRUMENTS & LENSES"},
-    {"id":"3829","label":"MEASURING & CONTROLLING DEVICES, NEC"},
-    {"id":"3841","label":"SURGICAL & MEDICAL INSTRUMENTS & APPARATUS"},
-    {"id":"3842","label":"ORTHOPEDIC, PROSTHETIC & SURGICAL APPLIANCES & SUPPLIES"},
-    {"id":"3843","label":"DENTAL EQUIPMENT & SUPPLIES"},
-    {"id":"3844","label":"X-RAY APPARATUS & TUBES & RELATED IRRADIATION APPARATUS"},
-    {"id":"3845","label":"ELECTROMEDICAL & ELECTROTHERAPEUTIC APPARATUS"},
-    {"id":"3851","label":"OPHTHALMIC GOODS"},
-    {"id":"3861","label":"PHOTOGRAPHIC EQUIPMENT & SUPPLIES"},
-    {"id":"3873","label":"WATCHES, CLOCKS, CLOCKWORK OPERATED DEVICES\/PARTS"},
-    {"id":"3910","label":"JEWELRY, SILVERWARE & PLATED WARE"},
-    {"id":"3911","label":"JEWELRY, PRECIOUS METAL"},
-    {"id":"3931","label":"MUSICAL INSTRUMENTS"},
-    {"id":"3942","label":"DOLLS & STUFFED TOYS"},
-    {"id":"3944","label":"GAMES, TOYS & CHILDREN'S VEHICLES (NO DOLLS & BICYCLES)"},
-    {"id":"3949","label":"SPORTING & ATHLETIC GOODS, NEC"},
-    {"id":"3950","label":"PENS, PENCILS & OTHER ARTISTS' MATERIALS"},
-    {"id":"3960","label":"COSTUME JEWELRY & NOVELTIES"},
-    {"id":"3990","label":"MISCELLANEOUS MANUFACTURING INDUSTRIES"},
-    {"id":"D5","label":"Transportation, Communications, Electric, Gas and Sanitary service","start_sic":"4000","end_sic":"4999"},
-    {"id":"4011","label":"RAILROADS, LINE-HAUL OPERATING"},
-    {"id":"4013","label":"RAILROAD SWITCHING & TERMINAL ESTABLISHMENTS"},
-    {"id":"4100","label":"LOCAL & SUBURBAN TRANSIT & INTERURBAN HWY PASSENGER TRANS"},
-    {"id":"4210","label":"TRUCKING & COURIER SERVICES (NO AIR)"},
-    {"id":"4213","label":"TRUCKING (NO LOCAL)"},
-    {"id":"4220","label":"PUBLIC WAREHOUSING & STORAGE"},
-    {"id":"4231","label":"TERMINAL MAINTENANCE FACILITIES FOR MOTOR FREIGHT TRANSPORT"},
-    {"id":"4400","label":"WATER TRANSPORTATION"},
-    {"id":"4412","label":"DEEP SEA FOREIGN TRANSPORTATION OF FREIGHT"},
-    {"id":"4512","label":"AIR TRANSPORTATION, SCHEDULED"},
-    {"id":"4513","label":"AIR COURIER SERVICES"},
-    {"id":"4522","label":"AIR TRANSPORTATION, NONSCHEDULED"},
-    {"id":"4581","label":"AIRPORTS, FLYING FIELDS & AIRPORT TERMINAL SERVICES"},
-    {"id":"4610","label":"PIPE LINES (NO NATURAL GAS)"},
-    {"id":"4700","label":"TRANSPORTATION SERVICES"},
-    {"id":"4731","label":"ARRANGEMENT OF TRANSPORTATION OF FREIGHT & CARGO"},
-    {"id":"4812","label":"RADIOTELEPHONE COMMUNICATIONS"},
-    {"id":"4813","label":"TELEPHONE COMMUNICATIONS (NO RADIOTELEPHONE)"},
-    {"id":"4822","label":"TELEGRAPH & OTHER MESSAGE COMMUNICATIONS"},
-    {"id":"4832","label":"RADIO BROADCASTING STATIONS"},
-    {"id":"4833","label":"TELEVISION BROADCASTING STATIONS"},
-    {"id":"4841","label":"CABLE & OTHER PAY TELEVISION SERVICES"},
-    {"id":"4899","label":"COMMUNICATIONS SERVICES, NEC"},
-    {"id":"4900","label":"ELECTRIC, GAS & SANITARY SERVICES"},
-    {"id":"4911","label":"ELECTRIC SERVICES"},
-    {"id":"4922","label":"NATURAL GAS TRANSMISSION"},
-    {"id":"4923","label":"NATURAL GAS TRANSMISISON & DISTRIBUTION"},
-    {"id":"4924","label":"NATURAL GAS DISTRIBUTION"},
-    {"id":"4931","label":"ELECTRIC & OTHER SERVICES COMBINED"},
-    {"id":"4932","label":"GAS & OTHER SERVICES COMBINED"},
-    {"id":"4941","label":"WATER SUPPLY"},
-    {"id":"4950","label":"SANITARY SERVICES"},
-    {"id":"4953","label":"REFUSE SYSTEMS"},
-    {"id":"4955","label":"HAZARDOUS WASTE MANAGEMENT"},
-    {"id":"4961","label":"STEAM & AIR-CONDITIONING SUPPLY"},
-    {"id":"4991","label":"COGENERATION SERVICES & SMALL POWER PRODUCERS"},
-    {"id":"D6","label":"Wholesale Trade","start_sic":"5000","end_sic":"5199"},
-    {"id":"5000","label":"WHOLESALE-DURABLE GOODS"},
-    {"id":"5010","label":"WHOLESALE-MOTOR VEHICLES & MOTOR VEHICLE PARTS & SUPPLIES"},
-    {"id":"5013","label":"WHOLESALE-MOTOR VEHICLE SUPPLIES & NEW PARTS"},
-    {"id":"5020","label":"WHOLESALE-FURNITURE & HOME FURNISHINGS"},
-    {"id":"5030","label":"WHOLESALE-LUMBER & OTHER CONSTRUCTION MATERIALS"},
-    {"id":"5031","label":"WHOLESALE-LUMBER, PLYWOOD, MILLWORK & WOOD PANELS"},
-    {"id":"5040","label":"WHOLESALE-PROFESSIONAL & COMMERCIAL EQUIPMENT & SUPPLIES"},
-    {"id":"5045","label":"WHOLESALE-COMPUTERS & PERIPHERAL EQUIPMENT & SOFTWARE"},
-    {"id":"5047","label":"WHOLESALE-MEDICAL, DENTAL & HOSPITAL EQUIPMENT & SUPPLIES"},
-    {"id":"5050","label":"WHOLESALE-METALS & MINERALS (NO PETROLEUM)"},
-    {"id":"5051","label":"WHOLESALE-METALS SERVICE CENTERS & OFFICES"},
-    {"id":"5063","label":"WHOLESALE-ELECTRICAL APPARATUS & EQUIPMENT, WIRING SUPPLIES"},
-    {"id":"5064","label":"WHOLESALE-ELECTRICAL APPLIANCES, TV & RADIO SETS"},
-    {"id":"5065","label":"WHOLESALE-ELECTRONIC PARTS & EQUIPMENT, NEC"},
-    {"id":"5070","label":"WHOLESALE-HARDWARE & PLUMBING & HEATING EQUIPMENT & SUPPLIES"},
-    {"id":"5072","label":"WHOLESALE-HARDWARE"},
-    {"id":"5080","label":"WHOLESALE-MACHINERY, EQUIPMENT & SUPPLIES"},
-    {"id":"5082","label":"WHOLESALE-CONSTRUCTION & MINING (NO PETRO) MACHINERY & EQUIP"},
-    {"id":"5084","label":"WHOLESALE-INDUSTRIAL MACHINERY & EQUIPMENT"},
-    {"id":"5090","label":"WHOLESALE-MISC DURABLE GOODS"},
-    {"id":"5094","label":"WHOLESALE-JEWELRY, WATCHES, PRECIOUS STONES & METALS"},
-    {"id":"5099","label":"WHOLESALE-DURABLE GOODS, NEC"},
-    {"id":"5110","label":"WHOLESALE-PAPER & PAPER PRODUCTS"},
-    {"id":"5122","label":"WHOLESALE-DRUGS, PROPRIETARIES & DRUGGISTS' SUNDRIES"},
-    {"id":"5130","label":"WHOLESALE-APPAREL, PIECE GOODS & NOTIONS"},
-    {"id":"5140","label":"WHOLESALE-GROCERIES & RELATED PRODUCTS"},
-    {"id":"5141","label":"WHOLESALE-GROCERIES, GENERAL LINE"},
-    {"id":"5150","label":"WHOLESALE-FARM PRODUCT RAW MATERIALS"},
-    {"id":"5160","label":"WHOLESALE-CHEMICALS & ALLIED PRODUCTS"},
-    {"id":"5171","label":"WHOLESALE-PETROLEUM BULK STATIONS & TERMINALS"},
-    {"id":"5172","label":"WHOLESALE-PETROLEUM & PETROLEUM PRODUCTS (NO BULK STATIONS)"},
-    {"id":"5180","label":"WHOLESALE-BEER, WINE & DISTILLED ALCOHOLIC BEVERAGES"},
-    {"id":"5190","label":"WHOLESALE-MISCELLANEOUS NONDURABLE GOODS"},
-    {"id":"D7","label":"Retail Trade","start_sic":"5200","end_sic":"5999"},
-    {"id":"5200","label":"RETAIL-BUILDING MATERIALS, HARDWARE, GARDEN SUPPLY"},
-    {"id":"5211","label":"RETAIL-LUMBER & OTHER BUILDING MATERIALS DEALERS"},
-    {"id":"5271","label":"RETAIL-MOBILE HOME DEALERS"},
-    {"id":"5311","label":"RETAIL-DEPARTMENT STORES"},
-    {"id":"5331","label":"RETAIL-VARIETY STORES"},
-    {"id":"5399","label":"RETAIL-MISC GENERAL MERCHANDISE STORES"},
-    {"id":"5400","label":"RETAIL-FOOD STORES"},
-    {"id":"5411","label":"RETAIL-GROCERY STORES"},
-    {"id":"5412","label":"RETAIL-CONVENIENCE STORES"},
-    {"id":"5500","label":"RETAIL-AUTO DEALERS & GASOLINE STATIONS"},
-    {"id":"5531","label":"RETAIL-AUTO & HOME SUPPLY STORES"},
-    {"id":"5600","label":"RETAIL-APPAREL & ACCESSORY STORES"},
-    {"id":"5621","label":"RETAIL-WOMEN'S CLOTHING STORES"},
-    {"id":"5651","label":"RETAIL-FAMILY CLOTHING STORES"},
-    {"id":"5661","label":"RETAIL-SHOE STORES"},
-    {"id":"5700","label":"RETAIL-HOME FURNITURE, FURNISHINGS & EQUIPMENT STORES"},
-    {"id":"5712","label":"RETAIL-FURNITURE STORES"},
-    {"id":"5731","label":"RETAIL-RADIO, TV & CONSUMER ELECTRONICS STORES"},
-    {"id":"5734","label":"RETAIL-COMPUTER & COMPUTER SOFTWARE STORES"},
-    {"id":"5735","label":"RETAIL-RECORD & PRERECORDED TAPE STORES"},
-    {"id":"5810","label":"RETAIL-EATING & DRINKING PLACES"},
-    {"id":"5812","label":"RETAIL-EATING PLACES"},
-    {"id":"5900","label":"RETAIL-MISCELLANEOUS RETAIL"},
-    {"id":"5912","label":"RETAIL-DRUG STORES AND PROPRIETARY STORES"},
-    {"id":"5940","label":"RETAIL-MISCELLANEOUS SHOPPING GOODS STORES"},
-    {"id":"5944","label":"RETAIL-JEWELRY STORES"},
-    {"id":"5945","label":"RETAIL-HOBBY, TOY & GAME SHOPS"},
-    {"id":"5960","label":"RETAIL-NONSTORE RETAILERS"},
-    {"id":"5961","label":"RETAIL-CATALOG & MAIL-ORDER HOUSES"},
-    {"id":"5990","label":"RETAIL-RETAIL STORES, NEC"},
-    {"id":"D8","label":"Finance, Insurance and Real Estate","start_sic":"6000","end_sic":"6799"},
-    {"id":"6021","label":"NATIONAL COMMERCIAL BANKS"},
-    {"id":"6022","label":"STATE COMMERCIAL BANKS"},
-    {"id":"6029","label":"COMMERCIAL BANKS, NEC"},
-    {"id":"6035","label":"SAVINGS INSTITUTION, FEDERALLY CHARTERED"},
-    {"id":"6036","label":"SAVINGS INSTITUTIONS, NOT FEDERALLY CHARTERED"},
-    {"id":"6099","label":"FUNCTIONS RELATED TO DEPOSITORY BANKING, NEC"},
-    {"id":"6111","label":"FEDERAL & FEDERALLY-SPONSORED CREDIT AGENCIES"},
-    {"id":"6141","label":"PERSONAL CREDIT INSTITUTIONS"},
-    {"id":"6153","label":"SHORT-TERM BUSINESS CREDIT INSTITUTIONS"},
-    {"id":"6159","label":"MISCELLANEOUS BUSINESS CREDIT INSTITUTION"},
-    {"id":"6162","label":"MORTGAGE BANKERS & LOAN CORRESPONDENTS"},
-    {"id":"6163","label":"LOAN BROKERS"},
-    {"id":"6172","label":"FINANCE LESSORS"},
-    {"id":"6189","label":"ASSET-BACKED SECURITIES"},
-    {"id":"6199","label":"FINANCE SERVICES"},
-    {"id":"6200","label":"SECURITY & COMMODITY BROKERS, DEALERS, EXCHANGES & SERVICES"},
-    {"id":"6211","label":"SECURITY BROKERS, DEALERS & FLOTATION COMPANIES"},
-    {"id":"6221","label":"COMMODITY CONTRACTS BROKERS & DEALERS"},
-    {"id":"6282","label":"INVESTMENT ADVICE"},
-    {"id":"6311","label":"LIFE INSURANCE"},
-    {"id":"6321","label":"ACCIDENT & HEALTH INSURANCE"},
-    {"id":"6324","label":"HOSPITAL & MEDICAL SERVICE PLANS"},
-    {"id":"6331","label":"FIRE, MARINE & CASUALTY INSURANCE"},
-    {"id":"6351","label":"SURETY INSURANCE"},
-    {"id":"6361","label":"TITLE INSURANCE"},
-    {"id":"6399","label":"INSURANCE CARRIERS, NEC"},
-    {"id":"6411","label":"INSURANCE AGENTS, BROKERS & SERVICE"},
-    {"id":"6500","label":"REAL ESTATE"},
-    {"id":"6510","label":"REAL ESTATE OPERATORS (NO DEVELOPERS) & LESSORS"},
-    {"id":"6512","label":"OPERATORS OF NONRESIDENTIAL BUILDINGS"},
-    {"id":"6513","label":"OPERATORS OF APARTMENT BUILDINGS"},
-    {"id":"6519","label":"LESSORS OF REAL PROPERTY, NEC"},
-    {"id":"6531","label":"REAL ESTATE AGENTS & MANAGERS (FOR OTHERS)"},
-    {"id":"6532","label":"REAL ESTATE DEALERS (FOR THEIR OWN ACCOUNT)"},
-    {"id":"6552","label":"LAND SUBDIVIDERS & DEVELOPERS (NO CEMETERIES)"},
-    {"id":"6770","label":"BLANK CHECKS"},
-    {"id":"6792","label":"OIL ROYALTY TRADERS"},
-    {"id":"6794","label":"PATENT OWNERS & LESSORS"},
-    {"id":"6795","label":"MINERAL ROYALTY TRADERS"},
-    {"id":"6798","label":"REAL ESTATE INVESTMENT TRUSTS"},
-    {"id":"6799","label":"INVESTORS, NEC"},
-    {"id":"D9","label":"Services","start_sic":"7000","end_sic":"8999"},
-    {"id":"7000","label":"HOTELS, ROOMING HOUSES, CAMPS & OTHER LODGING PLACES"},
-    {"id":"7011","label":"HOTELS & MOTELS"},
-    {"id":"7200","label":"SERVICES-PERSONAL SERVICES"},
-    {"id":"7310","label":"SERVICES-ADVERTISING"},
-    {"id":"7311","label":"SERVICES-ADVERTISING AGENCIES"},
-    {"id":"7320","label":"SERVICES-CONSUMER CREDIT REPORTING, COLLECTION AGENCIES"},
-    {"id":"7330","label":"SERVICES-MAILING, REPRODUCTION, COMMERCIAL ART & PHOTOGRAPHY"},
-    {"id":"7331","label":"SERVICES-DIRECT MAIL ADVERTISING SERVICES"},
-    {"id":"7340","label":"SERVICES-TO DWELLINGS & OTHER BUILDINGS"},
-    {"id":"7350","label":"SERVICES-MISCELLANEOUS EQUIPMENT RENTAL & LEASING"},
-    {"id":"7359","label":"SERVICES-EQUIPMENT RENTAL & LEASING, NEC"},
-    {"id":"7361","label":"SERVICES-EMPLOYMENT AGENCIES"},
-    {"id":"7363","label":"SERVICES-HELP SUPPLY SERVICES"},
-    {"id":"7370","label":"SERVICES-COMPUTER PROGRAMMING, DATA PROCESSING, ETC."},
-    {"id":"7371","label":"SERVICES-COMPUTER PROGRAMMING SERVICES"},
-    {"id":"7372","label":"SERVICES-PREPACKAGED SOFTWARE"},
-    {"id":"7373","label":"SERVICES-COMPUTER INTEGRATED SYSTEMS DESIGN"},
-    {"id":"7374","label":"SERVICES-COMPUTER PROCESSING & DATA PREPARATION"},
-    {"id":"7377","label":"SERVICES-COMPUTER RENTAL & LEASING"},
-    {"id":"7380","label":"SERVICES-MISCELLANEOUS BUSINESS SERVICES"},
-    {"id":"7381","label":"SERVICES-DETECTIVE, GUARD & ARMORED CAR SERVICES"},
-    {"id":"7384","label":"SERVICES-PHOTOFINISHING LABORATORIES"},
-    {"id":"7385","label":"SERVICES-TELEPHONE INTERCONNECT SYSTEMS"},
-    {"id":"7389","label":"SERVICES-BUSINESS SERVICES, NEC"},
-    {"id":"7500","label":"SERVICES-AUTOMOTIVE REPAIR, SERVICES & PARKING"},
-    {"id":"7510","label":"SERVICES-AUTO RENTAL & LEASING (NO DRIVERS)"},
-    {"id":"7600","label":"SERVICES-MISCELLANEOUS REPAIR SERVICES"},
-    {"id":"7812","label":"SERVICES-MOTION PICTURE & VIDEO TAPE PRODUCTION"},
-    {"id":"7819","label":"SERVICES-ALLIED TO MOTION PICTURE PRODUCTION"},
-    {"id":"7822","label":"SERVICES-MOTION PICTURE & VIDEO TAPE DISTRIBUTION"},
-    {"id":"7829","label":"SERVICES-ALLIED TO MOTION PICTURE DISTRIBUTION"},
-    {"id":"7830","label":"SERVICES-MOTION PICTURE THEATERS"},
-    {"id":"7841","label":"SERVICES-VIDEO TAPE RENTAL"},
-    {"id":"7900","label":"SERVICES-AMUSEMENT & RECREATION SERVICES"},
-    {"id":"7948","label":"SERVICES-RACING, INCLUDING TRACK OPERATION"},
-    {"id":"7990","label":"SERVICES-MISCELLANEOUS AMUSEMENT & RECREATION"},
-    {"id":"7997","label":"SERVICES-MEMBERSHIP SPORTS & RECREATION CLUBS"},
-    {"id":"8000","label":"SERVICES-HEALTH SERVICES"},
-    {"id":"8011","label":"SERVICES-OFFICES & CLINICS OF DOCTORS OF MEDICINE"},
-    {"id":"8050","label":"SERVICES-NURSING & PERSONAL CARE FACILITIES"},
-    {"id":"8051","label":"SERVICES-SKILLED NURSING CARE FACILITIES"},
-    {"id":"8060","label":"SERVICES-HOSPITALS"},
-    {"id":"8062","label":"SERVICES-GENERAL MEDICAL & SURGICAL HOSPITALS, NEC"},
-    {"id":"8071","label":"SERVICES-MEDICAL LABORATORIES"},
-    {"id":"8082","label":"SERVICES-HOME HEALTH CARE SERVICES"},
-    {"id":"8090","label":"SERVICES-MISC HEALTH & ALLIED SERVICES, NEC"},
-    {"id":"8093","label":"SERVICES-SPECIALTY OUTPATIENT FACILITIES, NEC"},
-    {"id":"8111","label":"SERVICES-LEGAL SERVICES"},
-    {"id":"8200","label":"SERVICES-EDUCATIONAL SERVICES"},
-    {"id":"8300","label":"SERVICES-SOCIAL SERVICES"},
-    {"id":"8351","label":"SERVICES-CHILD DAY CARE SERVICES"},
-    {"id":"8600","label":"SERVICES-MEMBERSHIP ORGANIZATIONS"},
-    {"id":"8700","label":"SERVICES-ENGINEERING, ACCOUNTING, RESEARCH, MANAGEMENT"},
-    {"id":"8711","label":"SERVICES-ENGINEERING SERVICES"},
-    {"id":"8731","label":"SERVICES-COMMERCIAL PHYSICAL & BIOLOGICAL RESEARCH"},
-    {"id":"8734","label":"SERVICES-TESTING LABORATORIES"},
-    {"id":"8741","label":"SERVICES-MANAGEMENT SERVICES"},
-    {"id":"8742","label":"SERVICES-MANAGEMENT CONSULTING SERVICES"},
-    {"id":"8744","label":"SERVICES-FACILITIES SUPPORT MANAGEMENT SERVICES"},
-    {"id":"8880","label":"AMERICAN DEPOSITARY RECEIPTS"},
-    {"id":"8888","label":"FOREIGN GOVERNMENTS"},
-    {"id":"8900","label":"SERVICES-SERVICES, NEC"},
-    {"id":"D10","label":"Public Administration","start_sic":"9100","end_sic":"9729"},
-    {"id":"9721","label":"INTERNATIONAL AFFAIRS"},
-    {"id":"D11","label":"Nonclassifiable","start_sic":"9900","end_sic":"9999"},
-    {"id":"9995","label":"NON-OPERATING ESTABLISHMENTS"}
-];
-
 var XLS_Forms = {
     "1-A": "xsl1-A_X01",
     "1-K": "xsl1-K_X01",
@@ -1752,10 +1336,10 @@ var formCategories = [
     {"category": "Insider Equity Awards, Transactions, and Ownership (Section 16 Reports)", "forms":["3","4","5"]},
     {"category": "Beneficial Ownership Reports", "forms":["SC 13D","SC 13G","SC14D1F"]},
     {"category": "Exempt Offerings", "forms":["1-A","1-A POS","1-A-W","253G1","253G2","253G3","253G4","D","DOS"]},
-    {"category":"Registration Statements", "forms":["10-12B","10-12G","18-12B","20FR12B","20FR12G","40-24B2","40FR12B","40FR12G","424A","424B1","424B2","424B3","424B4","424B5","424B7","424B8","424H","425","485APOS","485BPOS","485BXT","487","497","497J","497K","8-A12B","8-A12G","AW","AW WD","DEL AM","DRS","F-1","F-10","F-10EF","F-10POS","F-3","F-3ASR","F-3D","F-3DPOS","F-3MEF","F-4","F-4 POS","F-4MEF","F-6","F-6 POS","F-6EF","F-7","F-7 POS","F-8","F-8 POS","F-80","F-80POS","F-9","F-9 POS","F-N","F-X","FWP","N-2","POS AM","POS EX","POS462B","POS462C","POSASR","RW","RW WD","S-1","S-11","S-11MEF","S-1MEF","S-20","S-3","S-3ASR","S-3D","S-3DPOS","S-3MEF","S-4","S-4 POS","S-4EF","S-4MEF","S-6","S-8","S-8 POS","S-B","S-BMEF","SF-1","SF-3","SUPPL","UNDER"]},
-    {"category":"Filing Review Correspondence", "forms":["CORRESP","DOSLTR","DRSLTR","UPLOAD"]},
-    {"category":"SEC Orders and Notices", "forms":["40-APP","CT ORDER","EFFECT","QUALIF","REVOKED"]},
-    {"category":"Proxy Materials", "forms":["ARS","DEF 14A","DEF 14C","DEFA14A","DEFA14C","DEFC14A","DEFC14C","DEFM14A","DEFM14C","DEFN14A","DEFR14A","DEFR14C","DFAN14A","DFRN14A","PRE 14A","PRE 14C","PREC14A","PREC14C","PREM14A","PREM14C","PREN14A","PRER14A","PRER14C","PRRN14A","PX14A6G","PX14A6N","SC 14N"]},
-    {"category":"Tender Offers and Going Private Transactions", "forms":["CB","SC 13E1","SC 13E3","SC 14D9","SC 14F1","SC TO-C","SC TO-I","SC TO-T","SC13E4F","SC14D9C","SC14D9F"]},
-    {"category":"Trust Indenture Filings", "forms":["305B2","T-3"]}
+    {"category": "Registration Statements", "forms":["10-12B","10-12G","18-12B","20FR12B","20FR12G","40-24B2","40FR12B","40FR12G","424A","424B1","424B2","424B3","424B4","424B5","424B7","424B8","424H","425","485APOS","485BPOS","485BXT","487","497","497J","497K","8-A12B","8-A12G","AW","AW WD","DEL AM","DRS","F-1","F-10","F-10EF","F-10POS","F-3","F-3ASR","F-3D","F-3DPOS","F-3MEF","F-4","F-4 POS","F-4MEF","F-6","F-6 POS","F-6EF","F-7","F-7 POS","F-8","F-8 POS","F-80","F-80POS","F-9","F-9 POS","F-N","F-X","FWP","N-2","POS AM","POS EX","POS462B","POS462C","POSASR","RW","RW WD","S-1","S-11","S-11MEF","S-1MEF","S-20","S-3","S-3ASR","S-3D","S-3DPOS","S-3MEF","S-4","S-4 POS","S-4EF","S-4MEF","S-6","S-8","S-8 POS","S-B","S-BMEF","SF-1","SF-3","SUPPL","UNDER"]},
+    {"category": "Filing Review Correspondence", "forms":["CORRESP","DOSLTR","DRSLTR","UPLOAD"]},
+    {"category": "SEC Orders and Notices", "forms":["40-APP","CT ORDER","EFFECT","QUALIF","REVOKED"]},
+    {"category":" Proxy Materials", "forms":["ARS","DEF 14A","DEF 14C","DEFA14A","DEFA14C","DEFC14A","DEFC14C","DEFM14A","DEFM14C","DEFN14A","DEFR14A","DEFR14C","DFAN14A","DFRN14A","PRE 14A","PRE 14C","PREC14A","PREC14C","PREM14A","PREM14C","PREN14A","PRER14A","PRER14C","PRRN14A","PX14A6G","PX14A6N","SC 14N"]},
+    {"category": "Tender Offers and Going Private Transactions", "forms":["CB","SC 13E1","SC 13E3","SC 14D9","SC 14F1","SC TO-C","SC TO-I","SC TO-T","SC13E4F","SC14D9C","SC14D9F"]},
+    {"category": "Trust Indenture Filings", "forms":["305B2","T-3"]}
 ];

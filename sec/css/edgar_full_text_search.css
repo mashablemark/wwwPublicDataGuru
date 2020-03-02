@@ -23,6 +23,10 @@
     background-color: rgba(256, 256, 256, 0.1) ;
 }
 
+#filing-types{
+    text-overflow: ellipsis;
+}
+
 .btn-circle.btn-sm {
     width: 20px;
     height: 20px;
@@ -179,10 +183,10 @@ table.entity-hints tr.hint.selected{
 .xfa-angle-up:before {
     content: "\f107";
 }
-#previewer .modal-dialog{
+#previewer .modal-dialog, #forms-browser .modal-dialog{
     max-width: 100%;
 }
-#previewer .modal-body {
+#previewer .modal-body, #forms-browser .modal-body {
     border-width: 2px;
     border-style: inset;
     margin-left: 1rem;
@@ -190,6 +194,11 @@ table.entity-hints tr.hint.selected{
     height: 90%;
     overflow: auto;
 }
+.form-check{
+    display: inline-block;
+    width: 120px;
+}
+
 span.sect-efts-search-match-khjdickkwg {
     background-color: yellow;
     padding: 2px;

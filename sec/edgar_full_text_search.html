@@ -61,7 +61,7 @@
                     </select>
                 </div>
                 <div class="forms-input-group hide-on-short-form">
-                    <label for="filing-types">Filing Types</label><span id="browse-filing-types" class="forms-input-group browse d-none hide-on-short-form">Browse Filing Types</span>
+                    <label for="filing-types">Filing Types</label><span id="browse-filing-types" class="forms-input-group browse">Browse Filing Types</span>
                     <div class="input-group mb-3">
                         <input  id="filing-types" type="text" class="form-control border-onfocus text-black" placeholder="">
                         <div class="input-group-append">
@@ -76,10 +76,10 @@
             <div class="col-sm-4">
                 <label for="date-range-select" class="d-none hide-on-short-form">Date Range</label>
                 <select name="date-range-select" id="date-range-select" class="custom-select border-onfocus d-none hide-on-short-form text-black" autocomplete="false">
-                    <option value="30d">Last 30 Days</option>
-                    <option value="1y" selected>Last Year</option>
+                    <option value="all" selected>All (since 1994)</option>
                     <option value="5y">Last 5 Years</option>
-                    <option value="all">All (since 1994)</option>
+                    <option value="1y">Last Year</option>
+                    <option value="30d">Last 30 Days</option>
                     <option value="custom">Custom</option>
                 </select>
                 <label class="d-none hide-on-short-form">&nbsp;</label>
@@ -322,6 +322,34 @@
     </div>
 </div>
 
+<div class="modal" id="forms-browser">
+    <div class="modal-dialog  h-100 w-100">
+        <div class="modal-content h-75 w-75 mx-auto">
+
+            <!-- Modal Header -->
+            <div class="modal-header border border-0">
+                <div>Check forms that you want to search.  Use the category select to narrow the choices.</div>
+                <form>
+                    <select name="category-filter" id="category-filter" class="custom-select border-onfocus text-black" autocomplete="false">
+                        <option value="all" selected>all forms</option>
+                    </select>
+                </form>
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+            </div>
+
+            <!-- Modal body -->
+            <div class="modal-body">
+            </div>
+
+            <!-- Modal footer -->
+            <div class="modal-footer border border-0">
+                <button id="custom_forms_set" type="button" class="btn btn-warning" data-dismiss="modal">Filter</button>
+                <button type="button" class="btn btn-light btn-outline-primary" data-dismiss="modal">Cancel</button>
+            </div>
+
+        </div>
+    </div>
+</div>
 </body>
 
 
