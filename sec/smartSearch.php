@@ -19,7 +19,7 @@ $homepageHTML = str_replace ( ' href="/', ' href="'.$secPath,  $homepageHTML);
 //3. insert smartSearch.js
 $homepageHTML = str_replace ( '<head>', '<head>'
     . '<link rel="stylesheet" href="css/smartSearch.css" type="text/css">'
-    . '<script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>'
+//smarSearch.js rewritten to no longer need jQuery    . '<script type="text/javascript" src="global/js/jquery/jquery-3.3.1.min.js"></script>'
     . '<script src="js/smartSearch.js"></script>',  $homepageHTML);
 
 //4. modify banner = not official site!

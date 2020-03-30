@@ -1,4 +1,4 @@
-.rel-none{
+.smart-search-rel-none{
     position: relative!important;
     top: 0px!important;
     padding: 0!important;
@@ -7,7 +7,7 @@
     height: 0!important;
     width: 100%!important;
 }
-div.entity-hints {
+div.smart-search-entity-hints {
     color: #1e1e1e!important;
     background-color: white!important;
     border: darkgray thin solid!important;
@@ -20,29 +20,29 @@ div.entity-hints {
     border-bottom-right-radius: .25rem!important;
     border-bottom-left-radius: .25rem!important;
 }
-table.entity-hints{
+table.smart-search-entity-hints{
     width: 100%!important;
 }
 
-table.entity-hints, table.entity-hints td,  table.entity-hints th {
+table.smart-search-entity-hints, table.smart-search-entity-hints td,  table.smart-search-entity-hints th {
     border: none !important;
     padding: 5px 10px!important;
 }
-table.entity-hints th {
+table.smart-search-entity-hints th {
     font-weight: bold!important;
 
 }
-table.entity-hints tr.hint {
+table.smart-search-entity-hints tr.smart-search-hint {
     border-top: thin lightgrey solid!important;
     padding: 5px 10px!important;
     cursor: pointer!important;
 }
-table.entity-hints tr.hint:hover{
+table.smart-search-entity-hints tr.smart-search-hint:hover{
     background-color: grey!important;
 }
-table.entity-hints tr.hint.selected-hint{
+table.smart-search-entity-hints tr.smart-search-hint.smart-search-selected-hint{
     background-color: lightblue;
 }
-table.entity-hints tr:visited{
+table.smart-search-entity-hints tr:visited{
     color: #2F64B2!important;
 }

@@ -20,8 +20,8 @@ $homepageHTML = str_replace ( ' href="/', ' href="'.$secPath,  $homepageHTML);
 //3. insert search.js
 $homepageHTML = str_replace ( '<head>', '<head>'
     . '<link  rel="stylesheet" href="/global/js/jqueryui/jquery-ui.css" />'
-    . '<script type="text/javascript" src="/sec/global/js/jquery/jquery-3.3.1.min.js"></script>'
-    . '<script type="text/javascript" src="/global/js/jqueryui/jquery-ui.min.js"></script>'
+    //. '<script type="text/javascript" src="/sec/global/js/jquery/jquery-3.3.1.min.js"></script>'
+    //. '<script type="text/javascript" src="/global/js/jqueryui/jquery-ui.min.js"></script>'
     . '<script src="js/smartSearchCompanyLanding.js"></script>',  $homepageHTML);
 
 //4. modify banner = not official site!

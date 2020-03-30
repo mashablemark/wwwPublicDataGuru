@@ -411,12 +411,11 @@ function executeSearch(newHash, oldHash){
                     adsh = pathParts[0],
                     fileName = pathParts[1],
                     fileNameParts = fileName.split('.'),
-                    fileNameMain = fileNameParts[0],
                     fileNameExt = fileNameParts[1],
                     fileType = hits[i]._source.file_type || hits[i]._source.file_description || fileName,
                     form =  hits[i]._source.form;
-                    if(XLS_Forms[form]!=-1 && fileNameExt.toUpperCase()=='XML') //this is an XML file with a transformation
-                        fileName = XLS_Forms[form] + '/' + fileNameMain + '.' + fileNameExt;
+                    if(fileNameExt.toUpperCase()=='XML' && hits[i]._source.xsl) //this is an XML file with a transformation
+                        fileName = hits[i]._source.xsl + '/' + fileName;
                     rows.push('<tr>'
                         + '<td class="file"><a href="#'+fileName+'" class="preview-file" data-adsh="' + adsh + '" data-file-name="'
                         +     fileName+'">' + form + (form==fileType?'':' '+ fileType ) + '</a></td>'
@@ -1288,47 +1287,6 @@ const forms = [
   {"form":"N-1","description":"Initial registration statement filed on Form N-1 for open-end management investment companies"},
   {"form":"S-4EF","category":"Registration Statements","description":"Auto effective registration statement for securities issued in connection with the formation of a bank or savings and loan holding company in compliance with General Instruction G"}
 ];
-
-var XLS_Forms = {
-    "1-A": "xsl1-A_X01",
-    "1-K": "xsl1-K_X01",
-    "1-Z": "xsl1-Z_X01",
-    "3": "xslF345X03",
-    "4": "xslF345X03",
-    "5": "xslF345X03",
-    "CFPORTAL": "xslCFPORTAL_X01",
-    "C": "xslC_X01",
-    "EFFECT": "xslEFFECT_X02",
-    "Form13F": "xslForm13F_X01",
-    "Form25": "xslForm25_X02",
-    "FormD": "xslFormD_X01",
-    "FormN-MFP": "xslFormN-MFP_X01",
-    "FormTA": "xslFormTA_X01",
-    "13F": "xslForm13F_X01",
-    "25": "xslForm25_X02",
-    "D": "xslFormDX01",
-    "N-MFP": "xslFormN-MFP_X01",
-    "TA": "xslFormTA_X01",
-    "MA-I": "xslMA-I_X01",
-    "MA-W": "xslMA-W_X01",
-    "MA": "xslMA_X01",
-    "N-CEN": "xslN-CEN_X01",
-    "N-MFP1": "xslN-MFP1_X01",
-    "N-MFP2": "xslN-MFP2_X01",
-    "NPORT-NP": "xslNPORT-NP_X01",
-    "NPORT-P": "xslNPORT-P_X01",
-    "QUALIF": "xslQUALIF_X01",
-    "SBSE-A": "xslSBSE-A_X01",
-    "SBSE-BD": "xslSBSE-BD_X01",
-    "SBSE-C": "xslSBSE-C_X01",
-    "SBSE-W": "xslSBSE-W_X01",
-    "SBSE": "xslSBSE_X01",
-    "SDR": "xslSDR_X01",
-    "TA-1": "xslTA-1_X06",
-    "TA-2": "xslTA-2_X06",
-    "TA-W": "xslTA-W_X06",
-    "X-17A-5": "xslX-17A-5_X01",
-};
 
 var formCategories = [
     {"category": "&nbsp;&nbsp;exclude Insider Equity Awards, Transactions, and Ownership (Section 16 Reports)", "forms":["-3","-4","-5"]},
