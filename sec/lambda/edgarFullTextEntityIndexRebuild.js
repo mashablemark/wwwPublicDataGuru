@@ -63,9 +63,9 @@ const type = '_bulk';
             }
         }
     };
-
+    console.log('dropping index');
     //1. drop (if exist) and recreate the entity index (used for automcomplete suggestions)
-    await asyncExec(`curl -XDELETE 'https://${cluster.domain}.${cluster.egion}.es.amazonaws.com/${index}'`);
+    await asyncExec(`curl -XDELETE 'https://${cluster.domain}.${cluster.region}.es.amazonaws.com/${index}'`);
     console.log(await asyncExec(`curl -XPUT 'https://${cluster.domain}.${cluster.region}.es.amazonaws.com/${index}' -H "Content-Type: application/json" -d '${JSON.stringify(esEntityMappings)}'`));
     console.log('recreated index '+index);
     await common.runQuery(`call efts_update_ranks();`);

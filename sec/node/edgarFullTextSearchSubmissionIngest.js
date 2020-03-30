@@ -275,6 +275,8 @@ process.on('message', (processInfo) => {
                         && (submission.form.toUpperCase() != submission.docs[d].fileType.toUpperCase() || !XLS_Forms[rootForm])
                         || submission.docs[d].fileDescription =='IDEA: XBRL DOCUMENT'){
                         submission.docs[d].lines = false; //only index XML file the are the primary XML document of a form with XLS transformation
+                    } else {
+                        if(XLS_Forms[rootForm]) submission.docs[d].xsl = typeof XLS_Forms[rootForm] == 'string' ? XLS_Forms[rootForm] : XLS_Forms[rootForm].default; //not check for exact version; use latest
                     }
                 }
             }
@@ -365,6 +367,7 @@ process.on('message', (processInfo) => {
                         //file_name: document.fileName,  //embedded in ID = REDUNDANT FIELD
                         adsh: submission.adsh,
                         file_type: document.fileType,
+                        xsl: document.xsl,
                         sequence: document.fileSequence,
                         display_names: submission.displayNames,
                         file_description: document.fileDescription,
@@ -577,45 +580,46 @@ function runGarbageCollection(processInfo){
 }
 
 var XLS_Forms = {
-    "1-A": "xsl1-A_X01",
+    "1-A":  "xsl1-A_X01",
+    "1-A POS":  "xsl1-A_X01",
     "1-K": "xsl1-K_X01",
     "1-Z": "xsl1-Z_X01",
-    "3": "xslF345_X03",
-    "4": "xslF345_X03",
-    "5": "xslF345_X03",
+    "3": {default : "xslF345_X02", versionTag: 'schemaVersion', X01: "xslF345X01", X02: "xslF345X02"},
+    "4": {default : "xslF345_X03", versionTag: 'schemaVersion', X01: "xslF345X01", X02: "xslF345X02", X03: "xslF345X03"},
+    "5": {default : "xslF345_X03", versionTag: 'schemaVersion', X01: "xslF345X01", X02: "xslF345X02", X03: "xslF345X03"},
     "CFPORTAL": "xslCFPORTAL_X01",
     "C": "xslC_X01",
-    "EFFECT": "xslEFFECT_X02",
-    "Form13F": "xslForm13F_X01",
-    "Form25": "xslForm25_X02",
-    "FormD": "xslFormD_X01",
-    "FormN-MFP": "xslFormN-MFP_X01",
-    "FormTA": "xslFormTA_X01",
-    "13F": "xslForm13F_X01",
-    "25": "xslForm25_X02",
-    "D": "xslFormD_X01",
+    "C-AR" : "xslC_X01", //ARCHIVE PROBLEM: C-AR SUBMISSIONS NOT LISTING RENDERED DOC (e.g. https://www.sec.gov/Archives/edgar/data/1611161/000166516020000159/xslC_X01/primary_doc.xml)
+    "EFFECT": "xslEFFECT",  //xslEFFECT_X02 did not work
+    "13F": "xslForm13F_X01",  //there is no Form 13F, only 13f-HR and 13F-NT but this entry can't hurt
+    "13F-HR": "xslForm13F_X01",
+    "13F-NT": "xslForm13F_X01",
+    //"25": "xslForm25_X02",   XLS is invalid; all Form 25 files on EDGAR are HTML
+    "D": "xslFormDX01",
+    "MA": "xslFormMA_X01",
+    "MA-A": "xslFormMA_X01",
+    "MA-I": "xslFormMA-I_X01",
+    //"MA-NR": "xslMA-W_X01",  none in past ten years
+    "MA-W": "xslFormMA-W_X01", //bad rendering:  www.sec.gov/Archives/edgar/data/1631559/000163155920000001/xslFormMA-W_X01/primary_doc.xml
+    "N-CEN": "xslFormN-CEN_X01",
     "N-MFP": "xslFormN-MFP_X01",
-    "TA": "xslFormTA_X01",
-    "MA-I": "xslMA-I_X01",
-    "MA-W": "xslMA-W_X01",
-    "MA": "xslMA_X01",
-    "N-CEN": "xslN-CEN_X01",
     "N-MFP1": "xslN-MFP1_X01",
     "N-MFP2": "xslN-MFP2_X01",
-    "NPORT-NP": "xslNPORT-NP_X01",
-    "NPORT-P": "xslNPORT-P_X01",
-    "QUALIF": "xslQUALIF_X01",
-    "SBSE-A": "xslSBSE-A_X01",
-    "SBSE-BD": "xslSBSE-BD_X01",
-    "SBSE-C": "xslSBSE-C_X01",
-    "SBSE-W": "xslSBSE-W_X01",
-    "SBSE": "xslSBSE_X01",
+    "NPORT-NP": "xslFormNPORT-P_X01",  //no examples found
+    "NPORT-P": "xslFormNPORT-P_X01",
+    "QUALIF": "xslQUALIFX01",
+    "SBSE-A": "xslSBSE-A_X01",  //no examples found
+    "SBSE-BD": "xslSBSE-BD_X01",  //no examples found
+    "SBSE-C": "xslSBSE-C_X01",  //no examples found
+    "SBSE-W": "xslSBSE-W_X01",  //no examples found
+    "SBSE": "xslSBSE_X01",  //no examples found
     "SDR": "xslSDR_X01",
-    "TA-1": "xslTA-1_X06",
-    "TA-2": "xslTA-2_X06",
-    "TA-W": "xslTA-W_X06",
+    "TA-1": "xslFTA1X01",
+    "TA-2": "xslFTA2X01",
+    "TA-W": "xslFTAWX01",
     "X-17A-5": "xslX-17A-5_X01",
 };
+
 const edgarLocations = {
     "AL": "Alabama",
     "AK": "Alaska",
