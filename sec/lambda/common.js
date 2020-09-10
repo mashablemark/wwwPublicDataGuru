@@ -252,6 +252,9 @@ let me = {
             words[w] = word;
         }
         return words.join(' ');
+    },
+    formatCIK: function(unpaddedCIK){ //accept int or string and return string with padded zero
+        return '0'.repeat(10-unpaddedCIK.toString().length) + unpaddedCIK.toString()
     }
 };
 
