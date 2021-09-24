@@ -16,17 +16,17 @@ $edgarPath = $secPath . "Archives/edgar/data/";
 $urlParts = explode('/', $doc);
 array_pop($urlParts);
 $docPath = implode('/', $urlParts);
-$body = httpGet( $doc);
+$body = gzip_get_contents( $doc);
 echo $repoint ? repointHyperlinks($body): $body;
 
-function httpGet($target, $timeout = 15){
+function httpGet_OLD($target, $timeout = 15){
     $fp = false;
     $tryLimit = 3;
     $tries = 0;
     while($tries<$tryLimit && $fp===false){  //try up to 3 times to open resource
         $tries++;
         //$fp = @fsockopen($target, 80, $errNo, $errString, $timeout);
-        $fp = @fopen( $target, 'r' );  //the @ suppresses a warning on failure
+        $fp = fopen( $target, 'r' );  //the @ suppresses a warning on failure
     }
     if($fp===false){  //failed (after 3 tries)
         $content = false;
@@ -39,6 +39,21 @@ function httpGet($target, $timeout = 15){
         }
         fclose($fp);
     }
+    return $content;
+}
+
+function gzip_get_contents($url){
+    $ch=curl_init($url);
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_ENCODING, 'gzip');
+
+    $headers = array(
+        'User-Agent: pubdat AdminContact@pubdat.com',
+    );
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    $content=curl_exec($ch);
+    curl_close($ch);
     return $content;
 }
 
